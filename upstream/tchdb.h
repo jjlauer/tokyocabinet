@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The hash database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -31,6 +31,8 @@ __TCHDB_CLINKAGEBEGIN
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <limits.h>
+#include <math.h>
 #include <tcutil.h>
 
 
@@ -42,7 +44,10 @@ __TCHDB_CLINKAGEBEGIN
 
 typedef struct {                         /* type of structure for a hash database */
   void *mmtx;                            /* mutex for method */
-  void *dmtx;                            /* mutex for DRP */
+  void *rmtxs;                           /* mutexes for records */
+  void *dmtx;                            /* mutex for the while database */
+  void *tmtx;                            /* mutex for transaction */
+  void *wmtx;                            /* mutex for write ahead logging */
   void *eckey;                           /* key for thread specific error code */
   uint8_t type;                          /* database type */
   uint8_t flags;                         /* additional flags */
@@ -52,7 +57,7 @@ typedef struct {                         /* type of structure for a hash databas
   uint8_t opts;                          /* options */
   char *path;                            /* path of the database file */
   int fd;                                /* file descriptor of the database file */
-  uint32_t omode;                        /* connection mode */
+  uint32_t omode;                        /* open mode */
   uint64_t rnum;                         /* number of the records */
   uint64_t fsiz;                         /* size of the database file */
   uint64_t frec;                         /* offset of the first record */
@@ -60,13 +65,14 @@ typedef struct {                         /* type of structure for a hash databas
   uint64_t iter;                         /* offset of the iterator */
   char *map;                             /* pointer to the mapped memory */
   uint64_t msiz;                         /* size of the mapped memory */
+  uint64_t xmsiz;                        /* size of the extra mapped memory */
+  uint64_t xfsiz;                        /* extra size of the file for mapped memory */
   uint32_t *ba32;                        /* 32-bit bucket array */
   uint64_t *ba64;                        /* 64-bit bucket array */
   uint32_t align;                        /* record alignment */
   uint32_t runit;                        /* record reading unit */
   bool zmode;                            /* whether compression is used */
   int32_t fbpmax;                        /* maximum number of the free block pool */
-  int32_t fbpsiz;                        /* size of the free block pool */
   void *fbpool;                          /* free block pool */
   int32_t fbpnum;                        /* number of the free block pool */
   int32_t fbpmis;                        /* number of missing retrieval of the free block pool */
@@ -76,10 +82,17 @@ typedef struct {                         /* type of structure for a hash databas
   uint64_t drpoff;                       /* offset of the delayed record pool */
   TCMDB *recc;                           /* cache for records */
   uint32_t rcnum;                        /* max number of cached records */
+  TCCODEC enc;                           /* pointer to the encoding function */
+  void *encop;                           /* opaque object for the encoding functions */
+  TCCODEC dec;                           /* pointer to the decoding function */
+  void *decop;                           /* opaque object for the decoding functions */
   int ecode;                             /* last happened error code */
   bool fatal;                            /* whether a fatal error occured */
   uint64_t inode;                        /* inode number */
   time_t mtime;                          /* modification time */
+  bool tran;                             /* whether in the transaction */
+  int walfd;                             /* file descriptor of write ahead logging */
+  uint64_t walend;                       /* end offset of write ahead logging */
   int dbgfd;                             /* file descriptor for debugging */
   int64_t cnt_writerec;                  /* tesing counter for record write times */
   int64_t cnt_reuserec;                  /* tesing counter for record reuse times */
@@ -105,7 +118,9 @@ enum {                                   /* enumeration for additional flags */
 enum {                                   /* enumeration for tuning options */
   HDBTLARGE = 1 << 0,                    /* use 64-bit bucket array */
   HDBTDEFLATE = 1 << 1,                  /* compress each record with Deflate */
-  HDBTTCBS = 1 << 2                      /* compress each record with TCBS */
+  HDBTBZIP = 1 << 2,                     /* compress each record with BZIP2 */
+  HDBTTCBS = 1 << 3,                     /* compress each record with TCBS */
+  HDBTEXCODEC = 1 << 4                   /* compress each record with custom functions */
 };
 
 enum {                                   /* enumeration for open modes */
@@ -114,7 +129,8 @@ enum {                                   /* enumeration for open modes */
   HDBOCREAT = 1 << 2,                    /* writer creating */
   HDBOTRUNC = 1 << 3,                    /* writer truncating */
   HDBONOLCK = 1 << 4,                    /* open without locking */
-  HDBOLCKNB = 1 << 5                     /* lock without blocking */
+  HDBOLCKNB = 1 << 5,                    /* lock without blocking */
+  HDBOTSYNC = 1 << 6                     /* synchronize every transaction */
 };
 
 
@@ -139,7 +155,7 @@ void tchdbdel(TCHDB *hdb);
 /* Get the last happened error code of a hash database object.
    `hdb' specifies the hash database object.
    The return value is the last happened error code.
-   The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading
+   The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading
    error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no
    permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN'
    for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync
@@ -162,7 +178,7 @@ bool tchdbsetmutex(TCHDB *hdb);
 /* Set the tuning parameters of a hash database object.
    `hdb' specifies the hash database object which is not opened.
    `bnum' specifies the number of elements of the bucket array.  If it is not more than 0, the
-   default value is specified.  The default value is 16381.  Suggested size of the bucket array
+   default value is specified.  The default value is 131071.  Suggested size of the bucket array
    is about from 0.5 to 4 times of the number of all records to be stored.
    `apow' specifies the size of record alignment by power of 2.  If it is negative, the default
    value is specified.  The default value is 4 standing for 2^4=16.
@@ -170,8 +186,8 @@ bool tchdbsetmutex(TCHDB *hdb);
    is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
    `opts' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `HDBTDEFLATE' specifies that each record
-   is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with
-   TCBS encoding.
+   is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with
+   BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.
    If successful, the return value is true, else, it is false.
    Note that the tuning parameters should be set before the database is opened. */
 bool tchdbtune(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
@@ -186,13 +202,23 @@ bool tchdbtune(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts)
 bool tchdbsetcache(TCHDB *hdb, int32_t rcnum);
 
 
+/* Set the size of the extra mapped memory of a hash database object.
+   `hdb' specifies the hash database object which is not opened.
+   `xmsiz' specifies the size of the extra mapped memory.  If it is not more than 0, the extra
+   mapped memory is disabled.  The default size is 67108864.
+   If successful, the return value is true, else, it is false.
+   Note that the mapping parameters should be set before the database is opened. */
+bool tchdbsetxmsiz(TCHDB *hdb, int64_t xmsiz);
+
+
 /* Open a database file and connect a hash database object.
    `hdb' specifies the hash database object which is not opened.
    `path' specifies the path of the database file.
    `omode' specifies the connection mode: `HDBOWRITER' as a writer, `HDBOREADER' as a reader.
    If the mode is `HDBOWRITER', the following may be added by bitwise or: `HDBOCREAT', which
    means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new
-   database regardless if one exists.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by
+   database regardless if one exists, `HDBOTSYNC', which means every transaction synchronizes
+   updated contents with the device.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by
    bitwise or: `HDBONOLCK', which means it opens the database file without file locking, or
    `HDBOLCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
@@ -433,6 +459,28 @@ TCLIST *tchdbfwmkeys(TCHDB *hdb, const void *pbuf, int psiz, int max);
 TCLIST *tchdbfwmkeys2(TCHDB *hdb, const char *pstr, int max);
 
 
+/* Add an integer to a record in a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `INT_MIN'.
+   If the corresponding record exists, the value is treated as an integer and is added to.  If no
+   record corresponds, a new record of the additional value is stored. */
+int tchdbaddint(TCHDB *hdb, const void *kbuf, int ksiz, int num);
+
+
+/* Add a real number to a record in a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `NAN'.
+   If the corresponding record exists, the value is treated as a real number and is added to.  If
+   no record corresponds, a new record of the additional value is stored. */
+double tchdbadddouble(TCHDB *hdb, const void *kbuf, int ksiz, double num);
+
+
 /* Synchronize updated contents of a hash database object with the file and the device.
    `hdb' specifies the hash database object connected as a writer.
    If successful, the return value is true, else, it is false.
@@ -450,8 +498,9 @@ bool tchdbsync(TCHDB *hdb);
    is negative, the current setting is not changed.
    `opts' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `HDBTDEFLATE' specifies that each record
-   is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with
-   TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+   is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with
+   BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.  If it
+   is `UINT8_MAX', the current setting is not changed.
    If successful, the return value is true, else, it is false.
    This function is useful to reduce the size of the database file with data fragmentation by
    successive updating. */
@@ -474,6 +523,32 @@ bool tchdbvanish(TCHDB *hdb);
    executing operation is in progress.  So, this function is useful to create a backup file of
    the database file. */
 bool tchdbcopy(TCHDB *hdb, const char *path);
+
+
+/* Begin the transaction of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   The database is locked by the thread while the transaction so that only one transaction can be
+   activated with a database object at the same time.  Thus, the serializable isolation level is
+   assumed if every database operation is performed in the transaction.  All updated regions are
+   kept track of by write ahead logging while the transaction.  If the database is closed during
+   transaction, the transaction is aborted implicitly. */
+bool tchdbtranbegin(TCHDB *hdb);
+
+
+/* Commit the transaction of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is fixed when it is committed successfully. */
+bool tchdbtrancommit(TCHDB *hdb);
+
+
+/* Abort the transaction of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is discarded when it is aborted.  The state of the database is
+   rollbacked to before transaction. */
+bool tchdbtranabort(TCHDB *hdb);
 
 
 /* Get the file path of a hash database object.
@@ -530,11 +605,17 @@ void tchdbsetdbgfd(TCHDB *hdb, int fd);
 int tchdbdbgfd(TCHDB *hdb);
 
 
-/* Synchronize updating contents on memory.
+/* Synchronize updating contents on memory of a hash database object.
    `hdb' specifies the hash database object connected as a writer.
    `phys' specifies whether to synchronize physically.
    If successful, the return value is true, else, it is false. */
 bool tchdbmemsync(TCHDB *hdb, bool phys);
+
+
+/* Clear the cache of a hash tree database object.
+   `hdb' specifies the hash tree database object.
+   If successful, the return value is true, else, it is false. */
+bool tchdbcacheclear(TCHDB *hdb);
 
 
 /* Get the number of elements of the bucket array of a hash database object.
@@ -556,6 +637,13 @@ uint32_t tchdbalign(TCHDB *hdb);
    The return value is the maximum number of the free block pool or 0 if the object does not
    connect to any database file. */
 uint32_t tchdbfbpmax(TCHDB *hdb);
+
+
+/* Get the size of the extra mapped memory of a hash database object.
+   `hdb' specifies the hash database object.
+   The return value is the size of the extra mapped memory or 0 if the object does not connect to
+   any database file. */
+uint64_t tchdbxmsiz(TCHDB *hdb);
 
 
 /* Get the inode number of the database file of a hash database object.
@@ -609,6 +697,33 @@ char *tchdbopaque(TCHDB *hdb);
 uint64_t tchdbbnumused(TCHDB *hdb);
 
 
+/* Set the custom codec functions of a hash database object.
+   `hdb' specifies the hash database object.
+   `enc' specifies the pointer to the custom encoding function.
+   `encop' specifies an arbitrary pointer to be given as a parameter of the encoding function.
+   If it is not needed, `NULL' can be specified.
+   `dec' specifies the pointer to the custom decoding function.
+   `decop' specifies an arbitrary pointer to be given as a parameter of the decoding function.
+   If it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false.
+   Note that the custom codec functions should be set before the database is opened and should be
+   set every time the database is being opened. */
+bool tchdbsetcodecfunc(TCHDB *hdb, TCCODEC enc, void *encop, TCCODEC dec, void *decop);
+
+
+/* Get the custom codec functions of a hash database object.
+   `hdb' specifies the hash database object.
+   `ep' specifies the pointer to a variable into which the pointer to the custom encoding
+   function is assigned
+   `eop' specifies the pointer to a variable into which the arbitrary pointer to be given to the
+   encoding function is assigned.
+   `dp' specifies the pointer to a variable into which the pointer to the custom decoding
+   function is assigned
+   `dop' specifies the pointer to a variable into which the arbitrary pointer to be given to the
+   decoding function is assigned. */
+void tchdbcodecfunc(TCHDB *hdb, TCCODEC *ep, void **eop, TCCODEC *dp, void **dop);
+
+
 /* Retrieve the next record of a record in a hash database object.
    `hdb' specifies the hash database object.
    `kbuf' specifies the pointer to the region of the key.  If it is `NULL', the first record is
@@ -633,6 +748,22 @@ void *tchdbgetnext(TCHDB *hdb, const void *kbuf, int ksiz, int *sp);
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
 char *tchdbgetnext2(TCHDB *hdb, const char *kstr);
+
+
+/* Process each record atomically of a hash database object.
+   `hdb' specifies the hash database object.
+   `func' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false. */
+bool tchdbforeach(TCHDB *hdb, TCITER iter, void *op);
+
+
+/* Void the transaction of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   This function should be called only when no update in the transaction. */
+bool tchdbtranvoid(TCHDB *hdb);
 
 
 

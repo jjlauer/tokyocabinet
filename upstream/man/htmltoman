@@ -79,7 +79,7 @@ BEGIN {
 / *<li *[^>]*>.*<\/li> *$/ {
   text = $0
   text = strip(text)
-  text = gensub("<code *[^>]*>([^<]*)</code>", "\\\\fB\\1\\\\fR", "g", text)
+  text = gensub("<code *[^>]*>(.*)</code>", "\\\\fB\\1\\\\fR", "g", text)
   text = gensub("<var *[^>]*>([^<]*)</var>", "\\\\fI\\1\\\\fR", "g", text)
   gsub("<[^>]*>", "", text)
   text = unescape(text)
@@ -94,6 +94,7 @@ END {
   printf(".BR tcutil (3),\n")
   printf(".BR tchdb (3),\n")
   printf(".BR tcbdb (3)\n")
+  printf(".BR tcfdb (3)\n")
   printf(".PP\n")
   printf("Please see\n")
   printf(".I http://tokyocabinet.sourceforge.net/spex-en.html\n")

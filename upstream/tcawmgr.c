@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The CGI utility of the abstract database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -77,7 +77,7 @@ int main(int argc, char **argv){
   params.action = ACTLIST;
   int size;
   const char *buf = tcmapget(pmap, "action", 6, &size);
-  if(buf) params.action = atoi(buf);
+  if(buf) params.action = tcatoi(buf);
   if(params.action < ACTLIST) params.action = ACTLIST;
   buf = tcmapget(pmap, "key", 3, &size);
   if(buf){
@@ -104,11 +104,11 @@ int main(int argc, char **argv){
   }
   params.num = 0;
   buf = tcmapget(pmap, "num", 3, &size);
-  if(buf) params.num = atoi(buf);
+  if(buf) params.num = tcatoi(buf);
   if(params.num < 1) params.num = DEFSHOWNUM;
   params.page = 1;
   buf = tcmapget(pmap, "page", 4, &size);
-  if(buf) params.page = atoi(buf);
+  if(buf) params.page = tcatoi(buf);
   if(params.page < 1) params.page = 1;
   bool wmode;
   switch(params.action){
@@ -161,7 +161,7 @@ static void readparameters(TCMAP *params){
   int len = 0;
   const char *rp;
   if((rp = getenv("REQUEST_METHOD")) != NULL && !strcmp(rp, "POST") &&
-     (rp = getenv("CONTENT_LENGTH")) != NULL && (len = atoi(rp)) > 0){
+     (rp = getenv("CONTENT_LENGTH")) != NULL && (len = tcatoi(rp)) > 0){
     if(len > maxlen) len = maxlen;
     buf = tccalloc(len + 1, 1);
     if(fread(buf, 1, len, stdin) != len){
@@ -215,7 +215,7 @@ static void readparameters(TCMAP *params){
       }
       tclistdel(parts);
     } else {
-      TCLIST *pairs = tcstrsplit(buf, "&");
+      TCLIST *pairs = tcstrsplit(buf, "&;");
       int num = tclistnum(pairs);
       for(int i = 0; i < num; i++){
         char *key = tcstrdup(tclistval2(pairs, i));

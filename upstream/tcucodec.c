@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * Popular encoders and decoders of the utility API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -30,11 +30,14 @@ static int runurl(int argc, char **argv);
 static int runbase(int argc, char **argv);
 static int runquote(int argc, char **argv);
 static int runmime(int argc, char **argv);
+static int runhex(int argc, char **argv);
 static int runpack(int argc, char **argv);
 static int runtcbs(int argc, char **argv);
 static int runzlib(int argc, char **argv);
+static int runbzip(int argc, char **argv);
 static int runxml(int argc, char **argv);
 static int runucs(int argc, char **argv);
+static int runhash(int argc, char **argv);
 static int rundate(int argc, char **argv);
 static int runconf(int argc, char **argv);
 static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *base);
@@ -42,11 +45,14 @@ static int procbase(const char *ibuf, int isiz, bool dec);
 static int procquote(const char *ibuf, int isiz, bool dec);
 static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on,
                     bool hd, bool bd, int part);
+static int prochex(const char *ibuf, int isiz, bool dec);
 static int procpack(const char *ibuf, int isiz, bool dec, bool bwt);
 static int proctcbs(const char *ibuf, int isiz, bool dec);
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz);
+static int procbzip(const char *ibuf, int isiz, bool dec);
 static int procxml(const char *ibuf, int isiz, bool dec, bool br);
 static int procucs(const char *ibuf, int isiz, bool dec);
+static int prochash(const char *ibuf, int isiz, bool crc, int ch);
 static int procdate(const char *str, int jl, bool wf, bool rf);
 static int procconf(int mode);
 
@@ -64,16 +70,22 @@ int main(int argc, char **argv){
     rv = runquote(argc, argv);
   } else if(!strcmp(argv[1], "mime")){
     rv = runmime(argc, argv);
+  } else if(!strcmp(argv[1], "hex")){
+    rv = runhex(argc, argv);
   } else if(!strcmp(argv[1], "pack")){
     rv = runpack(argc, argv);
   } else if(!strcmp(argv[1], "tcbs")){
     rv = runtcbs(argc, argv);
   } else if(!strcmp(argv[1], "zlib")){
     rv = runzlib(argc, argv);
+  } else if(!strcmp(argv[1], "bzip")){
+    rv = runbzip(argc, argv);
   } else if(!strcmp(argv[1], "xml")){
     rv = runxml(argc, argv);
   } else if(!strcmp(argv[1], "ucs")){
     rv = runucs(argc, argv);
+  } else if(!strcmp(argv[1], "hash")){
+    rv = runhash(argc, argv);
   } else if(!strcmp(argv[1], "date")){
     rv = rundate(argc, argv);
   } else if(!strcmp(argv[1], "conf")){
@@ -95,11 +107,14 @@ static void usage(void){
   fprintf(stderr, "  %s quote [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s mime [-d] [-en name] [-q] [-on] [-hd] [-bd] [-part num] [file]\n",
           g_progname);
+  fprintf(stderr, "  %s hex [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s pack [-d] [-bwt] [file]\n", g_progname);
   fprintf(stderr, "  %s tcbs [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s zlib [-d] [-gz] [file]\n", g_progname);
+  fprintf(stderr, "  %s bzip [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s xml [-d] [-br] [file]\n", g_progname);
   fprintf(stderr, "  %s ucs [-d] [file]\n", g_progname);
+  fprintf(stderr, "  %s hash [-crc] [-ch num] [file]\n", g_progname);
   fprintf(stderr, "  %s date [-ds str] [-jl num] [-wf] [-rf]\n", g_progname);
   fprintf(stderr, "  %s conf [-v|-i|-l|-p]\n", g_progname);
   fprintf(stderr, "\n");
@@ -260,7 +275,7 @@ static int runmime(int argc, char **argv){
         bd = true;
       } else if(!strcmp(argv[i], "-part")){
         if(++i >= argc) usage();
-        part = atoi(argv[i]);
+        part = tcatoi(argv[i]);
       } else {
         usage();
       }
@@ -284,6 +299,42 @@ static int runmime(int argc, char **argv){
   }
   if(!ename) ename = "UTF-8";
   int rv = procmime(ibuf, isiz, dec, ename, qb, on, hd, bd, part);
+  if(path && path[0] == '@') printf("\n");
+  tcfree(ibuf);
+  return rv;
+}
+
+
+/* parse arguments of hex command */
+static int runhex(int argc, char **argv){
+  char *path = NULL;
+  bool dec = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-d")){
+        dec = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = prochex(ibuf, isiz, dec);
   if(path && path[0] == '@') printf("\n");
   tcfree(ibuf);
   return rv;
@@ -404,6 +455,42 @@ static int runzlib(int argc, char **argv){
 }
 
 
+/* parse arguments of bzip command */
+static int runbzip(int argc, char **argv){
+  char *path = NULL;
+  bool dec = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-d")){
+        dec = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = procbzip(ibuf, isiz, dec);
+  if(path && path[0] == '@') printf("\n");
+  tcfree(ibuf);
+  return rv;
+}
+
+
 /* parse arguments of xml command */
 static int runxml(int argc, char **argv){
   char *path = NULL;
@@ -479,6 +566,45 @@ static int runucs(int argc, char **argv){
 }
 
 
+/* parse arguments of hash command */
+static int runhash(int argc, char **argv){
+  char *path = NULL;
+  bool crc = false;
+  int ch = 0;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-crc")){
+        crc = true;
+      } else if(!strcmp(argv[i], "-ch")){
+        if(++i >= argc) usage();
+        ch = tcatoi(argv[i]);
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = prochash(ibuf, isiz, crc, ch);
+  tcfree(ibuf);
+  return rv;
+}
+
+
 /* parse arguments of date command */
 static int rundate(int argc, char **argv){
   char *str = NULL;
@@ -492,7 +618,7 @@ static int rundate(int argc, char **argv){
         str = argv[i];
       } else if(!strcmp(argv[i], "-jl")){
         if(++i >= argc) usage();
-        jl = atoi(argv[i]);
+        jl = tcatoi(argv[i]);
       } else if(!strcmp(argv[i], "-wf")){
         wf = true;
       } else if(!strcmp(argv[i], "-rf")){
@@ -656,6 +782,22 @@ static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, boo
 }
 
 
+/* perform hex command */
+static int prochex(const char *ibuf, int isiz, bool dec){
+  if(dec){
+    int osiz;
+    char *obuf = tchexdecode(ibuf, &osiz);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
+  } else {
+    char *obuf = tchexencode(ibuf, isiz);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
+  }
+  return 0;
+}
+
+
 /* perform pack command */
 static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
   if(dec){
@@ -726,6 +868,31 @@ static int proczlib(const char *ibuf, int isiz, bool dec, bool gz){
   } else {
     int osiz;
     char *obuf = gz ? tcgzipencode(ibuf, isiz, &osiz) : tcdeflate(ibuf, isiz, &osiz);
+    if(obuf){
+      fwrite(obuf, 1, osiz, stdout);
+      tcfree(obuf);
+    } else {
+      eprintf("deflate failure");
+    }
+  }
+  return 0;
+}
+
+
+/* perform bzip command */
+static int procbzip(const char *ibuf, int isiz, bool dec){
+  if(dec){
+    int osiz;
+    char *obuf = tcbzipdecode(ibuf, isiz, &osiz);
+    if(obuf){
+      fwrite(obuf, 1, osiz, stdout);
+      tcfree(obuf);
+    } else {
+      eprintf("inflate failure");
+    }
+  } else {
+    int osiz;
+    char *obuf = tcbzipencode(ibuf, isiz, &osiz);
     if(obuf){
       fwrite(obuf, 1, osiz, stdout);
       tcfree(obuf);
@@ -828,6 +995,23 @@ static int procucs(const char *ibuf, int isiz, bool dec){
 }
 
 
+/* perform hash command */
+static int prochash(const char *ibuf, int isiz, bool crc, int ch){
+  if(crc){
+    printf("%08x\n", tcgetcrc(ibuf, isiz));
+  } else if(ch > 0){
+    TCCHIDX *chidx = tcchidxnew(ch);
+    printf("%d\n", tcchidxhash(chidx, ibuf, isiz));
+    tcchidxdel(chidx);
+  } else {
+    char buf[48];
+    tcmd5hash(ibuf, isiz, buf);
+    printf("%s\n", buf);
+  }
+  return 0;
+}
+
+
 /* perform date command */
 static int procdate(const char *str, int jl, bool wf, bool rf){
   int64_t t = str ? tcstrmktime(str) : time(NULL);
@@ -874,6 +1058,7 @@ static int procconf(int mode){
     printf("myconf(applibs): %s\n", _TC_APPLIBS);
     printf("myconf(bigend): %d\n", TCBIGEND);
     printf("myconf(usezlib): %d\n", TCUSEZLIB);
+    printf("myconf(usebzip): %d\n", TCUSEBZIP);
     printf("sizeof(bool): %d\n", sizeof(bool));
     printf("sizeof(char): %d\n", sizeof(char));
     printf("sizeof(short): %d\n", sizeof(short));
@@ -883,17 +1068,22 @@ static int procconf(int mode){
     printf("sizeof(float): %d\n", sizeof(float));
     printf("sizeof(double): %d\n", sizeof(double));
     printf("sizeof(long double): %d\n", sizeof(long double));
+    printf("sizeof(void *): %d\n", sizeof(void *));
+    printf("sizeof(intptr_t): %d\n", sizeof(intptr_t));
     printf("sizeof(size_t): %d\n", sizeof(size_t));
     printf("sizeof(time_t): %d\n", sizeof(time_t));
     printf("sizeof(off_t): %d\n", sizeof(off_t));
     printf("sizeof(ino_t): %d\n", sizeof(ino_t));
-    printf("sizeof(intptr_t): %d\n", sizeof(intptr_t));
-    printf("sizeof(void *): %d\n", sizeof(void *));
+    printf("sizeof(wchar_t): %d\n", sizeof(wchar_t));
+    printf("sizeof(sig_atomic_t): %d\n", sizeof(sig_atomic_t));
     printf("macro(CHAR_MAX): %llu\n", (unsigned long long)CHAR_MAX);
     printf("macro(SHRT_MAX): %llu\n", (unsigned long long)SHRT_MAX);
     printf("macro(INT_MAX): %llu\n", (unsigned long long)INT_MAX);
     printf("macro(LONG_MAX): %llu\n", (unsigned long long)LONG_MAX);
     printf("macro(LLONG_MAX): %llu\n", (unsigned long long)LLONG_MAX);
+    printf("macro(FLT_MAX): %g\n", (double)FLT_MAX);
+    printf("macro(DBL_MAX): %g\n", (double)DBL_MAX);
+    printf("macro(LDBL_MAX): %Lg\n", (long double)LDBL_MAX);
     printf("macro(PATH_MAX): %llu\n", (unsigned long long)PATH_MAX);
     printf("macro(RAND_MAX): %llu\n", (unsigned long long)RAND_MAX);
     printf("sysconf(_SC_CLK_TCK): %ld\n", sysconf(_SC_CLK_TCK));

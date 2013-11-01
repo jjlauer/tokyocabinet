@@ -1,4 +1,4 @@
-.TH "TCUCODEC" 1 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCUCODEC" 1 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcucodec \- popular encoders and decoders
@@ -44,6 +44,11 @@ Perform TCBS encoding and its decoding.
 Perform ZLIB encoding and its decoding.
 .RE
 .br
+\fBtcucodec bzip \fR[\fB\-d\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
+.RS
+Perform BZIP2 encoding and its decoding.
+.RE
+.br
 \fBtcucodec xml \fR[\fB\-d\fR]\fB \fR[\fB\-br\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
 .RS
 Process XML.  By default, escape meta characters.
@@ -52,6 +57,11 @@ Process XML.  By default, escape meta characters.
 \fBtcucodec ucs \fR[\fB\-d\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
 .RS
 Convert UTF\-8 string into UCS\-2 array.
+.RE
+.br
+\fBtcucodec hash \fR[\fB\-crc\fR]\fB \fR[\fB\-ch \fInum\fB\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
+.RS
+Calculate the hash value.  By default, use MD5 function.
 .RE
 .br
 \fBtcucodec date \fR[\fB\-ds \fIstr\fB\fR]\fB \fR[\fB\-jl \fInum\fB\fR]\fB \fR[\fB\-wf\fR]\fB \fR[\fB\-rf\fR]\fB\fR
@@ -89,6 +99,10 @@ Options feature the following.
 \fB\-bwt\fR : convert by BWT as preprocessing.
 .br
 \fB\-gz\fR : use GZIP format.
+.br
+\fB\-crc\fR : use CRC32 function.
+.br
+\fB\-ch \fInum\fR\fR : use consistent hashing function.
 .br
 \fB\-ds\fR \fIstr\fR : specify the time..
 .br

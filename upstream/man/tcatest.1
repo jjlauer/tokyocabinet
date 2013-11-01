@@ -1,11 +1,11 @@
-.TH "TCATEST" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCATEST" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcatest \- test cases of the abstract database API
 
 .SH DESCRIPTION
 .PP
-The command `\fBtcatest\fR' is a utility for facility test and performance test.  This command is used in the following format.  `\fIname\fR' specifies the database name.  `\fIrnum\fR' specifies the number of iterations.
+The command `\fBtcatest\fR' is a utility for facility test and performance test.  This command is used in the following format.  `\fIname\fR' specifies the database name.  `\fIrnum\fR' specifies the number of iterations.  `\fItnum\fR' specifies the number of transactions.
 .PP
 .RS
 .br
@@ -37,6 +37,11 @@ Perform miscellaneous test of various operations.
 \fBtcatest wicked \fIname\fB \fIrnum\fB\fR
 .RS
 Perform updating operations of list and map selected at random.
+.RE
+.br
+\fBtcatest compare \fIname\fB \fItnum\fB \fIrnum\fB\fR
+.RS
+Perform comparison test of database schema.
 .RE
 .RE
 .PP

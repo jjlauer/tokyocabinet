@@ -1,4 +1,4 @@
-.TH "TCHDB" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCHDB" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tchdb \- the hash database API
@@ -78,7 +78,7 @@ The function `tchdbecode' is used in order to get the last happened error code o
 The return value is the last happened error code.
 .RE
 .RS
-The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
+The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
 .RE
 .RE
 .PP
@@ -116,7 +116,7 @@ The function `tchdbtune' is used in order to set the tuning parameters of a hash
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.
+`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -145,6 +145,25 @@ Note that the caching parameters should be set before the database is opened.
 .RE
 .RE
 .PP
+The function `tchdbsetxmsiz' is used in order to set the size of the extra mapped memory of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbsetxmsiz(TCHDB *\fIhdb\fB, int64_t \fIxmsiz\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object which is not opened.
+.RE
+.RS
+`\fIxmsiz\fR' specifies the size of the extra mapped memory.  If it is not more than 0, the extra mapped memory is disabled.  The default size is 67108864.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Note that the mapping parameters should be set before the database is opened.
+.RE
+.RE
+.PP
 The function `tchdbopen' is used in order to open a database file and connect a hash database object.
 .PP
 .RS
@@ -157,7 +176,7 @@ The function `tchdbopen' is used in order to open a database file and connect a 
 `\fIpath\fR' specifies the path of the database file.
 .RE
 .RS
-`\fIomode\fR' specifies the connection mode: `HDBOWRITER' as a writer, `HDBOREADER' as a reader.  If the mode is `HDBOWRITER', the following may be added by bitwise or: `HDBOCREAT', which means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new database regardless if one exists.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by bitwise or: `HDBONOLCK', which means it opens the database file without file locking, or `HDBOLCKNB', which means locking is performed without blocking.
+`\fIomode\fR' specifies the connection mode: `HDBOWRITER' as a writer, `HDBOREADER' as a reader.  If the mode is `HDBOWRITER', the following may be added by bitwise or: `HDBOCREAT', which means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new database regardless if one exists, `HDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by bitwise or: `HDBONOLCK', which means it opens the database file without file locking, or `HDBOLCKNB', which means locking is performed without blocking.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -639,6 +658,56 @@ Because the object of the return value is created with the function `tclistnew',
 .RE
 .RE
 .PP
+The function `tchdbaddint' is used in order to add an integer to a record in a hash database object.
+.PP
+.RS
+.br
+\fBint tchdbaddint(TCHDB *\fIhdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, int \fInum\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object connected as a writer.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `INT_MIN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as an integer and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
+The function `tchdbdbadddouble' is used in order to add a real number to a record in a hash database object.
+.PP
+.RS
+.br
+\fBdouble tchdbadddouble(TCHDB *\fIhdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, double \fInum\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object connected as a writer.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `NAN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as a real number and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
 The function `tchdbsync' is used in order to synchronize updated contents of a hash database object with the file and the device.
 .PP
 .RS
@@ -673,7 +742,7 @@ The function `tchdboptimize' is used in order to optimize the file of a hash dat
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the current setting is not changed.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -712,6 +781,54 @@ If successful, the return value is true, else, it is false.  False is returned i
 .RE
 .RS
 The database file is assured to be kept synchronized and not modified while the copying or executing operation is in progress.  So, this function is useful to create a backup file of the database file.
+.RE
+.RE
+.PP
+The function `tchdbtranbegin' is used in order to begin the transaction of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbtranbegin(TCHDB *\fIhdb\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object connected as a writer.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+The database is locked by the thread while the transaction so that only one transaction can be activated with a database object at the same time.  Thus, the serializable isolation level is assumed if every database operation is performed in the transaction.  All updated regions are kept track of by write ahead logging while the transaction.  If the database is closed during transaction, the transaction is aborted implicitly.
+.RE
+.RE
+.PP
+The function `tchdbtrancommit' is used in order to commit the transaction of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbtrancommit(TCHDB *\fIhdb\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object connected as a writer.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Update in the transaction is fixed when it is committed successfully.
+.RE
+.RE
+.PP
+The function `tchdbtranabort' is used in order to abort the transaction of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbtranabort(TCHDB *\fIhdb\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object connected as a writer.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Update in the transaction is discarded when it is aborted.  The state of the database is rollbacked to before transaction.
 .RE
 .RE
 .PP

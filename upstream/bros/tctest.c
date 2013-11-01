@@ -269,6 +269,7 @@ int dowrite(char *name, int rnum){
   /* open a database */
   hdb = tchdbnew();
   tchdbtune(hdb, rnum * 3, 0, 0, 0);
+  tchdbsetxmsiz(hdb, rnum * 48);
   if(!tchdbopen(hdb, name, HDBOWRITER | HDBOCREAT | HDBOTRUNC)){
     fprintf(stderr, "tchdbopen failed\n");
     tchdbdel(hdb);
@@ -314,6 +315,7 @@ int doread(char *name, int rnum){
   if(showprgr) printf("<Reading Test of Hash>\n  name=%s  rnum=%d\n\n", name, rnum);
   /* open a database */
   hdb = tchdbnew();
+  tchdbsetxmsiz(hdb, rnum * 48);
   if(!tchdbopen(hdb, name, HDBOREADER)){
     fprintf(stderr, "tchdbopen failed\n");
     tchdbdel(hdb);
@@ -366,6 +368,7 @@ int dobtwrite(char *name, int rnum, int rnd){
     tcbdbtune(bdb, 101, 256, -1, 0, 0, 0);
     tcbdbsetcache(bdb, 256, 256);
   }
+  tcbdbsetxmsiz(bdb, rnum * 32);
   if(!tcbdbopen(bdb, name, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
     fprintf(stderr, "tcbdbopen failed\n");
     tcbdbdel(bdb);
@@ -417,6 +420,7 @@ int dobtread(char *name, int rnum, int rnd){
   } else {
     tcbdbsetcache(bdb, 256, 256);
   }
+  tcbdbsetxmsiz(bdb, rnum * 32);
   if(!tcbdbopen(bdb, name, BDBOREADER)){
     fprintf(stderr, "tcbdbopen failed\n");
     tcbdbdel(bdb);

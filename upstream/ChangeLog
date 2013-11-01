@@ -1,3 +1,299 @@
+2009-12-27  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcadb.c (tcadbmisc): the return value of the "getlist" function was modified.
+
+	- Release: 1.3.27
+
+2008-12-17  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbforeach): global locking was replaced by record locking.
+
+	* tcbdb.c (tcbdbforeachimpl): cache adjustment was added.
+
+	* tcadb.c (tcadbmisc): new function.
+
+	- Release: 1.3.26
+
+2008-12-16  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tcbdbsearchleaf): performance was improved.
+
+	- Release: 1.3.25
+
+2008-12-08  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmdbforeach, tcmdbforeachimpl): new functions.
+
+	* tcutil.c (tcndbforeach, tcndbforeachimpl): new functions.
+
+	* tcutil.c (tctreenew2, tcndbnew2): type of the comparison function was modified.
+
+	* tcutil.c (tcstrdist, tcstrdistutf): maximum memory usage was limited.
+
+	* tchdb.c (tchdbforeach, tchdbforeachimpl): new functions.
+
+	* tchdb.c (tchdboptimizeimpl): performance was improved.
+
+	* tcbdb.c (tcbdbforeach, tcbdbforeachimpl): new functions.
+
+	* tcbdb.c (tcbdbsetcmpfunc): BDBCMP was changed to TCCMP.
+
+	* tcbdb.c (tcbdbcmplexical, tcbdbcmpdecimal, tcbdbcmpint32, tcbdbcmpint64): removed.
+
+	* tcfdb.c (tcfdbforeach, tcfdbforeachimpl): new functions.
+
+	* tcadb.c (tcadbomode, tcadbreveal): new functions.
+
+	- Release: 1.3.24
+
+2008-12-03  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tcbdbtranbegin): conbination of non-transaction and transaction became safer.
+
+	- Release: 1.3.23
+
+2008-11-28  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapput3, tcmdbput3, tcmapputcat3, tcmdbputcat3): new functions.
+
+	* tcutil.c (tctreeput3, tcndbput3): new functions.
+
+	* tcadb.c (tcadbput, tcadbputcat): LRU rule is now strictly applied.
+
+	- Release: 1.3.22
+
+2008-11-22  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbwalrestore): a bug on systems without unified buffer cache was fixed.
+
+	- Release: 1.3.21
+
+2008-11-21  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbtranbegin, tchdbtrancommit, tchdbtranabort): new functions.
+
+	- Release: 1.3.20
+
+2008-11-19  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbaddint, tchdbadddouble): bugs related to the return value were fixed.
+
+	- Release: 1.3.19
+
+2008-11-10  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcptrlistnew, tcptrlistdel): new functions.
+
+	* tcbdb.c (tcbdbputimpl, tcbdboutimpl, tcbdbgetimpl): new functions.
+
+	- Release: 1.3.18
+
+2008-11-07  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmdbnew, tcmdbdel, tcmdbopen, tcmdbclose): new functions.
+
+	* tcadb.c (tcadbnew, tcadbdel): on-memory tree database is now supported.
+
+	- Release: 1.3.17
+
+2008-10-30  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapdup): performance was improved.
+
+	* tcutil.c (tctreenew, tctreedel, tctreeopen, tctreeclose): new functions.
+
+	* tcutil.c (tcsystem): new function.
+
+	* tchdb.c (tchdbopenimpl): memory usage of reader declined.
+
+	* tcadb.c (tcadbsync, tcadbcopy): on-memory database is now supported.
+
+	- Release: 1.3.16
+
+2008-10-20  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapput, tcmapout, tcmapget): performance was improved.
+
+	* tcutil.c (tcnumtobinstr): new function.
+
+	* tchdb.c (tchdbbidx): performance was improved.
+
+	- Release: 1.3.15
+
+2008-10-05  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* myconf.h: missing features of PATH_MAX and nan is now emulated.
+
+	* tcutil.c (tczeromap, tczerounmap): new functions.
+
+	- Release: 1.3.14
+
+2008-10-19  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmdbadddouble): NAN were replaced by the nan function.
+
+	* Makefile.in: the compilation command now supports Solaris.
+
+	- Release: 1.3.13
+
+2008-10-05  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tchexencode, tchexdecode): new functions.
+
+	* tchdb.c (tchdbaddint): a bug of error code setting was fixed.
+
+	- Release: 1.3.12
+
+2008-09-23  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbputimpl): performance of the ADDINT mode was improved.
+
+	* tcbdb.c (tcbdbleafaddrec): performance of the ADDINT mode was improved.
+
+	* tcfdb.c (tcfdbputimpl): performance of the ADDINT mode was improved.
+
+	* tcutil.c (tcpagealign): new function.
+
+	* tchdb.c (tchdbsetxmsiz): the parameter is now rounded up to multiple of the page size.
+
+	* tcfdb.c (tcfdbtune): the parameter is now rounded up to multiple of the page size.
+
+	* tchdb.c (tcseekwrite, tcseekread, tcseekreadtry): page border handling was added.
+
+	- Release: 1.3.11
+
+2008-09-20  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcunlock): new function.
+
+	* tchdb.c (tchdbsetmutex): useless locking was eliminated.
+
+	* tcbdb.c (tcbdbsetmutex): useless locking was eliminated.
+
+	* tcfdb.c (tcfdbsetmutex): useless locking was eliminated.
+
+	- Release: 1.3.10
+
+2008-09-10  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdblockallrecords, tchdbunlockallrecords): new functions.
+
+	* tcfdb.c (tcfdblockallrecords, tcfdbunlockallrecords): new functions.
+
+	- Release: 1.3.9
+
+2008-09-05  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapaddint, tcmapadddouble): checking data size was added.
+
+	- Release: 1.3.8
+
+2008-09-03  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapaddint, tcmapadddouble): type of the return value was changed.
+
+	* tcfdb.c (tcfdbkeytoid): added as API.
+
+	* tcadb.c (tcadbaddint, tcadbadddouble): new functions.
+
+	- Release: 1.3.7
+
+2008-09-03  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tclrand, tcdrand): a bug of overflow on 64-bit environment was fixed.
+
+	* tcutil.c (tcmdbaddint, tcmdbadddouble): new functions.
+
+	* tchdb.c (tchdbaddint, tchdbadddouble): new functions.
+
+	* tcbdb.c (tcbdbaddint, tcbdbadddouble): new functions.
+
+	* tcfdb.c (tcfdbaddint, tcfdbadddouble): new functions.
+
+	- Release: 1.3.6
+
+2008-08-25  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcatoi): new function.
+
+	* tchdb.c (HDBDEFBNUM): increased for typical usecases.
+
+	* tcbdb.c (BDBDEFBNUM): increased for typical usecases.
+
+	* tchdb.c (tchdbsetxmsiz, tchdbxmsiz): new functions.
+
+	- Release: 1.3.5
+
+2008-08-23  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tcseekreadtry): new function.
+
+	- Release: 1.3.4
+
+2008-08-20  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdblockrecord, tchdbunlockrecord): new functions.
+
+	* tchdb.c (tchdbputimpl, tchdboutimpl, tchdbgutimpl): concurrency was improved.
+
+	- Release: 1.3.3
+
+2008-08-01  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapaddint, tcmapput3, tcmdbput3): mismatch of signature was fixed.
+
+	* tcutil.c (tcmapadddouble): new function.
+
+	- Release: 1.3.2
+
+2008-07-29  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcadb.c (tcadbopen): "opts=b" option is now supported.
+
+	- Release: 1.3.1
+
+2008-07-15  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmd5hash): new function.
+
+	* tcutil.c (tcchidxnew, tcchidxdel, tcchidxhash): refactoring.
+
+	* tcutil.c (tcbzipencode, tcbzipdecode): new functions.
+
+	* tchdb.c (tchdbsetcodecfunc, tchdbcodecfunc): new functions.
+
+	* tcbdb.c (tcbdbsetcodecfunc, tcbdbcodecfunc): new functions.
+
+	* md5.h, md5.c: new files, whose author is L. Peter Deutsch.
+
+	* myconf.c (_tc_bzcompress_impl, _tc_bzdecompress_impl): new functions.
+
+	* myconf.c (_tc_recencode, _tc_recdecode): new functions.
+
+	- Release: 1.3.0
+
+2008-07-11  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbcacheclear): new function.
+
+	* tcbdb.c (tcbdbcacheclear): new function.
+
+	- Release: 1.2.12
+
+2008-07-08  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapkeys2, tcmapvals2): new functions.
+
+	* tchdb.c (tchdboptimizeimpl): user meta data is now to be copied.
+
+	- Release: 1.2.11
+
+2008-07-01  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcjetlag): missing of the "timezone" variable is now allowed.
+
+	- Release: 1.2.10
+
 2008-06-17  Mikio Hirabayashi  <mikio@users.sourceforge.net>
 
 	* tcutil.c (tcjetlag): new function.

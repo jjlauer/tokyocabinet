@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The command line utility of the abstract database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -28,13 +28,13 @@ int main(int argc, char **argv);
 static void usage(void);
 static void printerr(TCADB *adb);
 static int printdata(const char *ptr, int size, bool px);
-static char *hextoobj(const char *str, int *sp);
 static int runcreate(int argc, char **argv);
 static int runinform(int argc, char **argv);
 static int runput(int argc, char **argv);
 static int runout(int argc, char **argv);
 static int runget(int argc, char **argv);
 static int runlist(int argc, char **argv);
+static int runmisc(int argc, char **argv);
 static int runversion(int argc, char **argv);
 static int proccreate(const char *name);
 static int procinform(const char *name);
@@ -43,6 +43,7 @@ static int procput(const char *name, const char *kbuf, int ksiz, const char *vbu
 static int procout(const char *name, const char *kbuf, int ksiz);
 static int procget(const char *name, const char *kbuf, int ksiz, bool px, bool pz);
 static int proclist(const char *name, int max, bool pv, bool px, const char *fmstr);
+static int procmisc(const char *name, const char *func, const TCLIST *args, bool px);
 static int procversion(void);
 
 
@@ -63,6 +64,8 @@ int main(int argc, char **argv){
     rv = runget(argc, argv);
   } else if(!strcmp(argv[1], "list")){
     rv = runlist(argc, argv);
+  } else if(!strcmp(argv[1], "misc")){
+    rv = runmisc(argc, argv);
   } else if(!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")){
     rv = runversion(argc, argv);
   } else {
@@ -83,6 +86,7 @@ static void usage(void){
   fprintf(stderr, "  %s out [-sx] name key\n", g_progname);
   fprintf(stderr, "  %s get [-sx] [-px] [-pz] name key\n", g_progname);
   fprintf(stderr, "  %s list [-m num] [-pv] [-px] [-fm str] name\n", g_progname);
+  fprintf(stderr, "  %s misc [-sx] [-px] name func [arg...]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -109,27 +113,6 @@ static int printdata(const char *ptr, int size, bool px){
     ptr++;
   }
   return len;
-}
-
-
-/* create a binary object from a hexadecimal string */
-static char *hextoobj(const char *str, int *sp){
-  int len = strlen(str);
-  char *buf = tcmalloc(len + 1);
-  int j = 0;
-  for(int i = 0; i < len; i += 2){
-    while(strchr(" \n\r\t\f\v", str[i])){
-      i++;
-    }
-    char mbuf[3];
-    if((mbuf[0] = str[i]) == '\0') break;
-    if((mbuf[1] = str[i+1]) == '\0') break;
-    mbuf[2] = '\0';
-    buf[j++] = (char)strtol(mbuf, NULL, 16);
-  }
-  buf[j] = '\0';
-  *sp = j;
-  return buf;
 }
 
 
@@ -203,8 +186,8 @@ static int runput(int argc, char **argv){
   int ksiz, vsiz;
   char *kbuf, *vbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
-    vbuf = hextoobj(value, &vsiz);
+    kbuf = tchexdecode(key, &ksiz);
+    vbuf = tchexdecode(value, &vsiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -242,7 +225,7 @@ static int runout(int argc, char **argv){
   int ksiz;
   char *kbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
+    kbuf = tchexdecode(key, &ksiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -283,7 +266,7 @@ static int runget(int argc, char **argv){
   int ksiz;
   char *kbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
+    kbuf = tchexdecode(key, &ksiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -307,7 +290,7 @@ static int runlist(int argc, char **argv){
     if(!name && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-m")){
         if(++i >= argc) usage();
-        max = atoi(argv[i]);
+        max = tcatoi(argv[i]);
       } else if(!strcmp(argv[i], "-pv")){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -328,6 +311,43 @@ static int runlist(int argc, char **argv){
   name = tcsprintf("%s#mode=r", name);
   int rv = proclist(name, max, pv, px, fmstr);
   tcfree(name);
+  return rv;
+}
+
+
+/* parse arguments of misc command */
+static int runmisc(int argc, char **argv){
+  char *name = NULL;
+  char *func = NULL;
+  TCLIST *args = tcmpoollistnew(tcmpoolglobal());
+  bool sx = false;
+  bool px = false;
+  for(int i = 2; i < argc; i++){
+    if(!name && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-sx")){
+        sx = true;
+      } else if(!strcmp(argv[i], "-px")){
+        px = true;
+      } else {
+        usage();
+      }
+    } else if(!name){
+      name = argv[i];
+    } else if(!func){
+      func = argv[i];
+    } else {
+      if(sx){
+        int size;
+        char *buf = tchexdecode(argv[i], &size);
+        tclistpush(args, buf, size);
+        tcfree(buf);
+      } else {
+        tclistpush2(args, argv[i]);
+      }
+    }
+  }
+  if(!name || !func) usage();
+  int rv = procmisc(name, func, args, px);
   return rv;
 }
 
@@ -366,6 +386,16 @@ static int procinform(const char *name){
     return 1;
   }
   bool err = false;
+  const char *type = "(unknown)";
+  switch(tcadbomode(adb)){
+  case ADBOVOID: type = "not opened"; break;
+  case ADBOMDB: type = "on-memory hash database"; break;
+  case ADBONDB: type = "on-memory tree database"; break;
+  case ADBOHDB: type = "hash database"; break;
+  case ADBOBDB: type = "B+ tree database"; break;
+  case ADBOFDB: type = "fixed-length database"; break;
+  }
+  printf("database type: %s\n", type);
   printf("record number: %llu\n", (unsigned long long)tcadbrnum(adb));
   printf("size: %llu\n", (unsigned long long)tcadbsize(adb));
   if(!tcadbclose(adb)){
@@ -526,10 +556,41 @@ static int proclist(const char *name, int max, bool pv, bool px, const char *fms
 }
 
 
+/* perform misc command */
+static int procmisc(const char *name, const char *func, const TCLIST *args, bool px){
+  TCADB *adb = tcadbnew();
+  if(!tcadbopen(adb, name)){
+    printerr(adb);
+    tcadbdel(adb);
+    return 1;
+  }
+  bool err = false;
+  TCLIST *res = tcadbmisc(adb, func, args);
+  if(res){
+    for(int i = 0; i < tclistnum(res); i++){
+      int rsiz;
+      const char *rbuf = tclistval(res, i, &rsiz);
+      printdata(rbuf, rsiz, px);
+      printf("\n");
+    }
+    tclistdel(res);
+  } else {
+    printerr(adb);
+    err = true;
+  }
+  if(!tcadbclose(adb)){
+    if(!err) printerr(adb);
+    err = true;
+  }
+  tcadbdel(adb);
+  return err ? 1 : 0;
+}
+
+
 /* perform version command */
 static int procversion(void){
   printf("Tokyo Cabinet version %s (%d:%s)\n", tcversion, _TC_LIBVER, _TC_FORMATVER);
-  printf("Copyright (C) 2006-2008 Mikio Hirabayashi\n");
+  printf("Copyright (C) 2006-2009 Mikio Hirabayashi\n");
   return 0;
 }
 

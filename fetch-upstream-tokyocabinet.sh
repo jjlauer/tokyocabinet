@@ -4,7 +4,7 @@
 for i in {48..48}; do
 
 #VERSION="1.4.${i}"
-VERSION="1.2.9"
+VERSION="1.3.27"
 
 VER_MERGED=$(git tag | grep -c "$VERSION")
 

@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The abstract database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -31,6 +31,7 @@ __TCADB_CLINKAGEBEGIN
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <math.h>
 #include <tcutil.h>
 #include <tchdb.h>
 #include <tcbdb.h>
@@ -45,7 +46,9 @@ __TCADB_CLINKAGEBEGIN
 
 typedef struct {                         /* type of structure for an abstract database */
   char *name;                            /* name of the database */
-  TCMDB *mdb;                            /* on-memory database object */
+  int omode;                             /* open mode */
+  TCMDB *mdb;                            /* on-memory hash database object */
+  TCNDB *ndb;                            /* on-memory tree database object */
   TCHDB *hdb;                            /* hash database object */
   TCBDB *bdb;                            /* B+ tree database object */
   TCFDB *fdb;                            /* fixed-length databae object */
@@ -54,6 +57,15 @@ typedef struct {                         /* type of structure for an abstract da
   uint32_t capcnt;                       /* count for capacity check */
   BDBCUR *cur;                           /* cursor of B+ tree */
 } TCADB;
+
+enum {                                   /* enumeration for open modes */
+  ADBOVOID,                              /* not opened */
+  ADBOMDB,                               /* on-memory hash database */
+  ADBONDB,                               /* on-memory tree database */
+  ADBOHDB,                               /* hash database */
+  ADBOBDB,                               /* B+ tree database */
+  ADBOFDB                                /* fixed-length database */
+};
 
 
 /* Create an abstract database object.
@@ -69,22 +81,22 @@ void tcadbdel(TCADB *adb);
 /* Open an abstract database.
    `adb' specifies the abstract database object.
    `name' specifies the name of the database.  If it is "*", the database will be an on-memory
-   database.  If its suffix is ".tch", the database will be a hash database.  If its suffix is
-   ".tcb", the database will be a B+ tree database.  If its suffix is ".tcf", the database will be
-   a fixed-length database.  Otherwise, this function fails.  Tuning parameters can trail the
-   name, separated by "#".  Each parameter is composed of the name and the number, separated by
-   "=".  On-memory database supports "bnum", "capnum", and "capsiz".  Hash database supports
-   "mode", "bnum", "apow", "fpow", "opts", and "rcnum".  B+ tree database supports "mode",
-   "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum", and "ncnum".  Fixed-length database
-   supports "mode", "width", and "limsiz".  "capnum" specifies the capacity number of records.
-   "capsiz" specifies the capacity size of using memory.  Records spilled the capacity are removed
-   by the storing order.  "mode" can contain "w" of writer, "r" of reader, "c" of creating, "t" of
-   truncating, "e" of no locking, and "f" of non-blocking lock.  The default mode is relevant to
-   "wc".  "opts" can contains "l" of large option, "d" of Deflate option, and "b" of TCBS option.
-   "width" specifies the width of the value of each record.  "limsiz" specifies the limit size of
-   the database file.  For example, "casket.tch#bnum=1000000#opts=ld" means that the name of the
-   database file is "casket.tch", and the bucket number is 1000000, and the options are large and
-   Deflate.
+   hash database.  If it is "+", the database will be an on-memory tree database.  If its suffix
+   is ".tch", the database will be a hash database.  If its suffix is ".tcb", the database will
+   be a B+ tree database.  If its suffix is ".tcf", the database will be a fixed-length database.
+   Otherwise, this function fails.  Tuning parameters can trail the name, separated by "#".  Each
+   parameter is composed of the name and the number, separated by "=".  On-memory hash database
+   supports "bnum", "capnum", and "capsiz".  On-memory tree database supports "capnum" and
+   "capsiz".  Hash database supports "mode", "bnum", "apow", "fpow", "opts", "rcnum", and "xmsiz".
+   B+ tree database supports "mode", "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum",
+   "ncnum", and "xmsiz".  Fixed-length database supports "mode", "width", and "limsiz".  "capnum"
+   specifies the capacity number of records.  "capsiz" specifies the capacity size of using
+   memory.  Records spilled the capacity are removed by the storing order.  "mode" can contain
+   "w" of writer, "r" of reader, "c" of creating, "t" of truncating, "e" of no locking, and "f"
+   of non-blocking lock.  The default mode is relevant to "wc".  "opts" can contains "l" of large
+   option, "d" of Deflate option, "b" of BZIP2 option, and "t" of TCBS option.  For example,
+   "casket.tch#bnum=1000000#opts=ld" means that the name of the database file is "casket.tch",
+   and the bucket number is 1000000, and the options are large and Deflate.
    If successful, the return value is true, else, it is false. */
 bool tcadbopen(TCADB *adb, const char *name);
 
@@ -278,10 +290,31 @@ TCLIST *tcadbfwmkeys(TCADB *adb, const void *pbuf, int psiz, int max);
 TCLIST *tcadbfwmkeys2(TCADB *adb, const char *pstr, int max);
 
 
+/* Add an integer to a record in an abstract database object.
+   `adb' specifies the abstract database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `INT_MIN'.
+   If the corresponding record exists, the value is treated as an integer and is added to.  If no
+   record corresponds, a new record of the additional value is stored. */
+int tcadbaddint(TCADB *adb, const void *kbuf, int ksiz, int num);
+
+
+/* Add a real number to a record in an abstract database object.
+   `adb' specifies the abstract database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `NAN'.
+   If the corresponding record exists, the value is treated as a real number and is added to.  If
+   no record corresponds, a new record of the additional value is stored. */
+double tcadbadddouble(TCADB *adb, const void *kbuf, int ksiz, double num);
+
+
 /* Synchronize updated contents of an abstract database object with the file and the device.
    `adb' specifies the abstract database object.
-   If successful, the return value is true, else, it is false.
-   This function fails and has no effect for on-memory database. */
+   If successful, the return value is true, else, it is false. */
 bool tcadbsync(TCADB *adb);
 
 
@@ -299,7 +332,7 @@ bool tcadbvanish(TCADB *adb);
    command returns non-zero code.
    The database file is assured to be kept synchronized and not modified while the copying or
    executing operation is in progress.  So, this function is useful to create a backup file of
-   the database file.  This function fails and has no effect for on-memory database. */
+   the database file. */
 bool tcadbcopy(TCADB *adb, const char *path);
 
 
@@ -315,6 +348,50 @@ uint64_t tcadbrnum(TCADB *adb);
    The return value is the size of the database or 0 if the object does not connect to any
    database instance. */
 uint64_t tcadbsize(TCADB *adb);
+
+
+/* Call a versatile function for miscellaneous operations of an abstract database object.
+   `adb' specifies the abstract database object.
+   `name' specifies the name of the function.
+   `args' specifies a list object containing arguments.
+   If successful, the return value is a list object of the result.  `NULL' is returned on failure.
+   All databases support "putlist", "outlist", and "getlist".  "putlist" is to store records.  It
+   receives keys and values one after the other, and returns an empty list.  "outlist" is to
+   remove records.  It receives keys, and returns an empty list.  "getlist" is to retrieve
+   records.  It receives keys, and returns keys and values of corresponding records one after the
+   other.  Because the object of the return value is created with the function `tclistnew', it
+   should be deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcadbmisc(TCADB *adb, const char *name, const TCLIST *args);
+
+
+
+/*************************************************************************************************
+ * features for experts
+ *************************************************************************************************/
+
+
+/* Get the open mode of an abstract database object.
+   `adb' specifies the abstract database object.
+   The return value is `ADBOVOID' for not opened database, `ADBOMDB' for on-memory hash database,
+  `ADBONDB' for on-memory tree database, `ADBOHDB' for hash database, `ADBOBDB' for B+ tree
+  database, `ADBOFDB' for fixed-length database. */
+int tcadbomode(TCADB *adb);
+
+
+/* Get the concrete database object of an abstract database object.
+   `adb' specifies the abstract database object.
+   The return value is the concrete database object depend on the open mode or 0 if the object
+   does not connect to any database instance. */
+void *tcadbreveal(TCADB *adb);
+
+
+/* Process each record atomically of an abstract database object.
+   `adb' specifies the abstract database object.
+   `func' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false. */
+bool tcadbforeach(TCADB *adb, TCITER iter, void *op);
 
 
 

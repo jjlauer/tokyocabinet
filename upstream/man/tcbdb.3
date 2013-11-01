@@ -1,4 +1,4 @@
-.TH "TCBDB" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCBDB" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcbdb \- the B+ tree database API
@@ -78,7 +78,7 @@ The function `tcbdbecode' is used in order to get the last happened error code o
 The return value is the last happened error code.
 .RE
 .RS
-The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
+The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
 .RE
 .RE
 .PP
@@ -102,7 +102,7 @@ The function `tcbdbsetcmpfunc' is used in order to set the custom comparison fun
 .PP
 .RS
 .br
-\fBbool tcbdbsetcmpfunc(TCBDB *\fIbdb\fB, BDBCMP \fIcmp\fB, void *\fIcmpop\fB);\fR
+\fBbool tcbdbsetcmpfunc(TCBDB *\fIbdb\fB, TCCMP \fIcmp\fB, void *\fIcmpop\fB);\fR
 .RS
 `\fIbdb\fR' specifies the B+ tree database object which is not opened.
 .RE
@@ -116,7 +116,7 @@ The function `tcbdbsetcmpfunc' is used in order to set the custom comparison fun
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-The default comparison function compares keys of two records by lexical order.  The functions `tcbdbcmplexical' (dafault), `tcbdbcmpdecimal', `tcbdbcmpint32', and `tcbdbcmpint64' are built\-in.  Note that the comparison function should be set before the database is opened.  Moreover, user\-defined comparison functions should be set every time the database is being opened.
+The default comparison function compares keys of two records by lexical order.  The functions `tccmplexical' (dafault), `tccmpdecimal', `tccmpint32', and `tccmpint64' are built\-in.  Note that the comparison function should be set before the database is opened.  Moreover, user\-defined comparison functions should be set every time the database is being opened.
 .RE
 .RE
 .PP
@@ -144,7 +144,7 @@ The function `tcbdbtune' is used in order to set the tuning parameters of a B+ t
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each page is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.
+`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each page is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -176,6 +176,25 @@ Note that the caching parameters should be set before the database is opened.
 .RE
 .RE
 .PP
+The function `tcbdbsetxmsiz' is used in order to set the size of the extra mapped memory of a B+ tree database object.
+.PP
+.RS
+.br
+\fBbool tcbdbsetxmsiz(TCBDB *\fIbdb\fB, int64_t \fIxmsiz\fB);\fR
+.RS
+`\fIbdb\fR' specifies the B+ tree database object which is not opened.
+.RE
+.RS
+`\fIxmsiz\fR' specifies the size of the extra mapped memory.  If it is not more than 0, the extra mapped memory is disabled.  It is disabled by default.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Note that the mapping parameters should be set before the database is opened.
+.RE
+.RE
+.PP
 The function `tcbdbopen' is used in order to open a database file and connect a B+ tree database object.
 .PP
 .RS
@@ -188,7 +207,7 @@ The function `tcbdbopen' is used in order to open a database file and connect a 
 `\fIpath\fR' specifies the path of the database file.
 .RE
 .RS
-`\fIomode\fR' specifies the connection mode: `BDBOWRITER' as a writer, `BDBOREADER' as a reader.  If the mode is `BDBOWRITER', the following may be added by bitwise or: `BDBOCREAT', which means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database regardless if one exists.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or `BDBOLCKNB', which means locking is performed without blocking.
+`\fIomode\fR' specifies the connection mode: `BDBOWRITER' as a writer, `BDBOREADER' as a reader.  If the mode is `BDBOWRITER', the following may be added by bitwise or: `BDBOCREAT', which means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database regardless if one exists, `BDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or `BDBOLCKNB', which means locking is performed without blocking.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -781,6 +800,56 @@ Because the object of the return value is created with the function `tclistnew',
 .RE
 .RE
 .PP
+The function `tcbdbaddint' is used in order to add an integer to a record in a B+ tree database object.
+.PP
+.RS
+.br
+\fBint tcbdbaddint(TCBDB *\fIbdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, int \fInum\fB);\fR
+.RS
+`\fIbdb\fR' specifies the B+ tree database object connected as a writer.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `INT_MIN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as an integer and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
+The function `tcbdbadddouble' is used in order to add a real number to a record in a B+ tree database object.
+.PP
+.RS
+.br
+\fBdouble tcbdbadddouble(TCBDB *\fIbdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, double \fInum\fB);\fR
+.RS
+`\fIbdb\fR' specifies the B+ tree database object connected as a writer.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `NAN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as a real number and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
 The function `tcbdbsync' is used in order to synchronize updated contents of a B+ tree database object with the file and the device.
 .PP
 .RS
@@ -821,7 +890,7 @@ The function `tcbdboptimize' is used in order to optimize the file of a B+ tree 
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the current setting is not changed.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -1116,7 +1185,7 @@ After insertion, the cursor is moved to the inserted record.
 .RE
 .RE
 .PP
-The function `tcbdbcurout' is used in order to delete the record where a cursor object is.
+The function `tcbdbcurout' is used in order to remove the record where a cursor object is.
 .PP
 .RS
 .br

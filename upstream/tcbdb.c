@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The B+ tree database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -21,6 +21,7 @@
 
 #define BDBFILEMODE    00644             // permission of created files
 #define BDBOPAQUESIZ   64                // size of using opaque field
+#define BDBLEFTOPQSIZ  64                // size of left opaque field
 #define BDBPAGEBUFSIZ  32768             // size of a buffer to read each page
 #define BDBNODEIDBASE  ((1LL<<48)+1)     // base number of node ID
 #define BDBLEVELMAX    64                // max level of B+ tree
@@ -30,23 +31,21 @@
 #define BDBMINLMEMB    4                 // minimum number of members in each leaf
 #define BDBDEFNMEMB    256               // default number of members in each node
 #define BDBMINNMEMB    4                 // minimum number of members in each node
-#define BDBDEFBNUM     16381             // default bucket number
+#define BDBDEFBNUM     32749             // default bucket number
 #define BDBDEFAPOW     8                 // default alignment power
 #define BDBDEFFPOW     10                // default free block pool power
 #define BDBDEFLCNUM    1024              // default number of leaf cache
 #define BDBDEFNCNUM    512               // default number of node cache
 
 typedef struct {                         // type of structure for a record
-  char *kbuf;                            // pointer to the key region
   int ksiz;                              // size of the key region
-  char *vbuf;                            // pointer to the value region
   int vsiz;                              // size of the value region
   TCLIST *rest;                          // list of value objects
 } BDBREC;
 
 typedef struct {                         // type of structure for a leaf page
   uint64_t id;                           // ID number of the leaf
-  TCLIST *recs;                          // list of records
+  TCPTRLIST *recs;                       // list of records
   uint64_t prev;                         // ID number of the previous leaf
   uint64_t next;                         // ID number of the next leaf
   bool dirty;                            // whether to be written back
@@ -55,14 +54,13 @@ typedef struct {                         // type of structure for a leaf page
 
 typedef struct {                         // type of structure for a page index
   uint64_t pid;                          // ID number of the referring page
-  char *kbuf;                            // pointer to the key region
   int ksiz;                              // size of the key region
 } BDBIDX;
 
 typedef struct {                         // type of structure for a node page
   uint64_t id;                           // ID number of the node
   uint64_t heir;                         // ID of the child before the first index
-  TCLIST *idxs;                          // list of indexes
+  TCPTRLIST *idxs;                       // list of indexes
   bool dirty;                            // whether to be written back
 } BDBNODE;
 
@@ -72,6 +70,8 @@ enum {                                   // enumeration for duplication behavior
   BDBPDCAT,                              // concatenate values
   BDBPDDUP,                              // allow duplication of keys
   BDBPDDUPB,                             // allow backward duplication
+  BDBPDADDINT,                           // add an integer
+  BDBPDADDDBL                            // add a real number
 };
 
 
@@ -84,10 +84,8 @@ enum {                                   // enumeration for duplication behavior
   ((TC_bdb)->mmtx ? tcbdblockcache(TC_bdb) : true)
 #define BDBUNLOCKCACHE(TC_bdb) \
   ((TC_bdb)->mmtx ? tcbdbunlockcache(TC_bdb) : true)
-#define BDBLOCKTRAN(TC_bdb) \
-  ((TC_bdb)->mmtx ? tcbdblocktran(TC_bdb) : true)
-#define BDBUNLOCKTRAN(TC_bdb) \
-  ((TC_bdb)->mmtx ? tcbdbunlocktran(TC_bdb) : true)
+#define BDBTHREADYIELD(TC_bdb) \
+  do { if((TC_bdb)->mmtx) pthread_yield(); } while(false)
 
 
 /* private function prototypes */
@@ -98,7 +96,7 @@ static BDBLEAF *tcbdbleafnew(TCBDB *bdb, uint64_t prev, uint64_t next);
 static bool tcbdbleafcacheout(TCBDB *bdb, BDBLEAF *leaf);
 static bool tcbdbleafsave(TCBDB *bdb, BDBLEAF *leaf);
 static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id);
-static BDBLEAF *tcbdbgethistleaf(TCBDB *bdb, const char *kbuf, int ksiz);
+static BDBLEAF *tcbdbgethistleaf(TCBDB *bdb, const char *kbuf, int ksiz, uint64_t id);
 static bool tcbdbleafaddrec(TCBDB *bdb, BDBLEAF *leaf, int dmode,
                             const char *kbuf, int ksiz, const char *vbuf, int vsiz);
 static int tcbdbleafdatasize(BDBLEAF *leaf);
@@ -134,8 +132,6 @@ static bool tcbdblockmethod(TCBDB *bdb, bool wr);
 static bool tcbdbunlockmethod(TCBDB *bdb);
 static bool tcbdblockcache(TCBDB *bdb);
 static bool tcbdbunlockcache(TCBDB *bdb);
-static bool tcbdblocktran(TCBDB *bdb);
-static bool tcbdbunlocktran(TCBDB *bdb);
 static bool tcbdbcurfirstimpl(BDBCUR *cur);
 static bool tcbdbcurlastimpl(BDBCUR *cur);
 static bool tcbdbcurjumpimpl(BDBCUR *cur, const char *kbuf, int ksiz, bool forward);
@@ -145,6 +141,7 @@ static bool tcbdbcurnextimpl(BDBCUR *cur);
 static bool tcbdbcurputimpl(BDBCUR *cur, const char *vbuf, int vsiz, int mode);
 static bool tcbdbcuroutimpl(BDBCUR *cur);
 static bool tcbdbcurrecimpl(BDBCUR *cur, const char **kbp, int *ksp, const char **vbp, int *vsp);
+static bool tcbdbforeachimpl(TCBDB *bdb, TCITER iter, void *op);
 
 
 /* debugging function prototypes */
@@ -172,6 +169,8 @@ TCBDB *tcbdbnew(void){
   tcbdbclear(bdb);
   bdb->hdb = tchdbnew();
   TCMALLOC(bdb->hist, sizeof(*bdb->hist) * BDBLEVELMAX);
+  tchdbtune(bdb->hdb, BDBDEFBNUM, BDBDEFAPOW, BDBDEFFPOW, 0);
+  tchdbsetxmsiz(bdb->hdb, 0);
   return bdb;
 }
 
@@ -183,10 +182,8 @@ void tcbdbdel(TCBDB *bdb){
   TCFREE(bdb->hist);
   tchdbdel(bdb->hdb);
   if(bdb->mmtx){
-    pthread_mutex_destroy(bdb->tmtx);
     pthread_mutex_destroy(bdb->cmtx);
     pthread_rwlock_destroy(bdb->mmtx);
-    TCFREE(bdb->tmtx);
     TCFREE(bdb->cmtx);
     TCFREE(bdb->mmtx);
   }
@@ -205,33 +202,28 @@ int tcbdbecode(TCBDB *bdb){
 bool tcbdbsetmutex(TCBDB *bdb){
   assert(bdb);
   if(!TCUSEPTHREAD) return true;
-  if(!tcglobalmutexlock()) return false;
   if(bdb->mmtx || bdb->open){
     tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
-    tcglobalmutexunlock();
     return false;
   }
   TCMALLOC(bdb->mmtx, sizeof(pthread_rwlock_t));
   TCMALLOC(bdb->cmtx, sizeof(pthread_mutex_t));
-  TCMALLOC(bdb->tmtx, sizeof(pthread_mutex_t));
-  if(pthread_rwlock_init(bdb->mmtx, NULL) != 0 || pthread_mutex_init(bdb->cmtx, NULL) != 0 ||
-     pthread_mutex_init(bdb->tmtx, NULL) != 0){
-    TCFREE(bdb->tmtx);
+  bool err = false;
+  if(pthread_rwlock_init(bdb->mmtx, NULL) != 0) err = true;
+  if(pthread_mutex_init(bdb->cmtx, NULL) != 0) err = true;
+  if(err){
     TCFREE(bdb->cmtx);
     TCFREE(bdb->mmtx);
-    bdb->tmtx = NULL;
     bdb->cmtx = NULL;
     bdb->mmtx = NULL;
-    tcglobalmutexunlock();
     return false;
   }
-  tcglobalmutexunlock();
   return tchdbsetmutex(bdb->hdb);
 }
 
 
 /* Set the custom comparison function of a B+ tree database object. */
-bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop){
+bool tcbdbsetcmpfunc(TCBDB *bdb, TCCMP cmp, void *cmpop){
   assert(bdb && cmp);
   if(bdb->open){
     tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
@@ -257,7 +249,9 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   uint8_t hopts = 0;
   if(opts & BDBTLARGE) hopts |= HDBTLARGE;
   if(opts & BDBTDEFLATE) hopts |= HDBTDEFLATE;
+  if(opts & BDBTBZIP) hopts |= HDBTBZIP;
   if(opts & BDBTTCBS) hopts |= HDBTTCBS;
+  if(opts & BDBTEXCODEC) hopts |= HDBTEXCODEC;
   bnum = (bnum > 0) ? bnum : BDBDEFBNUM;
   apow = (apow >= 0) ? apow : BDBDEFAPOW;
   fpow = (fpow >= 0) ? fpow : BDBDEFFPOW;
@@ -275,6 +269,16 @@ bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum){
   if(lcnum > 0) bdb->lcnum = tclmax(lcnum, BDBLEVELMAX);
   if(ncnum > 0) bdb->ncnum = tclmax(ncnum, BDBLEVELMAX);
   return true;
+}
+
+
+/* Set the size of the extra mapped memory of a B+ tree database object. */
+bool tcbdbsetxmsiz(TCBDB *bdb, int64_t xmsiz){
+  if(bdb->open){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  return tchdbsetxmsiz(bdb->hdb, xmsiz);
 }
 
 
@@ -635,6 +639,35 @@ TCLIST *tcbdbfwmkeys2(TCBDB *bdb, const char *pstr, int max){
 }
 
 
+/* Add an integer to a record in a B+ tree database object. */
+int tcbdbaddint(TCBDB *bdb, const void *kbuf, int ksiz, int num){
+  assert(bdb && kbuf && ksiz >= 0);
+  if(!BDBLOCKMETHOD(bdb, true)) return INT_MIN;
+  if(!bdb->open || !bdb->wmode){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    BDBUNLOCKMETHOD(bdb);
+    return INT_MIN;
+  }
+  bool rv = tcbdbputimpl(bdb, kbuf, ksiz, (char *)&num, sizeof(num), BDBPDADDINT);
+  BDBUNLOCKMETHOD(bdb);
+  return rv ? num : INT_MIN;
+}
+
+
+/* Add a real number to a record in a B+ tree database object. */
+double tcbdbadddouble(TCBDB *bdb, const void *kbuf, int ksiz, double num){
+  assert(bdb && kbuf && ksiz >= 0);
+  if(!BDBLOCKMETHOD(bdb, true)) return nan("");
+  if(!bdb->open || !bdb->wmode){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    BDBUNLOCKMETHOD(bdb);
+    return nan("");
+  }
+  bool rv = tcbdbputimpl(bdb, kbuf, ksiz, (char *)&num, sizeof(num), BDBPDADDDBL);
+  BDBUNLOCKMETHOD(bdb);
+  return rv ? num : nan("");
+}
+
 
 /* Synchronize updated contents of a B+ tree database object with the file and the device. */
 bool tcbdbsync(TCBDB *bdb){
@@ -661,6 +694,7 @@ bool tcbdboptimize(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
+  BDBTHREADYIELD(bdb);
   bool rv = tcbdboptimizeimpl(bdb, lmemb, nmemb, bnum, apow, fpow, opts);
   BDBUNLOCKMETHOD(bdb);
   return rv;
@@ -676,6 +710,7 @@ bool tcbdbvanish(TCBDB *bdb){
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
+  BDBTHREADYIELD(bdb);
   bool rv = tcbdbvanishimpl(bdb);
   BDBUNLOCKMETHOD(bdb);
   return rv;
@@ -691,6 +726,7 @@ bool tcbdbcopy(TCBDB *bdb, const char *path){
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
+  BDBTHREADYIELD(bdb);
   TCLIST *lids = tclistnew();
   TCLIST *nids = tclistnew();
   const char *vbuf;
@@ -711,6 +747,7 @@ bool tcbdbcopy(TCBDB *bdb, const char *path){
   for(int i = 0; i < ln; i++){
     vbuf = TCLISTVALPTR(lids, i);
     if(BDBLOCKMETHOD(bdb, true)){
+      BDBTHREADYIELD(bdb);
       if(bdb->open){
         int rsiz;
         BDBLEAF *leaf = (BDBLEAF *)tcmapget(bdb->leafc, vbuf, sizeof(leaf->id), &rsiz);
@@ -743,6 +780,7 @@ bool tcbdbcopy(TCBDB *bdb, const char *path){
   tclistdel(lids);
   if(!tcbdbtranbegin(bdb)) err = true;
   if(BDBLOCKMETHOD(bdb, false)){
+    BDBTHREADYIELD(bdb);
     if(!tchdbcopy(bdb->hdb, path)) err = true;
     BDBUNLOCKMETHOD(bdb);
   } else {
@@ -766,7 +804,7 @@ bool tcbdbtranbegin(TCBDB *bdb){
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
-  if(!BDBLOCKTRAN(bdb)){
+  if(!tchdbtranbegin(bdb->hdb)){
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -792,7 +830,11 @@ bool tcbdbtrancommit(TCBDB *bdb){
   bool err = false;
   if(!tcbdbmemsync(bdb, false)) err = true;
   if(!tcbdbcacheadjust(bdb)) err = true;
-  BDBUNLOCKTRAN(bdb);
+  if(err){
+    tchdbtranabort(bdb->hdb);
+  } else if(!tchdbtrancommit(bdb->hdb)){
+    err = true;
+  }
   BDBUNLOCKMETHOD(bdb);
   return !err;
 }
@@ -813,9 +855,11 @@ bool tcbdbtranabort(TCBDB *bdb){
   TCFREE(bdb->rbopaque);
   bdb->tran = false;
   bdb->rbopaque = NULL;
+  bdb->hleaf = 0;
+  bdb->lleaf = 0;
   bool err = false;
   if(!tcbdbcacheadjust(bdb)) err = true;
-  BDBUNLOCKTRAN(bdb);
+  if(!tchdbtranvoid(bdb->hdb)) err = true;
   BDBUNLOCKMETHOD(bdb);
   return !err;
 }
@@ -1248,7 +1292,7 @@ int tcbdbdbgfd(TCBDB *bdb){
 }
 
 
-/* Synchronize updating contents on memory. */
+/* Synchronize updating contents on memory of a B+ tree database object. */
 bool tcbdbmemsync(TCBDB *bdb, bool phys){
   assert(bdb);
   if(!bdb->open || !bdb->wmode){
@@ -1280,8 +1324,42 @@ bool tcbdbmemsync(TCBDB *bdb, bool phys){
 }
 
 
+/* Clear the cache of a B+ tree database object. */
+bool tcbdbcacheclear(TCBDB *bdb){
+  assert(bdb);
+  if(!bdb->open){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  bool err = false;
+  if(TCMAPRNUM(bdb->leafc) > 0){
+    bool clk = BDBLOCKCACHE(bdb);
+    TCMAP *leafc = bdb->leafc;
+    tcmapiterinit(leafc);
+    int rsiz;
+    const void *buf;
+    while((buf = tcmapiternext(leafc, &rsiz)) != NULL){
+      if(!tcbdbleafcacheout(bdb, (BDBLEAF *)tcmapiterval(buf, &rsiz))) err = true;
+    }
+    if(clk) BDBUNLOCKCACHE(bdb);
+  }
+  if(TCMAPRNUM(bdb->nodec) > 0){
+    bool clk = BDBLOCKCACHE(bdb);
+    TCMAP *nodec = bdb->nodec;
+    tcmapiterinit(nodec);
+    int rsiz;
+    const void *buf;
+    while((buf = tcmapiternext(nodec, &rsiz)) != NULL){
+      if(!tcbdbnodecacheout(bdb, (BDBNODE *)tcmapiterval(buf, &rsiz))) err = true;
+    }
+    if(clk) BDBUNLOCKCACHE(bdb);
+  }
+  return !err;
+}
+
+
 /* Get the comparison function of a B+ tree database object. */
-BDBCMP tcbdbcmpfunc(TCBDB *bdb){
+TCCMP tcbdbcmpfunc(TCBDB *bdb){
   assert(bdb);
   return bdb->cmp;
 }
@@ -1453,6 +1531,21 @@ bool tcbdbsetcapnum(TCBDB *bdb, uint64_t capnum){
 }
 
 
+/* Set the custom codec functions of a B+ tree database object. */
+bool tcbdbsetcodecfunc(TCBDB *bdb, TCCODEC enc, void *encop, TCCODEC dec, void *decop){
+  assert(bdb && enc && dec);
+  if(!BDBLOCKMETHOD(bdb, true)) return false;
+  if(bdb->open){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    BDBUNLOCKMETHOD(bdb);
+    return false;
+  }
+  bool rv = tchdbsetcodecfunc(bdb->hdb, enc, encop, dec, decop);
+  BDBUNLOCKMETHOD(bdb);
+  return rv;
+}
+
+
 /* Store a new record into a B+ tree database object with backward duplication. */
 bool tcbdbputdupback(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
@@ -1498,94 +1591,19 @@ bool tcbdbcurjumpback2(BDBCUR *cur, const char *kstr){
 }
 
 
-/* Compare keys of two records by lexical order. */
-int tcbdbcmplexical(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && asiz >= 0 && bptr && bsiz >= 0);
-  int rv;
-  TCCMPLEXICAL(rv, aptr, asiz, bptr, bsiz);
+/* Process each record atomically of a B+ tree database object. */
+bool tcbdbforeach(TCBDB *bdb, TCITER iter, void *op){
+  assert(bdb && iter);
+  if(!BDBLOCKMETHOD(bdb, true)) return false;
+  if(!bdb->open){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    BDBUNLOCKMETHOD(bdb);
+    return false;
+  }
+  BDBTHREADYIELD(bdb);
+  bool rv = tcbdbforeachimpl(bdb, iter, op);
+  BDBUNLOCKMETHOD(bdb);
   return rv;
-}
-
-
-/* Compare two keys as decimal strings of real numbers. */
-int tcbdbcmpdecimal(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && asiz >= 0 && bptr && bsiz >= 0);
-  int sign;
-  int64_t anum = 0;
-  sign = 1;
-  if(asiz > 0 && *aptr == '-'){
-    aptr++;
-    asiz--;
-    sign = -1;
-  }
-  for(int i = 0; i < asiz; i++){
-    int c = aptr[i];
-    if(c < '0' || c > '9') continue;
-    anum = anum * 10 + c - '0';
-  }
-  anum *= sign;
-  int64_t bnum = 0;
-  sign = 1;
-  if(bsiz > 0 && *bptr == '-'){
-    bptr++;
-    bsiz--;
-    sign = -1;
-  }
-  for(int i = 0; i < bsiz; i++){
-    int c = bptr[i];
-    if(c < '0' || c > '9') continue;
-    bnum = bnum * 10 + c - '0';
-  }
-  bnum *= sign;
-  return (anum < bnum) ? -1 : anum > bnum;
-}
-
-
-/* Compare two keys as 32-bit integers in the native byte order. */
-int tcbdbcmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && bptr);
-  int32_t anum, bnum;
-  if(asiz == sizeof(int32_t)){
-    memcpy(&anum, aptr, sizeof(int32_t));
-  } else if(asiz < sizeof(int32_t)){
-    memset(&anum, 0, sizeof(int32_t));
-    memcpy(&anum, aptr, asiz);
-  } else {
-    memcpy(&anum, aptr, sizeof(int32_t));
-  }
-  if(bsiz == sizeof(int32_t)){
-    memcpy(&bnum, bptr, sizeof(int32_t));
-  } else if(bsiz < sizeof(int32_t)){
-    memset(&bnum, 0, sizeof(int32_t));
-    memcpy(&bnum, bptr, bsiz);
-  } else {
-    memcpy(&bnum, bptr, sizeof(int32_t));
-  }
-  return (anum < bnum) ? -1 : anum > bnum;
-}
-
-
-/* Compare two keys as 64-bit integers in the native byte order. */
-int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && bptr);
-  int64_t anum, bnum;
-  if(asiz == sizeof(int64_t)){
-    memcpy(&anum, aptr, sizeof(int64_t));
-  } else if(asiz < sizeof(int64_t)){
-    memset(&anum, 0, sizeof(int64_t));
-    memcpy(&anum, aptr, asiz);
-  } else {
-    memcpy(&anum, aptr, sizeof(int64_t));
-  }
-  if(bsiz == sizeof(int64_t)){
-    memcpy(&bnum, bptr, sizeof(int64_t));
-  } else if(bsiz < sizeof(int64_t)){
-    memset(&bnum, 0, sizeof(int64_t));
-    memcpy(&bnum, bptr, bsiz);
-  } else {
-    memcpy(&bnum, bptr, sizeof(int64_t));
-  }
-  return (anum < bnum) ? -1 : anum > bnum;
 }
 
 
@@ -1601,7 +1619,6 @@ static void tcbdbclear(TCBDB *bdb){
   assert(bdb);
   bdb->mmtx = NULL;
   bdb->cmtx = NULL;
-  bdb->tmtx = NULL;
   bdb->hdb = NULL;
   bdb->opaque = NULL;
   bdb->open = false;
@@ -1653,13 +1670,13 @@ static void tcdumpmeta(TCBDB *bdb){
   assert(bdb);
   memset(bdb->opaque, 0, 64);
   char *wp = bdb->opaque;
-  if(bdb->cmp == tcbdbcmplexical){
+  if(bdb->cmp == tccmplexical){
     *(uint8_t *)(wp++) = 0x0;
-  } else if(bdb->cmp == tcbdbcmpdecimal){
+  } else if(bdb->cmp == tccmpdecimal){
     *(uint8_t *)(wp++) = 0x1;
-  } else if(bdb->cmp == tcbdbcmpint32){
+  } else if(bdb->cmp == tccmpint32){
     *(uint8_t *)(wp++) = 0x2;
-  } else if(bdb->cmp == tcbdbcmpint64){
+  } else if(bdb->cmp == tccmpint64){
     *(uint8_t *)(wp++) = 0x3;
   } else {
     *(uint8_t *)(wp++) = 0xff;
@@ -1708,13 +1725,13 @@ static void tcloadmeta(TCBDB *bdb){
   const char *rp = bdb->opaque;
   uint8_t cnum = *(uint8_t *)(rp++);
   if(cnum == 0x0){
-    bdb->cmp = tcbdbcmplexical;
+    bdb->cmp = tccmplexical;
   } else if(cnum == 0x1){
-    bdb->cmp = tcbdbcmpdecimal;
+    bdb->cmp = tccmpdecimal;
   } else if(cnum == 0x2){
-    bdb->cmp = tcbdbcmpint32;
+    bdb->cmp = tccmpint32;
   } else if(cnum == 0x3){
-    bdb->cmp = tcbdbcmpint64;
+    bdb->cmp = tccmpint64;
   }
   rp += 7;
   uint32_t lnum;
@@ -1755,7 +1772,7 @@ static BDBLEAF *tcbdbleafnew(TCBDB *bdb, uint64_t prev, uint64_t next){
   assert(bdb);
   BDBLEAF lent;
   lent.id = ++bdb->lnum;
-  lent.recs = tclistnew2(bdb->lmemb + 1);
+  lent.recs = tcptrlistnew2(bdb->lmemb + 1);
   lent.prev = prev;
   lent.next = next;
   lent.dirty = true;
@@ -1774,15 +1791,14 @@ static bool tcbdbleafcacheout(TCBDB *bdb, BDBLEAF *leaf){
   assert(bdb && leaf);
   bool err = false;
   if(leaf->dirty && !tcbdbleafsave(bdb, leaf)) err = true;
-  TCLIST *recs = leaf->recs;
-  int ln = TCLISTNUM(recs);
+  TCPTRLIST *recs = leaf->recs;
+  int ln = TCPTRLISTNUM(recs);
   for(int i = 0; i < ln; i++){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-    TCFREE(recp->kbuf);
-    TCFREE(recp->vbuf);
-    if(recp->rest) tclistdel(recp->rest);
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    if(rec->rest) tclistdel(rec->rest);
+    TCFREE(rec);
   }
-  tclistdel(recs);
+  tcptrlistdel(recs);
   tcmapout(bdb->leafc, &(leaf->id), sizeof(leaf->id));
   return !err;
 }
@@ -1807,25 +1823,26 @@ static bool tcbdbleafsave(TCBDB *bdb, BDBLEAF *leaf){
   TCSETVNUMBUF64(step, wp, llnum);
   wp += step;
   TCXSTRCAT(rbuf, hbuf, wp - hbuf);
-  TCLIST *recs = leaf->recs;
-  int ln = TCLISTNUM(recs);
+  TCPTRLIST *recs = leaf->recs;
+  int ln = TCPTRLISTNUM(recs);
   for(int i = 0; i < ln; i++){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    char *dbuf = (char *)rec + sizeof(*rec);
     int lnum;
     wp = hbuf;
-    lnum = recp->ksiz;
+    lnum = rec->ksiz;
     TCSETVNUMBUF(step, wp, lnum);
     wp += step;
-    lnum = recp->vsiz;
+    lnum = rec->vsiz;
     TCSETVNUMBUF(step, wp, lnum);
     wp += step;
-    TCLIST *rest = recp->rest;
+    TCLIST *rest = rec->rest;
     int rnum = rest ? TCLISTNUM(rest) : 0;
     TCSETVNUMBUF(step, wp, rnum);
     wp += step;
     TCXSTRCAT(rbuf, hbuf, wp - hbuf);
-    TCXSTRCAT(rbuf, recp->kbuf, recp->ksiz);
-    TCXSTRCAT(rbuf, recp->vbuf, recp->vsiz);
+    TCXSTRCAT(rbuf, dbuf, rec->ksiz);
+    TCXSTRCAT(rbuf, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
     for(int j = 0; j < rnum; j++){
       int vsiz;
       const char *vbuf = tclistval(rest, j, &vsiz);
@@ -1893,34 +1910,42 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
   rsiz -= step;
   lent.dirty = false;
   lent.dead = false;
-  lent.recs = tclistnew2(bdb->lmemb + 1);
+  lent.recs = tcptrlistnew2(bdb->lmemb + 1);
   bool err = false;
   while(rsiz >= 3){
-    BDBREC rec;
-    TCREADVNUMBUF(rp, rec.ksiz, step);
+    int ksiz;
+    TCREADVNUMBUF(rp, ksiz, step);
     rp += step;
     rsiz -= step;
-    TCREADVNUMBUF(rp, rec.vsiz, step);
+    int vsiz;
+    TCREADVNUMBUF(rp, vsiz, step);
     rp += step;
     rsiz -= step;
     int rnum;
     TCREADVNUMBUF(rp, rnum, step);
     rp += step;
     rsiz -= step;
-    if(rsiz < rec.ksiz + rec.vsiz + rnum){
+    if(rsiz < ksiz + vsiz + rnum){
       err = true;
       break;
     }
-    TCMEMDUP(rec.kbuf, rp, rec.ksiz);
-    rp += rec.ksiz;
-    rsiz -= rec.ksiz;
-    TCMEMDUP(rec.vbuf, rp, rec.vsiz);
-    rp += rec.vsiz;
-    rsiz -= rec.vsiz;
+    int psiz = TCALIGNPAD(ksiz);
+    BDBREC *nrec;
+    TCMALLOC(nrec, sizeof(*nrec) + ksiz + psiz + vsiz + 1);
+    char *dbuf = (char *)nrec + sizeof(*nrec);
+    memcpy(dbuf, rp, ksiz);
+    dbuf[ksiz] = '\0';
+    nrec->ksiz = ksiz;
+    rp += ksiz;
+    rsiz -= ksiz;
+    memcpy(dbuf + ksiz + psiz, rp, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    nrec->vsiz = vsiz;
+    rp += vsiz;
+    rsiz -= vsiz;
     if(rnum > 0){
-      rec.rest = tclistnew2(rnum);
+      nrec->rest = tclistnew2(rnum);
       while(rnum-- > 0 && rsiz > 0){
-        int vsiz;
         TCREADVNUMBUF(rp, vsiz, step);
         rp += step;
         rsiz -= step;
@@ -1928,14 +1953,14 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
           err = true;
           break;
         }
-        TCLISTPUSH(rec.rest, rp, vsiz);
+        TCLISTPUSH(nrec->rest, rp, vsiz);
         rp += vsiz;
         rsiz -= vsiz;
       }
     } else {
-      rec.rest = NULL;
+      nrec->rest = NULL;
     }
-    TCLISTPUSH(lent.recs, &rec, sizeof(rec));
+    TCPTRLISTPUSH(lent.recs, nrec);
   }
   TCFREE(rbuf);
   if(err || rsiz != 0){
@@ -1944,14 +1969,13 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
   }
   clk = BDBLOCKCACHE(bdb);
   if(!tcmapputkeep(bdb->leafc, &(lent.id), sizeof(lent.id), &lent, sizeof(lent))){
-    int ln = TCLISTNUM(lent.recs);
+    int ln = TCPTRLISTNUM(lent.recs);
     for(int i = 0; i < ln; i++){
-      BDBREC *recp = (BDBREC *)TCLISTVALPTR(lent.recs, i);
-      TCFREE(recp->kbuf);
-      TCFREE(recp->vbuf);
-      if(recp->rest) tclistdel(recp->rest);
+      BDBREC *rec = TCPTRLISTVAL(lent.recs, i);
+      if(rec->rest) tclistdel(rec->rest);
+      TCFREE(rec);
     }
-    tclistdel(lent.recs);
+    tcptrlistdel(lent.recs);
   }
   leaf = (BDBLEAF *)tcmapget(bdb->leafc, &(lent.id), sizeof(lent.id), &rsiz);
   if(clk) BDBUNLOCKCACHE(bdb);
@@ -1963,27 +1987,30 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
    `bdb' specifies the B+ tree database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
+   `id' specifies the ID number of the historical leaf.
    If successful, the return value is the pointer to the leaf, else, it is `NULL'. */
-static BDBLEAF *tcbdbgethistleaf(TCBDB *bdb, const char *kbuf, int ksiz){
-  assert(bdb && kbuf && ksiz >= 0);
-  BDBLEAF *leaf = tcbdbleafload(bdb, bdb->hleaf);
+static BDBLEAF *tcbdbgethistleaf(TCBDB *bdb, const char *kbuf, int ksiz, uint64_t id){
+  assert(bdb && kbuf && ksiz >= 0 && id > 0);
+  BDBLEAF *leaf = tcbdbleafload(bdb, id);
   if(!leaf) return NULL;
-  int ln = TCLISTNUM(leaf->recs);
+  int ln = TCPTRLISTNUM(leaf->recs);
   if(ln < 2) return NULL;
-  BDBREC *recp = (BDBREC *)TCLISTVALPTR(leaf->recs, 0);
+  BDBREC *rec = TCPTRLISTVAL(leaf->recs, 0);
+  char *dbuf = (char *)rec + sizeof(*rec);
   int rv;
-  if(bdb->cmp == tcbdbcmplexical){
-    TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+  if(bdb->cmp == tccmplexical){
+    TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
   } else {
-    rv = bdb->cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, bdb->cmpop);
+    rv = bdb->cmp(kbuf, ksiz, dbuf, rec->ksiz, bdb->cmpop);
   }
   if(rv == 0) return leaf;
   if(rv < 0) return NULL;
-  recp = (BDBREC *)TCLISTVALPTR(leaf->recs, ln - 1);
-  if(bdb->cmp == tcbdbcmplexical){
-    TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+  rec = TCPTRLISTVAL(leaf->recs, ln - 1);
+  dbuf = (char *)rec + sizeof(*rec);
+  if(bdb->cmp == tccmplexical){
+    TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
   } else {
-    rv = bdb->cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, bdb->cmpop);
+    rv = bdb->cmp(kbuf, ksiz, dbuf, rec->ksiz, bdb->cmpop);
   }
   if(rv <= 0 || leaf->next < 1) return leaf;
   return NULL;
@@ -2002,20 +2029,21 @@ static BDBLEAF *tcbdbgethistleaf(TCBDB *bdb, const char *kbuf, int ksiz){
 static bool tcbdbleafaddrec(TCBDB *bdb, BDBLEAF *leaf, int dmode,
                             const char *kbuf, int ksiz, const char *vbuf, int vsiz){
   assert(bdb && leaf && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
-  BDBCMP cmp = bdb->cmp;
+  TCCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
-  TCLIST *recs = leaf->recs;
-  int ln = TCLISTNUM(recs);
+  TCPTRLIST *recs = leaf->recs;
+  int ln = TCPTRLISTNUM(recs);
   int left = 0;
   int right = ln;
   int i = (left + right) / 2;
   while(right >= left && i < ln){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    char *dbuf = (char *)rec + sizeof(*rec);
     int rv;
-    if(cmp == tcbdbcmplexical){
-      TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+    if(cmp == tccmplexical){
+      TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
     } else {
-      rv = cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, cmpop);
+      rv = cmp(kbuf, ksiz, dbuf, rec->ksiz, cmpop);
     }
     if(rv == 0){
       break;
@@ -2027,66 +2055,113 @@ static bool tcbdbleafaddrec(TCBDB *bdb, BDBLEAF *leaf, int dmode,
     i = (left + right) / 2;
   }
   while(i < ln){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    char *dbuf = (char *)rec + sizeof(*rec);
     int rv;
-    if(cmp == tcbdbcmplexical){
-      TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+    if(cmp == tccmplexical){
+      TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
     } else {
-      rv = cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, cmpop);
+      rv = cmp(kbuf, ksiz, dbuf, rec->ksiz, cmpop);
     }
     if(rv == 0){
+      int psiz = TCALIGNPAD(ksiz);
+      BDBREC *orec = rec;
       switch(dmode){
       case BDBPDKEEP:
         return false;
       case BDBPDCAT:
-        TCREALLOC(recp->vbuf, recp->vbuf, recp->vsiz + vsiz + 1);
-        memcpy(recp->vbuf + recp->vsiz, vbuf, vsiz);
-        recp->vsiz += vsiz;
-        recp->vbuf[recp->vsiz] = '\0';
+        TCREALLOC(rec, rec, sizeof(*rec) + rec->ksiz + psiz + rec->vsiz + vsiz + 1);
+        if(rec != orec){
+          tcptrlistover(recs, i, rec);
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+        memcpy(dbuf + ksiz + psiz + rec->vsiz, vbuf, vsiz);
+        rec->vsiz += vsiz;
+        dbuf[ksiz+psiz+rec->vsiz] = '\0';
         break;
       case BDBPDDUP:
-        if(!recp->rest) recp->rest = tclistnew();
-        TCLISTPUSH(recp->rest, vbuf, vsiz);
+        if(!rec->rest) rec->rest = tclistnew();
+        TCLISTPUSH(rec->rest, vbuf, vsiz);
         bdb->rnum++;
         break;
       case BDBPDDUPB:
-        if(!recp->rest) recp->rest = tclistnew();
-        tclistunshift(recp->rest, recp->vbuf, recp->vsiz);
-        if(vsiz > recp->vsiz) TCREALLOC(recp->vbuf, recp->vbuf, vsiz + 1);
-        memcpy(recp->vbuf, vbuf, vsiz);
-        recp->vbuf[vsiz] = '\0';
-        recp->vsiz = vsiz;
+        if(!rec->rest) rec->rest = tclistnew();
+        tclistunshift(rec->rest, dbuf + rec->ksiz + psiz, rec->vsiz);
+        if(vsiz > rec->vsiz){
+          TCREALLOC(rec, rec, sizeof(*rec) + rec->ksiz + psiz + vsiz + 1);
+          if(rec != orec){
+            tcptrlistover(recs, i, rec);
+            dbuf = (char *)rec + sizeof(*rec);
+          }
+        }
+        memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+        dbuf[ksiz+psiz+vsiz] = '\0';
+        rec->vsiz = vsiz;
         bdb->rnum++;
         break;
+      case BDBPDADDINT:
+        if(rec->vsiz != sizeof(int)) return false;
+        if(*(int *)vbuf == 0){
+          *(int *)vbuf = *(int *)(dbuf + ksiz + psiz);
+          return true;
+        }
+        *(int *)(dbuf + ksiz + psiz) += *(int *)vbuf;
+        *(int *)vbuf = *(int *)(dbuf + ksiz + psiz);
+        break;
+      case BDBPDADDDBL:
+        if(rec->vsiz != sizeof(double)) return false;
+        if(*(double *)vbuf == 0.0){
+          *(double *)vbuf = *(double *)(dbuf + ksiz + psiz);
+          return true;
+        }
+        *(double *)(dbuf + ksiz + psiz) += *(double *)vbuf;
+        *(double *)vbuf = *(double *)(dbuf + ksiz + psiz);
+        break;
       default:
-        if(vsiz > recp->vsiz) TCREALLOC(recp->vbuf, recp->vbuf, vsiz + 1);
-        memcpy(recp->vbuf, vbuf, vsiz);
-        recp->vbuf[vsiz] = '\0';
-        recp->vsiz = vsiz;
+        if(vsiz > rec->vsiz){
+          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+          if(rec != orec){
+            tcptrlistover(recs, i, rec);
+            dbuf = (char *)rec + sizeof(*rec);
+          }
+        }
+        memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+        dbuf[ksiz+psiz+vsiz] = '\0';
+        rec->vsiz = vsiz;
         break;
       }
       break;
     } else if(rv < 0){
-      BDBREC rec;
-      TCMEMDUP(rec.kbuf, kbuf, ksiz);
-      rec.ksiz = ksiz;
-      TCMEMDUP(rec.vbuf, vbuf, vsiz);
-      rec.vsiz = vsiz;
-      rec.rest = NULL;
-      tclistinsert(recs, i, &rec, sizeof(rec));
+      int psiz = TCALIGNPAD(ksiz);
+      BDBREC *nrec;
+      TCMALLOC(nrec, sizeof(*nrec) + ksiz + psiz + vsiz + 1);
+      char *dbuf = (char *)nrec + sizeof(*nrec);
+      memcpy(dbuf, kbuf, ksiz);
+      dbuf[ksiz] = '\0';
+      nrec->ksiz = ksiz;
+      memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+      dbuf[ksiz+psiz+vsiz] = '\0';
+      nrec->vsiz = vsiz;
+      nrec->rest = NULL;
+      TCPTRLISTINSERT(recs, i, nrec);
       bdb->rnum++;
       break;
     }
     i++;
   }
   if(i >= ln){
-    BDBREC rec;
-    TCMEMDUP(rec.kbuf, kbuf, ksiz);
-    rec.ksiz = ksiz;
-    TCMEMDUP(rec.vbuf, vbuf, vsiz);
-    rec.vsiz = vsiz;
-    rec.rest = NULL;
-    TCLISTPUSH(recs, &rec, sizeof(rec));
+    int psiz = TCALIGNPAD(ksiz);
+    BDBREC *nrec;
+    TCMALLOC(nrec, sizeof(*nrec) + ksiz + psiz + vsiz + 1);
+    char *dbuf = (char *)nrec + sizeof(*nrec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    nrec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    nrec->vsiz = vsiz;
+    nrec->rest = NULL;
+    TCPTRLISTPUSH(recs, nrec);
     bdb->rnum++;
   }
   leaf->dirty = true;
@@ -2101,18 +2176,16 @@ static bool tcbdbleafaddrec(TCBDB *bdb, BDBLEAF *leaf, int dmode,
 static int tcbdbleafdatasize(BDBLEAF *leaf){
   assert(leaf);
   int sum = 0;
-  TCLIST *recs = leaf->recs;
-  int ln = TCLISTNUM(recs);
+  TCPTRLIST *recs = leaf->recs;
+  int ln = TCPTRLISTNUM(recs);
   for(int i = 0; i < ln; i++){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-    sum += recp->ksiz + recp->vsiz;
-    if(recp->rest){
-      TCLIST *rest = recp->rest;
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    sum += rec->ksiz + rec->vsiz;
+    if(rec->rest){
+      TCLIST *rest = rec->rest;
       int rnum = TCLISTNUM(rest);
       for(int j = 0; j < rnum; j++){
-        int vsiz;
-        tclistval(rest, j, &vsiz);
-        sum += vsiz;
+        sum += TCLISTVALSIZ(rest, j);
       }
     }
   }
@@ -2127,9 +2200,8 @@ static int tcbdbleafdatasize(BDBLEAF *leaf){
 static BDBLEAF *tcbdbleafdivide(TCBDB *bdb, BDBLEAF *leaf){
   assert(bdb && leaf);
   bdb->hleaf = 0;
-  TCLIST *recs = leaf->recs;
-  int mid = TCLISTNUM(recs) / 2;
-  BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, mid);
+  TCPTRLIST *recs = leaf->recs;
+  int mid = TCPTRLISTNUM(recs) / 2;
   BDBLEAF *newleaf = tcbdbleafnew(bdb, leaf->id, leaf->next);
   if(newleaf->next > 0){
     BDBLEAF *nextleaf = tcbdbleafload(bdb, newleaf->next);
@@ -2139,17 +2211,12 @@ static BDBLEAF *tcbdbleafdivide(TCBDB *bdb, BDBLEAF *leaf){
   }
   leaf->next = newleaf->id;
   leaf->dirty = true;
-  int ln = TCLISTNUM(recs);
-  TCLIST *newrecs = newleaf->recs;
+  int ln = TCPTRLISTNUM(recs);
+  TCPTRLIST *newrecs = newleaf->recs;
   for(int i = mid; i < ln; i++){
-    recp = (BDBREC *)TCLISTVALPTR(recs, i);
-    TCLISTPUSH(newrecs, recp, sizeof(*recp));
+    TCPTRLISTPUSH(newrecs, TCPTRLISTVAL(recs, i));
   }
-  ln = TCLISTNUM(newrecs);
-  for(int i = 0; i < ln; i++){
-    int rsiz;
-    TCFREE(tclistpop(recs, &rsiz));
-  }
+  TCPTRLISTTRUNC(recs, TCPTRLISTNUM(recs) - TCPTRLISTNUM(newrecs));
   return newleaf;
 }
 
@@ -2193,7 +2260,7 @@ static BDBNODE *tcbdbnodenew(TCBDB *bdb, uint64_t heir){
   assert(bdb && heir > 0);
   BDBNODE nent;
   nent.id = ++bdb->nnum + BDBNODEIDBASE;
-  nent.idxs = tclistnew2(bdb->nmemb + 1);
+  nent.idxs = tcptrlistnew2(bdb->nmemb + 1);
   nent.heir = heir;
   nent.dirty = true;
   tcmapputkeep(bdb->nodec, &(nent.id), sizeof(nent.id), &nent, sizeof(nent));
@@ -2210,13 +2277,13 @@ static bool tcbdbnodecacheout(TCBDB *bdb, BDBNODE *node){
   assert(bdb && node);
   bool err = false;
   if(node->dirty && !tcbdbnodesave(bdb, node)) err = true;
-  TCLIST *idxs = node->idxs;
-  int ln = TCLISTNUM(idxs);
+  TCPTRLIST *idxs = node->idxs;
+  int ln = TCPTRLISTNUM(idxs);
   for(int i = 0; i < ln; i++){
-    BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-    TCFREE(idxp->kbuf);
+    BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+    TCFREE(idx);
   }
-  tclistdel(idxs);
+  tcptrlistdel(idxs);
   tcmapout(bdb->nodec, &(node->id), sizeof(node->id));
   return !err;
 }
@@ -2236,19 +2303,20 @@ static bool tcbdbnodesave(TCBDB *bdb, BDBNODE *node){
   llnum = node->heir;
   TCSETVNUMBUF64(step, hbuf, llnum);
   TCXSTRCAT(rbuf, hbuf, step);
-  TCLIST *idxs = node->idxs;
-  int ln = TCLISTNUM(idxs);
+  TCPTRLIST *idxs = node->idxs;
+  int ln = TCPTRLISTNUM(idxs);
   for(int i = 0; i < ln; i++){
-    BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
+    BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+    char *ebuf = (char *)idx + sizeof(*idx);
     char *wp = hbuf;
-    llnum = idxp->pid;
+    llnum = idx->pid;
     TCSETVNUMBUF64(step, wp, llnum);
     wp += step;
-    uint32_t lnum = idxp->ksiz;
+    uint32_t lnum = idx->ksiz;
     TCSETVNUMBUF(step, wp, lnum);
     wp += step;
     TCXSTRCAT(rbuf, hbuf, wp - hbuf);
-    TCXSTRCAT(rbuf, idxp->kbuf, idxp->ksiz);
+    TCXSTRCAT(rbuf, ebuf, idx->ksiz);
   }
   bool err = false;
   step = sprintf(hbuf, "#%llx", (unsigned long long)(node->id - BDBNODEIDBASE));
@@ -2301,24 +2369,31 @@ static BDBNODE *tcbdbnodeload(TCBDB *bdb, uint64_t id){
   rp += step;
   rsiz -= step;
   nent.dirty = false;
-  nent.idxs = tclistnew2(bdb->nmemb + 1);
+  nent.idxs = tcptrlistnew2(bdb->nmemb + 1);
   bool err = false;
   while(rsiz >= 2){
-    BDBIDX idx;
-    TCREADVNUMBUF64(rp, idx.pid, step);
+    uint64_t pid;
+    TCREADVNUMBUF64(rp, pid, step);
     rp += step;
     rsiz -= step;
-    TCREADVNUMBUF(rp, idx.ksiz, step);
+    int ksiz;
+    TCREADVNUMBUF(rp, ksiz, step);
     rp += step;
     rsiz -= step;
-    if(rsiz < idx.ksiz){
+    if(rsiz < ksiz){
       err = true;
       break;
     }
-    TCMEMDUP(idx.kbuf, rp, idx.ksiz);
-    rp += idx.ksiz;
-    rsiz -= idx.ksiz;
-    TCLISTPUSH(nent.idxs, &idx, sizeof(idx));
+    BDBIDX *nidx;
+    TCMALLOC(nidx, sizeof(*nidx) + ksiz + 1);
+    nidx->pid = pid;
+    char *ebuf = (char *)nidx + sizeof(*nidx);
+    memcpy(ebuf, rp, ksiz);
+    ebuf[ksiz] = '\0';
+    nidx->ksiz = ksiz;
+    rp += ksiz;
+    rsiz -= ksiz;
+    TCPTRLISTPUSH(nent.idxs, nidx);
   }
   TCFREE(rbuf);
   if(err || rsiz != 0){
@@ -2327,12 +2402,12 @@ static BDBNODE *tcbdbnodeload(TCBDB *bdb, uint64_t id){
   }
   clk = BDBLOCKCACHE(bdb);
   if(!tcmapputkeep(bdb->nodec, &(nent.id), sizeof(nent.id), &nent, sizeof(nent))){
-    int ln = TCLISTNUM(nent.idxs);
+    int ln = TCPTRLISTNUM(nent.idxs);
     for(int i = 0; i < ln; i++){
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(nent.idxs, i);
-      TCFREE(idxp->kbuf);
+      BDBIDX *idx = TCPTRLISTVAL(nent.idxs, i);
+      TCFREE(idx);
     }
-    tclistdel(nent.idxs);
+    tcptrlistdel(nent.idxs);
   }
   node = (BDBNODE *)tcmapget(bdb->nodec, &(nent.id), sizeof(nent.id), &rsiz);
   if(clk) BDBUNLOCKCACHE(bdb);
@@ -2350,27 +2425,31 @@ static BDBNODE *tcbdbnodeload(TCBDB *bdb, uint64_t id){
 static void tcbdbnodeaddidx(TCBDB *bdb, BDBNODE *node, bool order, uint64_t pid,
                             const char *kbuf, int ksiz){
   assert(bdb && node && pid > 0 && kbuf && ksiz >= 0);
-  BDBIDX idx;
-  idx.pid = pid;
-  TCMEMDUP(idx.kbuf, kbuf, ksiz);
-  idx.ksiz = ksiz;
-  BDBCMP cmp = bdb->cmp;
+  BDBIDX *nidx;
+  TCMALLOC(nidx, sizeof(*nidx) + ksiz + 1);
+  nidx->pid = pid;
+  char *ebuf = (char *)nidx + sizeof(*nidx);
+  memcpy(ebuf, kbuf, ksiz);
+  ebuf[ksiz] = '\0';
+  nidx->ksiz = ksiz;
+  TCCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
-  TCLIST *idxs = node->idxs;
+  TCPTRLIST *idxs = node->idxs;
   if(order){
-    TCLISTPUSH(idxs, &idx, sizeof(idx));
+    TCPTRLISTPUSH(idxs, nidx);
   } else {
-    int ln = TCLISTNUM(idxs);
+    int ln = TCPTRLISTNUM(idxs);
     int left = 0;
     int right = ln;
     int i = (left + right) / 2;
     while(right >= left && i < ln){
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
+      BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+      char *ebuf = (char *)idx + sizeof(*idx);
       int rv;
-      if(cmp == tcbdbcmplexical){
-        TCCMPLEXICAL(rv, kbuf, ksiz, idxp->kbuf, idxp->ksiz);
+      if(cmp == tccmplexical){
+        TCCMPLEXICAL(rv, kbuf, ksiz, ebuf, idx->ksiz);
       } else {
-        rv = cmp(kbuf, ksiz, idxp->kbuf, idxp->ksiz, cmpop);
+        rv = cmp(kbuf, ksiz, ebuf, idx->ksiz, cmpop);
       }
       if(rv == 0){
         break;
@@ -2382,20 +2461,21 @@ static void tcbdbnodeaddidx(TCBDB *bdb, BDBNODE *node, bool order, uint64_t pid,
       i = (left + right) / 2;
     }
     while(i < ln){
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
+      BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+      char *ebuf = (char *)idx + sizeof(*idx);
       int rv;
-      if(cmp == tcbdbcmplexical){
-        TCCMPLEXICAL(rv, kbuf, ksiz, idxp->kbuf, idxp->ksiz);
+      if(cmp == tccmplexical){
+        TCCMPLEXICAL(rv, kbuf, ksiz, ebuf, idx->ksiz);
       } else {
-        rv = cmp(kbuf, ksiz, idxp->kbuf, idxp->ksiz, cmpop);
+        rv = cmp(kbuf, ksiz, ebuf, idx->ksiz, cmpop);
       }
       if(rv < 0){
-        tclistinsert(idxs, i, &idx, sizeof(idx));
+        TCPTRLISTINSERT(idxs, i, nidx);
         break;
       }
       i++;
     }
-    if(i >= ln) TCLISTPUSH(idxs, &idx, sizeof(idx));
+    if(i >= ln) TCPTRLISTPUSH(idxs, nidx);
   }
   node->dirty = true;
 }
@@ -2408,25 +2488,21 @@ static void tcbdbnodeaddidx(TCBDB *bdb, BDBNODE *node, bool order, uint64_t pid,
    The return value is whether the subtraction is completed. */
 static bool tcbdbnodesubidx(TCBDB *bdb, BDBNODE *node, uint64_t pid){
   assert(bdb && node && pid > 0);
-  TCLIST *idxs = node->idxs;
-  int ln = TCLISTNUM(idxs);
+  TCPTRLIST *idxs = node->idxs;
+  int ln = TCPTRLISTNUM(idxs);
   if(ln < 2) return false;
   if(node->heir == pid){
-    int rsiz;
-    BDBIDX *idxp = (BDBIDX *)tclistshift(idxs, &rsiz);
-    node->heir = idxp->pid;
-    TCFREE(idxp->kbuf);
-    TCFREE(idxp);
+    BDBIDX *idx = tcptrlistshift(idxs);
+    node->heir = idx->pid;
+    TCFREE(idx);
     node->dirty = true;
     return true;
   } else {
-    int ln = TCLISTNUM(idxs);
+    int ln = TCPTRLISTNUM(idxs);
     for(int i = 0; i < ln; i++){
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-      if(idxp->pid == pid){
-        int rsiz;
-        TCFREE(idxp->kbuf);
-        TCFREE(tclistremove(idxs, i, &rsiz));
+      BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+      if(idx->pid == pid){
+        TCFREE(tcptrlistremove(idxs, i));
         node->dirty = true;
         return true;
       }
@@ -2443,7 +2519,7 @@ static bool tcbdbnodesubidx(TCBDB *bdb, BDBNODE *node, uint64_t pid){
    The return value is the ID number of the leaf object or 0 on failure. */
 static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
-  BDBCMP cmp = bdb->cmp;
+  TCCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
   uint64_t *hist = bdb->hist;
   uint64_t pid = bdb->root;
@@ -2455,8 +2531,8 @@ static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
       tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return 0;
     }
-    TCLIST *idxs = node->idxs;
-    int ln = TCLISTNUM(idxs);
+    TCPTRLIST *idxs = node->idxs;
+    int ln = TCPTRLISTNUM(idxs);
     if(ln < 1){
       tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return 0;
@@ -2465,14 +2541,15 @@ static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
     int left = 0;
     int right = ln;
     int i = (left + right) / 2;
-    BDBIDX *idxp = NULL;
+    BDBIDX *idx = NULL;
     while(right >= left && i < ln){
-      idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
+      idx = TCPTRLISTVAL(idxs, i);
+      char *ebuf = (char *)idx + sizeof(*idx);
       int rv;
-      if(cmp == tcbdbcmplexical){
-        TCCMPLEXICAL(rv, kbuf, ksiz, idxp->kbuf, idxp->ksiz);
+      if(cmp == tccmplexical){
+        TCCMPLEXICAL(rv, kbuf, ksiz, ebuf, idx->ksiz);
       } else {
-        rv = cmp(kbuf, ksiz, idxp->kbuf, idxp->ksiz, cmpop);
+        rv = cmp(kbuf, ksiz, ebuf, idx->ksiz, cmpop);
       }
       if(rv == 0){
         break;
@@ -2485,30 +2562,29 @@ static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
     }
     if(i > 0) i--;
     while(i < ln){
-      idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
+      idx = TCPTRLISTVAL(idxs, i);
+      char *ebuf = (char *)idx + sizeof(*idx);
       int rv;
-      if(cmp == tcbdbcmplexical){
-        TCCMPLEXICAL(rv, kbuf, ksiz, idxp->kbuf, idxp->ksiz);
+      if(cmp == tccmplexical){
+        TCCMPLEXICAL(rv, kbuf, ksiz, ebuf, idx->ksiz);
       } else {
-        rv = cmp(kbuf, ksiz, idxp->kbuf, idxp->ksiz, cmpop);
+        rv = cmp(kbuf, ksiz, ebuf, idx->ksiz, cmpop);
       }
       if(rv < 0){
         if(i == 0){
           pid = node->heir;
           break;
         }
-        idxp = (BDBIDX *)TCLISTVALPTR(idxs, i - 1);
-        pid = idxp->pid;
+        idx = TCPTRLISTVAL(idxs, i - 1);
+        pid = idx->pid;
         break;
       }
       i++;
     }
-    if(i >= ln) pid = idxp->pid;
+    if(i >= ln) pid = idx->pid;
   }
-  if(!bdb->mmtx){
-    if(bdb->lleaf == pid) bdb->hleaf = pid;
-    bdb->lleaf = pid;
-  }
+  if(bdb->lleaf == pid) bdb->hleaf = pid;
+  bdb->lleaf = pid;
   bdb->hnum = hnum;
   return pid;
 }
@@ -2523,24 +2599,25 @@ static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
    The return value is the pointer to a corresponding record or `NULL' on failure. */
 static BDBREC *tcbdbsearchrec(TCBDB *bdb, BDBLEAF *leaf, const char *kbuf, int ksiz, int *ip){
   assert(bdb && leaf && kbuf && ksiz >= 0);
-  BDBCMP cmp = bdb->cmp;
+  TCCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
-  TCLIST *recs = leaf->recs;
-  int ln = TCLISTNUM(recs);
+  TCPTRLIST *recs = leaf->recs;
+  int ln = TCPTRLISTNUM(recs);
   int left = 0;
   int right = ln;
   int i = (left + right) / 2;
   while(right >= left && i < ln){
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    char *dbuf = (char *)rec + sizeof(*rec);
     int rv;
-    if(cmp == tcbdbcmplexical){
-      TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+    if(cmp == tccmplexical){
+      TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
     } else {
-      rv = cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, cmpop);
+      rv = cmp(kbuf, ksiz, dbuf, rec->ksiz, cmpop);
     }
     if(rv == 0){
       if(ip) *ip = i;
-      return recp;
+      return rec;
     } else if(rv <= 0){
       right = i - 1;
     } else {
@@ -2599,15 +2676,14 @@ static void tcbdbcachepurge(TCBDB *bdb){
     int lsiz;
     BDBLEAF *leaf = (BDBLEAF *)tcmapiterval(tmp, &lsiz);
     if(!leaf->dirty) continue;
-    TCLIST *recs = leaf->recs;
-    int ln = TCLISTNUM(recs);
+    TCPTRLIST *recs = leaf->recs;
+    int ln = TCPTRLISTNUM(recs);
     for(int i = 0; i < ln; i++){
-      BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-      TCFREE(recp->kbuf);
-      TCFREE(recp->vbuf);
-      if(recp->rest) tclistdel(recp->rest);
+      BDBREC *rec = TCPTRLISTVAL(recs, i);
+      if(rec->rest) tclistdel(rec->rest);
+      TCFREE(rec);
     }
-    tclistdel(recs);
+    tcptrlistdel(recs);
     tcmapout(bdb->leafc, tmp, tsiz);
   }
   tcmapiterinit(bdb->nodec);
@@ -2615,13 +2691,13 @@ static void tcbdbcachepurge(TCBDB *bdb){
     int nsiz;
     BDBNODE *node = (BDBNODE *)tcmapiterval(tmp, &nsiz);
     if(!node->dirty) continue;
-    TCLIST *idxs = node->idxs;
-    int ln = TCLISTNUM(idxs);
+    TCPTRLIST *idxs = node->idxs;
+    int ln = TCPTRLISTNUM(idxs);
     for(int i = 0; i < ln; i++){
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-      TCFREE(idxp->kbuf);
+      BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+      TCFREE(idx);
     }
-    tclistdel(idxs);
+    tcptrlistdel(idxs);
     tcmapout(bdb->nodec, tmp, tsiz);
   }
   if(clk) BDBUNLOCKCACHE(bdb);
@@ -2646,6 +2722,7 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
   }
   if(omode & BDBONOLCK) homode |= HDBONOLCK;
   if(omode & BDBOLCKNB) homode |= HDBOLCKNB;
+  if(omode & BDBOTSYNC) homode |= HDBOTSYNC;
   tchdbsettype(bdb->hdb, TCDBTBTREE);
   if(!tchdbopen(bdb->hdb, path, homode)) return false;
   bdb->root = 0;
@@ -2666,7 +2743,7 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
     bdb->nnum = 0;
     bdb->rnum = 0;
     if(!bdb->cmp){
-      bdb->cmp = tcbdbcmplexical;
+      bdb->cmp = tccmplexical;
       bdb->cmpop = NULL;
     }
     tcdumpmeta(bdb);
@@ -2699,7 +2776,9 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
   uint8_t opts = 0;
   if(hopts & HDBTLARGE) opts |= BDBTLARGE;
   if(hopts & HDBTDEFLATE) opts |= BDBTDEFLATE;
+  if(hopts & HDBTBZIP) opts |= BDBTBZIP;
   if(hopts & HDBTTCBS) opts |= BDBTTCBS;
+  if(hopts & HDBTEXCODEC) opts |= BDBTEXCODEC;
   bdb->opts = opts;
   bdb->hleaf = 0;
   bdb->lleaf = 0;
@@ -2714,6 +2793,7 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
    If successful, the return value is true, else, it is false. */
 static bool tcbdbcloseimpl(TCBDB *bdb){
   assert(bdb);
+  bool err = false;
   if(bdb->tran){
     tcbdbcachepurge(bdb);
     memcpy(bdb->opaque, bdb->rbopaque, BDBOPAQUESIZ);
@@ -2721,9 +2801,8 @@ static bool tcbdbcloseimpl(TCBDB *bdb){
     TCFREE(bdb->rbopaque);
     bdb->tran = false;
     bdb->rbopaque = NULL;
-    BDBUNLOCKTRAN(bdb);
+    if(!tchdbtranvoid(bdb->hdb)) err = true;
   }
-  bool err = false;
   bdb->open = false;
   const char *vbuf;
   int vsiz;
@@ -2757,29 +2836,33 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
                          int dmode){
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return false;
     if(!(leaf = tcbdbleafload(bdb, pid))) return false;
+    hlid = 0;
   }
   if(!tcbdbleafaddrec(bdb, leaf, dmode, kbuf, ksiz, vbuf, vsiz)){
     tcbdbsetecode(bdb, TCEKEEP, __FILE__, __LINE__, __func__);
     return false;
   }
-  int rnum = TCLISTNUM(leaf->recs);
+  int rnum = TCPTRLISTNUM(leaf->recs);
   if(rnum > bdb->lmemb ||
      (bdb->lsmax > 0 && rnum > BDBMINLMEMB && (bdb->lschk++ & (0x8 - 1)) == 0 &&
       tcbdbleafdatasize(leaf) > bdb->lsmax)){
+    if(hlid > 0 && hlid != tcbdbsearchleaf(bdb, kbuf, ksiz)) return false;
     bdb->lschk = 0;
     BDBLEAF *newleaf = tcbdbleafdivide(bdb, leaf);
     if(!newleaf) return false;
     if(leaf->id == bdb->last) bdb->last = newleaf->id;
     uint64_t heir = leaf->id;
     uint64_t pid = newleaf->id;
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(newleaf->recs, 0);
-    int ksiz = recp->ksiz;
+    BDBREC *rec = TCPTRLISTVAL(newleaf->recs, 0);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int ksiz = rec->ksiz;
     char *kbuf;
-    TCMEMDUP(kbuf, recp->kbuf, ksiz);
+    TCMEMDUP(kbuf, dbuf, ksiz);
     while(true){
       BDBNODE *node;
       if(bdb->hnum < 1){
@@ -2796,26 +2879,26 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
       }
       tcbdbnodeaddidx(bdb, node, false, pid, kbuf, ksiz);
       TCFREE(kbuf);
-      TCLIST *idxs = node->idxs;
-      int ln = TCLISTNUM(idxs);
+      TCPTRLIST *idxs = node->idxs;
+      int ln = TCPTRLISTNUM(idxs);
       if(ln <= bdb->nmemb) break;
       int mid = ln / 2;
-      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, mid);
-      BDBNODE *newnode = tcbdbnodenew(bdb, idxp->pid);
+      BDBIDX *idx = TCPTRLISTVAL(idxs, mid);
+      BDBNODE *newnode = tcbdbnodenew(bdb, idx->pid);
       heir = node->id;
       pid = newnode->id;
-      TCMEMDUP(kbuf, idxp->kbuf, idxp->ksiz);
-      ksiz = idxp->ksiz;
+      char *ebuf = (char *)idx + sizeof(*idx);
+      TCMEMDUP(kbuf, ebuf, idx->ksiz);
+      ksiz = idx->ksiz;
       for(int i = mid + 1; i < ln; i++){
-        idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-        tcbdbnodeaddidx(bdb, newnode, true, idxp->pid, idxp->kbuf, idxp->ksiz);
+        idx = TCPTRLISTVAL(idxs, i);
+        char *ebuf = (char *)idx + sizeof(*idx);
+        tcbdbnodeaddidx(bdb, newnode, true, idx->pid, ebuf, idx->ksiz);
       }
-      ln = TCLISTNUM(newnode->idxs);
+      ln = TCPTRLISTNUM(newnode->idxs);
       for(int i = 0; i < ln; i++){
-        int rsiz;
-        idxp = (BDBIDX *)tclistpop(idxs, &rsiz);
-        TCFREE(idxp->kbuf);
-        TCFREE(idxp);
+        idx = tcptrlistpop(idxs);
+        TCFREE(idx);
       }
       node->dirty = true;
     }
@@ -2838,40 +2921,53 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
 
 
 /* Remove a record of a B+ tree database object.
-   `hdb' specifies the B+ tree database object.
+   `bdb' specifies the B+ tree database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
    If successful, the return value is true, else, it is false. */
 static bool tcbdboutimpl(TCBDB *bdb, const char *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return false;
     if(!(leaf = tcbdbleafload(bdb, pid))) return false;
+    hlid = 0;
   }
   int ri;
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
-  if(!recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
+  if(!rec){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  if(recp->rest){
-    TCFREE(recp->vbuf);
-    recp->vbuf = tclistshift(recp->rest, &(recp->vsiz));
-    if(TCLISTNUM(recp->rest) < 1){
-      tclistdel(recp->rest);
-      recp->rest = NULL;
+  if(rec->rest){
+    int vsiz;
+    char *vbuf = tclistshift(rec->rest, &vsiz);
+    int psiz = TCALIGNPAD(rec->ksiz);
+    if(vsiz > rec->vsiz){
+      BDBREC *orec = rec;
+      TCREALLOC(rec, rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+      if(rec != orec) tcptrlistover(leaf->recs, ri, rec);
+    }
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    TCFREE(vbuf);
+    if(TCLISTNUM(rec->rest) < 1){
+      tclistdel(rec->rest);
+      rec->rest = NULL;
     }
   } else {
-    TCFREE(recp->vbuf);
-    TCFREE(recp->kbuf);
-    int rsiz;
-    TCFREE(tclistremove(leaf->recs, ri, &rsiz));
+    TCFREE(tcptrlistremove(leaf->recs, ri));
   }
   leaf->dirty = true;
   bdb->rnum--;
-  if(TCLISTNUM(leaf->recs) < 1 && bdb->hnum > 0 && !tcbdbleafkill(bdb, leaf)) return false;
+  if(TCPTRLISTNUM(leaf->recs) < 1){
+    if(hlid > 0 && hlid != tcbdbsearchleaf(bdb, kbuf, ksiz)) return false;
+    if(bdb->hnum > 0 && !tcbdbleafkill(bdb, leaf)) return false;
+  }
   if(!bdb->tran && !tcbdbcacheadjust(bdb)) return false;
   return true;
 }
@@ -2885,29 +2981,30 @@ static bool tcbdboutimpl(TCBDB *bdb, const char *kbuf, int ksiz){
 static bool tcbdboutlist(TCBDB *bdb, const char *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return false;
     if(!(leaf = tcbdbleafload(bdb, pid))) return false;
   }
   int ri;
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
-  if(!recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
+  if(!rec){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   int rnum = 1;
-  if(recp->rest){
-    rnum += TCLISTNUM(recp->rest);
-    tclistdel(recp->rest);
+  if(rec->rest){
+    rnum += TCLISTNUM(rec->rest);
+    tclistdel(rec->rest);
   }
-  TCFREE(recp->vbuf);
-  TCFREE(recp->kbuf);
-  int rsiz;
-  TCFREE(tclistremove(leaf->recs, ri, &rsiz));
+  TCFREE(tcptrlistremove(leaf->recs, ri));
   leaf->dirty = true;
   bdb->rnum -= rnum;
-  if(TCLISTNUM(leaf->recs) < 1 && bdb->hnum > 0 && !tcbdbleafkill(bdb, leaf)) return false;
+  if(TCPTRLISTNUM(leaf->recs) < 1){
+    if(hlid > 0 && hlid != tcbdbsearchleaf(bdb, kbuf, ksiz)) return false;
+    if(bdb->hnum > 0 && !tcbdbleafkill(bdb, leaf)) return false;
+  }
   if(!bdb->tran && !tcbdbcacheadjust(bdb)) return false;
   return true;
 }
@@ -2924,18 +3021,19 @@ static bool tcbdboutlist(TCBDB *bdb, const char *kbuf, int ksiz){
 static const char *tcbdbgetimpl(TCBDB *bdb, const char *kbuf, int ksiz, int *sp){
   assert(bdb && kbuf && ksiz >= 0 && sp);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return NULL;
     if(!(leaf = tcbdbleafload(bdb, pid))) return NULL;
   }
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
-  if(!recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
+  if(!rec){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return NULL;
   }
-  *sp = recp->vsiz;
-  return recp->vbuf;
+  *sp = rec->vsiz;
+  return (char *)rec + sizeof(*rec) + rec->ksiz + TCALIGNPAD(rec->ksiz);
 }
 
 
@@ -2947,17 +3045,18 @@ static const char *tcbdbgetimpl(TCBDB *bdb, const char *kbuf, int ksiz, int *sp)
 static int tcbdbgetnum(TCBDB *bdb, const char *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return 0;
     if(!(leaf = tcbdbleafload(bdb, pid))) return 0;
   }
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
-  if(!recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
+  if(!rec){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return 0;
   }
-  return recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
+  return rec->rest ? TCLISTNUM(rec->rest) + 1 : 1;
 }
 
 
@@ -2969,22 +3068,23 @@ static int tcbdbgetnum(TCBDB *bdb, const char *kbuf, int ksiz){
 static TCLIST *tcbdbgetlist(TCBDB *bdb, const char *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   BDBLEAF *leaf = NULL;
-  if(bdb->hleaf < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz))){
+  uint64_t hlid = bdb->hleaf;
+  if(hlid < 1 || !(leaf = tcbdbgethistleaf(bdb, kbuf, ksiz, hlid))){
     uint64_t pid = tcbdbsearchleaf(bdb, kbuf, ksiz);
     if(pid < 1) return NULL;
     if(!(leaf = tcbdbleafload(bdb, pid))) return NULL;
   }
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
-  if(!recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
+  if(!rec){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return NULL;
   }
   TCLIST *vals;
-  TCLIST *rest = recp->rest;
+  TCLIST *rest = rec->rest;
   if(rest){
     int ln = TCLISTNUM(rest);
     vals = tclistnew2(ln + 1);
-    TCLISTPUSH(vals, recp->vbuf, recp->vsiz);
+    TCLISTPUSH(vals, (char *)rec + sizeof(*rec) + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
     for(int i = 0; i < ln; i++){
       int vsiz;
       const char *vbuf = tclistval(rest, i, &vsiz);
@@ -2992,7 +3092,7 @@ static TCLIST *tcbdbgetlist(TCBDB *bdb, const char *kbuf, int ksiz){
     }
   } else {
     vals = tclistnew2(1);
-    TCLISTPUSH(vals, recp->vbuf, recp->vsiz);
+    TCLISTPUSH(vals, (char *)rec + sizeof(*rec) + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
   }
   return vals;
 }
@@ -3019,7 +3119,7 @@ static bool tcbdbrangeimpl(TCBDB *bdb, const char *bkbuf, int bksiz, bool binc,
   } else {
     tcbdbcurfirstimpl(cur);
   }
-  BDBCMP cmp = bdb->cmp;
+  TCCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
   const char *lbuf = NULL;
   int lsiz = 0;
@@ -3113,6 +3213,10 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   char *tpath = tcsprintf("%s%ctmp%c%llu", path, MYEXTCHR, MYEXTCHR, tchdbinode(bdb->hdb));
   TCBDB *tbdb = tcbdbnew();
   tcbdbsetcmpfunc(tbdb, bdb->cmp, bdb->cmpop);
+  TCCODEC enc, dec;
+  void *encop, *decop;
+  tchdbcodecfunc(bdb->hdb, &enc, &encop, &dec, &decop);
+  if(enc && dec) tcbdbsetcodecfunc(tbdb, enc, encop, dec, decop);
   tcbdbtune(tbdb, lmemb, nmemb, bnum, apow, fpow, opts);
   tcbdbsetlsmax(tbdb, bdb->lsmax);
   if(!tcbdbopen(tbdb, tpath, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
@@ -3121,6 +3225,7 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
     TCFREE(tpath);
     return false;
   }
+  memcpy(tcbdbopaque(tbdb), tcbdbopaque(bdb), BDBLEFTOPQSIZ);
   bool err = false;
   BDBCUR *cur = tcbdbcurnew(bdb);
   tcbdbcurfirstimpl(cur);
@@ -3192,7 +3297,7 @@ static bool tcbdblockmethod(TCBDB *bdb, bool wr){
 
 
 /* Unlock a method of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
+   `bdb' specifies the B+ tree database object.
    If successful, the return value is true, else, it is false. */
 static bool tcbdbunlockmethod(TCBDB *bdb){
   assert(bdb);
@@ -3206,7 +3311,7 @@ static bool tcbdbunlockmethod(TCBDB *bdb){
 
 
 /* Lock the cache of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
+   `bdb' specifies the B+ tree database object.
    If successful, the return value is true, else, it is false. */
 static bool tcbdblockcache(TCBDB *bdb){
   assert(bdb);
@@ -3220,39 +3325,11 @@ static bool tcbdblockcache(TCBDB *bdb){
 
 
 /* Unlock the cache of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
+   `bdb' specifies the B+ tree database object.
    If successful, the return value is true, else, it is false. */
 static bool tcbdbunlockcache(TCBDB *bdb){
   assert(bdb);
   if(pthread_mutex_unlock(bdb->cmtx) != 0){
-    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  TCTESTYIELD();
-  return true;
-}
-
-
-/* Lock the transaction of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
-   If successful, the return value is true, else, it is false. */
-static bool tcbdblocktran(TCBDB *bdb){
-  assert(bdb);
-  if(pthread_mutex_lock(bdb->tmtx) != 0){
-    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  TCTESTYIELD();
-  return true;
-}
-
-
-/* Unlock the transaction of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
-   If successful, the return value is true, else, it is false. */
-static bool tcbdbunlocktran(TCBDB *bdb){
-  assert(bdb);
-  if(pthread_mutex_unlock(bdb->tmtx) != 0){
     tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
@@ -3308,44 +3385,45 @@ static bool tcbdbcurjumpimpl(BDBCUR *cur, const char *kbuf, int ksiz, bool forwa
     cur->vidx = 0;
     return false;
   }
-  if(TCLISTNUM(leaf->recs) < 1){
+  if(TCPTRLISTNUM(leaf->recs) < 1){
     cur->id = pid;
     cur->kidx = 0;
     cur->vidx = 0;
     return forward ? tcbdbcurnextimpl(cur) : tcbdbcurprevimpl(cur);
   }
   int ri;
-  BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
-  if(recp){
+  BDBREC *rec = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
+  if(rec){
     cur->id = pid;
     cur->kidx = ri;
     if(forward){
       cur->vidx = 0;
     } else {
-      cur->vidx = recp->rest ? TCLISTNUM(recp->rest) : 0;
+      cur->vidx = rec->rest ? TCLISTNUM(rec->rest) : 0;
     }
     return true;
   }
   cur->id = leaf->id;
-  if(ri > 0 && ri >= TCLISTNUM(leaf->recs)) ri = TCLISTNUM(leaf->recs) - 1;
+  if(ri > 0 && ri >= TCPTRLISTNUM(leaf->recs)) ri = TCPTRLISTNUM(leaf->recs) - 1;
   cur->kidx = ri;
-  recp = (BDBREC *)TCLISTVALPTR(leaf->recs, ri);
+  rec = TCPTRLISTVAL(leaf->recs, ri);
+  char *dbuf = (char *)rec + sizeof(*rec);
   if(forward){
     int rv;
-    if(bdb->cmp == tcbdbcmplexical){
-      TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+    if(bdb->cmp == tccmplexical){
+      TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
     } else {
-      rv = bdb->cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, bdb->cmpop);
+      rv = bdb->cmp(kbuf, ksiz, dbuf, rec->ksiz, bdb->cmpop);
     }
     if(rv < 0) return true;
-    cur->vidx = recp->rest ? TCLISTNUM(recp->rest) : 0;
+    cur->vidx = rec->rest ? TCLISTNUM(rec->rest) : 0;
     return tcbdbcurnextimpl(cur);
   }
   int rv;
-  if(bdb->cmp == tcbdbcmplexical){
-    TCCMPLEXICAL(rv, kbuf, ksiz, recp->kbuf, recp->ksiz);
+  if(bdb->cmp == tccmplexical){
+    TCCMPLEXICAL(rv, kbuf, ksiz, dbuf, rec->ksiz);
   } else {
-    rv = bdb->cmp(kbuf, ksiz, recp->kbuf, recp->ksiz, bdb->cmpop);
+    rv = bdb->cmp(kbuf, ksiz, dbuf, rec->ksiz, bdb->cmpop);
   }
   if(rv > 0) return true;
   cur->vidx = 0;
@@ -3370,8 +3448,8 @@ static bool tcbdbcuradjust(BDBCUR *cur, bool forward){
     }
     BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
     if(!leaf) return false;
-    TCLIST *recs = leaf->recs;
-    int knum = TCLISTNUM(recs);
+    TCPTRLIST *recs = leaf->recs;
+    int knum = TCPTRLISTNUM(recs);
     if(cur->kidx < 0){
       if(forward){
         cur->kidx = 0;
@@ -3391,8 +3469,8 @@ static bool tcbdbcuradjust(BDBCUR *cur, bool forward){
         cur->vidx = INT_MAX;
       }
     } else {
-      BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
-      int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
+      BDBREC *rec = TCPTRLISTVAL(recs, cur->kidx);
+      int vnum = rec->rest ? TCLISTNUM(rec->rest) + 1 : 1;
       if(cur->vidx < 0){
         if(forward){
           cur->vidx = 0;
@@ -3455,44 +3533,59 @@ static bool tcbdbcurputimpl(BDBCUR *cur, const char *vbuf, int vsiz, int cpmode)
   TCBDB *bdb = cur->bdb;
   BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
   if(!leaf) return false;
-  TCLIST *recs = leaf->recs;
-  if(cur->kidx >= TCLISTNUM(recs)){
+  TCPTRLIST *recs = leaf->recs;
+  if(cur->kidx >= TCPTRLISTNUM(recs)){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
-  int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
+  BDBREC *rec = TCPTRLISTVAL(recs, cur->kidx);
+  int vnum = rec->rest ? TCLISTNUM(rec->rest) + 1 : 1;
   if(cur->vidx >= vnum){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
+  char *dbuf = (char *)rec + sizeof(*rec);
+  int psiz = TCALIGNPAD(rec->ksiz);
+  BDBREC *orec = rec;
   switch(cpmode){
   case BDBCPCURRENT:
     if(cur->vidx < 1){
-      if(vsiz > recp->vsiz) TCREALLOC(recp->vbuf, recp->vbuf, vsiz + 1);
-      memcpy(recp->vbuf, vbuf, vsiz);
-      recp->vbuf[vsiz] = '\0';
-      recp->vsiz = vsiz;
+      if(vsiz > rec->vsiz){
+        TCREALLOC(rec, rec, sizeof(*rec) + rec->ksiz + psiz + vsiz + 1);
+        if(rec != orec){
+          tcptrlistover(recs, cur->kidx, rec);
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+      }
+      memcpy(dbuf + rec->ksiz + psiz, vbuf, vsiz);
+      dbuf[rec->ksiz+psiz+vsiz] = '\0';
+      rec->vsiz = vsiz;
     } else {
-      tclistover(recp->rest, cur->vidx - 1, vbuf, vsiz);
+      tclistover(rec->rest, cur->vidx - 1, vbuf, vsiz);
     }
     break;
   case BDBCPBEFORE:
     if(cur->vidx < 1){
-      if(!recp->rest) recp->rest = tclistnew();
-      tclistunshift(recp->rest, recp->vbuf, recp->vsiz);
-      if(vsiz > recp->vsiz) TCREALLOC(recp->vbuf, recp->vbuf, vsiz + 1);
-      memcpy(recp->vbuf, vbuf, vsiz);
-      recp->vbuf[vsiz] = '\0';
-      recp->vsiz = vsiz;
+      if(!rec->rest) rec->rest = tclistnew();
+      tclistunshift(rec->rest, dbuf + rec->ksiz + psiz, rec->vsiz);
+      if(vsiz > rec->vsiz){
+        TCREALLOC(rec, rec, sizeof(*rec) + rec->ksiz + psiz + vsiz + 1);
+        if(rec != orec){
+          tcptrlistover(recs, cur->kidx, rec);
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+      }
+      memcpy(dbuf + rec->ksiz + psiz, vbuf, vsiz);
+      dbuf[rec->ksiz+psiz+vsiz] = '\0';
+      rec->vsiz = vsiz;
     } else {
-      tclistinsert(recp->rest, cur->vidx - 1, vbuf, vsiz);
+      TCLISTINSERT(rec->rest, cur->vidx - 1, vbuf, vsiz);
     }
     bdb->rnum++;
     break;
   case BDBCPAFTER:
-    if(!recp->rest) recp->rest = tclistnew();
-    tclistinsert(recp->rest, cur->vidx, vbuf, vsiz);
+    if(!rec->rest) rec->rest = tclistnew();
+    TCLISTINSERT(rec->rest, cur->vidx, vbuf, vsiz);
     cur->vidx++;
     bdb->rnum++;
     break;
@@ -3510,40 +3603,53 @@ static bool tcbdbcuroutimpl(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
   if(!leaf) return false;
-  TCLIST *recs = leaf->recs;
-  if(cur->kidx >= TCLISTNUM(recs)){
+  TCPTRLIST *recs = leaf->recs;
+  if(cur->kidx >= TCPTRLISTNUM(recs)){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
-  int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
+  BDBREC *rec = TCPTRLISTVAL(recs, cur->kidx);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  int vnum = rec->rest ? TCLISTNUM(rec->rest) + 1 : 1;
   if(cur->vidx >= vnum){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  if(recp->rest){
+  if(rec->rest){
     if(cur->vidx < 1){
-      TCFREE(recp->vbuf);
-      recp->vbuf = tclistshift(recp->rest, &(recp->vsiz));
+      int vsiz;
+      char *vbuf = tclistshift(rec->rest, &vsiz);
+      int psiz = TCALIGNPAD(rec->ksiz);
+      if(vsiz > rec->vsiz){
+        BDBREC *orec = rec;
+        TCREALLOC(rec, rec, sizeof(*rec) + rec->ksiz + psiz + vsiz + 1);
+        if(rec != orec){
+          tcptrlistover(leaf->recs, cur->kidx, rec);
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+      }
+      memcpy(dbuf + rec->ksiz + psiz, vbuf, vsiz);
+      dbuf[rec->ksiz+psiz+vsiz] = '\0';
+      rec->vsiz = vsiz;
+      TCFREE(vbuf);
     } else {
       int vsiz;
-      TCFREE(tclistremove(recp->rest, cur->vidx - 1, &vsiz));
+      TCFREE(tclistremove(rec->rest, cur->vidx - 1, &vsiz));
     }
-    if(TCLISTNUM(recp->rest) < 1){
-      tclistdel(recp->rest);
-      recp->rest = NULL;
+    if(TCLISTNUM(rec->rest) < 1){
+      tclistdel(rec->rest);
+      rec->rest = NULL;
     }
   } else {
-    if(TCLISTNUM(recs) < 2 && bdb->hnum > 0){
-      uint64_t pid = tcbdbsearchleaf(bdb, recp->kbuf, recp->ksiz);
+    if(TCPTRLISTNUM(recs) < 2){
+      uint64_t pid = tcbdbsearchleaf(bdb, dbuf, rec->ksiz);
       if(pid < 1) return false;
-      if(!(leaf = tcbdbleafload(bdb, pid))) return false;
-      if(!tcbdbleafkill(bdb, leaf)) return false;
+      if(bdb->hnum > 0){
+        if(!(leaf = tcbdbleafload(bdb, pid))) return false;
+        if(!tcbdbleafkill(bdb, leaf)) return false;
+      }
     }
-    TCFREE(recp->vbuf);
-    TCFREE(recp->kbuf);
-    int rsiz;
-    TCFREE(tclistremove(leaf->recs, cur->kidx, &rsiz));
+    TCFREE(tcptrlistremove(leaf->recs, cur->kidx));
   }
   bdb->rnum--;
   leaf->dirty = true;
@@ -3565,26 +3671,68 @@ static bool tcbdbcurrecimpl(BDBCUR *cur, const char **kbp, int *ksp, const char 
   TCBDB *bdb = cur->bdb;
   BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
   if(!leaf) return false;
-  TCLIST *recs = leaf->recs;
-  if(cur->kidx >= TCLISTNUM(recs)){
+  TCPTRLIST *recs = leaf->recs;
+  if(cur->kidx >= TCPTRLISTNUM(recs)){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
-  int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
+  BDBREC *rec = TCPTRLISTVAL(recs, cur->kidx);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  int vnum = rec->rest ? TCLISTNUM(rec->rest) + 1 : 1;
   if(cur->vidx >= vnum){
     tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
-  *kbp = recp->kbuf;
-  *ksp = recp->ksiz;
+  *kbp = dbuf;
+  *ksp = rec->ksiz;
   if(cur->vidx > 0){
-    *vbp = tclistval(recp->rest, cur->vidx - 1, vsp);
+    *vbp = tclistval(rec->rest, cur->vidx - 1, vsp);
   } else {
-    *vbp = recp->vbuf;
-    *vsp = recp->vsiz;
+    *vbp = dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+    *vsp = rec->vsiz;
   }
   return true;
+}
+
+
+/* Process each record atomically of a B+ tree database object.
+   `func' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.
+   If successful, the return value is true, else, it is false. */
+static bool tcbdbforeachimpl(TCBDB *bdb, TCITER iter, void *op){
+  assert(bdb && iter);
+  bool err = false;
+  BDBCUR *cur = tcbdbcurnew(bdb);
+  tcbdbcurfirstimpl(cur);
+  const char *kbuf, *vbuf;
+  int ksiz, vsiz;
+  while(cur->id > 0){
+    if(tcbdbcurrecimpl(cur, &kbuf, &ksiz, &vbuf, &vsiz)){
+      if(!iter(kbuf, ksiz, vbuf, vsiz, op)) break;
+      tcbdbcurnextimpl(cur);
+      if(bdb->tran){
+        if(cur->id > 0){
+          BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
+          if(!leaf){
+            err = true;
+            break;
+          }
+          if(!leaf->dirty && !tcbdbleafcacheout(bdb, leaf)){
+            err = false;
+            break;
+          }
+        }
+      } else if(TCMAPRNUM(bdb->leafc) > bdb->lcnum && !tcbdbcacheadjust(bdb)){
+        err = true;
+        break;
+      }
+    } else {
+      if(tchdbecode(bdb->hdb) != TCEINVALID && tchdbecode(bdb->hdb) != TCENOREC) err = true;
+      break;
+    }
+  }
+  tcbdbcurdel(cur);
+  return !err;
 }
 
 
@@ -3605,7 +3753,6 @@ void tcbdbprintmeta(TCBDB *bdb){
   wp += sprintf(wp, "META:");
   wp += sprintf(wp, " mmtx=%p", (void *)bdb->mmtx);
   wp += sprintf(wp, " cmtx=%p", (void *)bdb->cmtx);
-  wp += sprintf(wp, " tmtx=%p", (void *)bdb->tmtx);
   wp += sprintf(wp, " hdb=%p", (void *)bdb->hdb);
   wp += sprintf(wp, " opaque=%p", (void *)bdb->opaque);
   wp += sprintf(wp, " open=%d", bdb->open);
@@ -3652,7 +3799,7 @@ void tcbdbprintmeta(TCBDB *bdb){
 void tcbdbprintleaf(TCBDB *bdb, BDBLEAF *leaf){
   assert(bdb && leaf);
   int dbgfd = tchdbdbgfd(bdb->hdb);
-  TCLIST *recs = leaf->recs;
+  TCPTRLIST *recs = leaf->recs;
   if(dbgfd < 0) return;
   char buf[BDBPAGEBUFSIZ];
   char *wp = buf;
@@ -3662,14 +3809,15 @@ void tcbdbprintleaf(TCBDB *bdb, BDBLEAF *leaf){
   wp += sprintf(wp, " next:%llx", (unsigned long long)leaf->next);
   wp += sprintf(wp, " dirty:%d", leaf->dirty);
   wp += sprintf(wp, " dead:%d", leaf->dead);
-  wp += sprintf(wp, " rnum:%d", TCLISTNUM(recs));
+  wp += sprintf(wp, " rnum:%d", TCPTRLISTNUM(recs));
   *(wp++) = ' ';
-  for(int i = 0; i < TCLISTNUM(recs); i++){
+  for(int i = 0; i < TCPTRLISTNUM(recs); i++){
     tcwrite(dbgfd, buf, wp - buf);
     wp = buf;
-    BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-    wp += sprintf(wp, " [%s:%s]", recp->kbuf, recp->vbuf);
-    TCLIST *rest = recp->rest;
+    BDBREC *rec = TCPTRLISTVAL(recs, i);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    wp += sprintf(wp, " [%s:%s]", dbuf, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz));
+    TCLIST *rest = rec->rest;
     if(rest){
       for(int j = 0; j < TCLISTNUM(rest); j++){
         wp += sprintf(wp, ":%s", (char *)TCLISTVALPTR(rest, j));
@@ -3687,7 +3835,7 @@ void tcbdbprintleaf(TCBDB *bdb, BDBLEAF *leaf){
 void tcbdbprintnode(TCBDB *bdb, BDBNODE *node){
   assert(bdb && node);
   int dbgfd = tchdbdbgfd(bdb->hdb);
-  TCLIST *idxs = node->idxs;
+  TCPTRLIST *idxs = node->idxs;
   if(dbgfd < 0) return;
   char buf[BDBPAGEBUFSIZ];
   char *wp = buf;
@@ -3695,13 +3843,14 @@ void tcbdbprintnode(TCBDB *bdb, BDBNODE *node){
   wp += sprintf(wp, " id:%llx", (unsigned long long)node->id);
   wp += sprintf(wp, " heir:%llx", (unsigned long long)node->heir);
   wp += sprintf(wp, " dirty:%d", node->dirty);
-  wp += sprintf(wp, " rnum:%d", TCLISTNUM(idxs));
+  wp += sprintf(wp, " rnum:%d", TCPTRLISTNUM(idxs));
   *(wp++) = ' ';
-  for(int i = 0; i < TCLISTNUM(idxs); i++){
+  for(int i = 0; i < TCPTRLISTNUM(idxs); i++){
     tcwrite(dbgfd, buf, wp - buf);
     wp = buf;
-    BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-    wp += sprintf(wp, " [%llx:%s]", (unsigned long long)idxp->pid, idxp->kbuf);
+    BDBIDX *idx = TCPTRLISTVAL(idxs, i);
+    char *ebuf = (char *)idx + sizeof(*idx);
+    wp += sprintf(wp, " [%llx:%s]", (unsigned long long)idx->pid, ebuf);
   }
   *(wp++) = '\n';
   tcwrite(dbgfd, buf, wp - buf);

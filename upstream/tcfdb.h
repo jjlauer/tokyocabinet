@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The fixed-length database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -31,6 +31,8 @@ __TCFDB_CLINKAGEBEGIN
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <limits.h>
+#include <math.h>
 #include <tcutil.h>
 
 
@@ -54,7 +56,7 @@ typedef struct {                         /* type of structure for a fixed-length
   uint64_t limid;                        /* limit ID number */
   char *path;                            /* path of the database file */
   int fd;                                /* file descriptor of the database file */
-  uint32_t omode;                        /* connection mode */
+  uint32_t omode;                        /* open mode */
   uint64_t rnum;                         /* number of the records */
   uint64_t fsiz;                         /* size of the database file */
   uint64_t min;                          /* minimum ID number */
@@ -115,7 +117,7 @@ void tcfdbdel(TCFDB *fdb);
 /* Get the last happened error code of a fixed-length database object.
    `fdb' specifies the fixed-length database object.
    The return value is the last happened error code.
-   The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading
+   The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading
    error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no
    permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN'
    for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync
@@ -543,6 +545,34 @@ TCLIST *tcfdbrange4(TCFDB *fdb, const void *ibuf, int isiz, int max);
 TCLIST *tcfdbrange5(TCFDB *fdb, const void *istr, int max);
 
 
+/* Add an integer to a record in a fixed-length database object.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   `id' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID
+   number of existing records is specified.  If it is `FDBIDPREV', the number less by one than
+   the minimum ID number of existing records is specified.  If it is `FDBIDMAX', the maximum ID
+   number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than
+   the maximum ID number of existing records is specified.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `INT_MIN'.
+   If the corresponding record exists, the value is treated as an integer and is added to.  If no
+   record corresponds, a new record of the additional value is stored. */
+int tcfdbaddint(TCFDB *fdb, int64_t id, int num);
+
+
+/* Add a real number to a record in a fixed-length database object.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   `id' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID
+   number of existing records is specified.  If it is `FDBIDPREV', the number less by one than
+   the minimum ID number of existing records is specified.  If it is `FDBIDMAX', the maximum ID
+   number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than
+   the maximum ID number of existing records is specified.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `NAN'.
+   If the corresponding record exists, the value is treated as a real number and is added to.  If
+   no record corresponds, a new record of the additional value is stored. */
+double tcfdbadddouble(TCFDB *fdb, int64_t id, double num);
+
+
 /* Synchronize updated contents of a fixed-length database object with the file and the device.
    `fdb' specifies the fixed-length database object connected as a writer.
    If successful, the return value is true, else, it is false.
@@ -626,7 +656,7 @@ void tcfdbsetdbgfd(TCFDB *fdb, int fd);
 int tcfdbdbgfd(TCFDB *fdb);
 
 
-/* Synchronize updating contents on memory.
+/* Synchronize updating contents on memory of a fixed-length database object.
    `fdb' specifies the fixed-length database object connected as a writer.
    `phys' specifies whether to synchronize physically.
    If successful, the return value is true, else, it is false. */
@@ -704,6 +734,22 @@ uint8_t tcfdbflags(TCFDB *fdb);
    `fdb' specifies the fixed-length database object.
    The return value is the pointer to the opaque field whose size is 128 bytes. */
 char *tcfdbopaque(TCFDB *fdb);
+
+
+/* Process each record atomically of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `func' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false. */
+bool tcfdbforeach(TCFDB *fdb, TCITER iter, void *op);
+
+
+/* Generate the ID number from arbitrary binary data.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   The return value is the ID number. */
+int64_t tcfdbkeytoid(const char *kbuf, int ksiz);
 
 
 

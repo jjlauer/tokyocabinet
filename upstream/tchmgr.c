@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The command line utility of the hash database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -29,7 +29,6 @@ int main(int argc, char **argv);
 static void usage(void);
 static void printerr(TCHDB *hdb);
 static int printdata(const char *ptr, int size, bool px);
-static char *hextoobj(const char *str, int *sp);
 static char *mygetline(FILE *ifp);
 static int runcreate(int argc, char **argv);
 static int runinform(int argc, char **argv);
@@ -57,7 +56,7 @@ int main(int argc, char **argv){
   g_progname = argv[0];
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
-  if(ebuf) g_dbgfd = atoi(ebuf);
+  if(ebuf) g_dbgfd = tcatoi(ebuf);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "create")){
@@ -90,14 +89,14 @@ static void usage(void){
   fprintf(stderr, "%s: the command line utility of the hash database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum [apow [fpow]]]\n", g_progname);
+  fprintf(stderr, "  %s create [-tl] [-td|-tb|-tt|-tx] path [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
   fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
   fprintf(stderr, "  %s list [-nl|-nb] [-m num] [-pv] [-px] [-fm str] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum [apow [fpow]]]\n",
-          g_progname);
+  fprintf(stderr, "  %s optimize [-tl] [-td|-tb|-tt|-tx] [-tz] [-nl|-nb] path"
+          " [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
@@ -130,42 +129,28 @@ static int printdata(const char *ptr, int size, bool px){
 }
 
 
-/* create a binary object from a hexadecimal string */
-static char *hextoobj(const char *str, int *sp){
-  int len = strlen(str);
-  char *buf = tcmalloc(len + 1);
-  int j = 0;
-  for(int i = 0; i < len; i += 2){
-    while(strchr(" \n\r\t\f\v", str[i])){
-      i++;
-    }
-    char mbuf[3];
-    if((mbuf[0] = str[i]) == '\0') break;
-    if((mbuf[1] = str[i+1]) == '\0') break;
-    mbuf[2] = '\0';
-    buf[j++] = (char)strtol(mbuf, NULL, 16);
-  }
-  buf[j] = '\0';
-  *sp = j;
-  return buf;
-}
-
-
 /* read a line from a file descriptor */
 static char *mygetline(FILE *ifp){
-  char *buf;
-  int c, len, blen;
-  buf = NULL;
-  len = 0;
-  blen = 256;
+  int len = 0;
+  int blen = 1024;
+  char *buf = tcmalloc(blen);
+  bool end = true;
+  int c;
   while((c = fgetc(ifp)) != EOF){
-    if(blen <= len) blen *= 2;
-    buf = tcrealloc(buf, blen + 1);
+    end = false;
+    if(c == '\0') continue;
+    if(blen <= len){
+      blen *= 2;
+      buf = tcrealloc(buf, blen + 1);
+    }
     if(c == '\n' || c == '\r') c = '\0';
     buf[len++] = c;
     if(c == '\0') break;
   }
-  if(!buf) return NULL;
+  if(end){
+    tcfree(buf);
+    return NULL;
+  }
   buf[len] = '\0';
   return buf;
 }
@@ -185,7 +170,11 @@ static int runcreate(int argc, char **argv){
       } else if(!strcmp(argv[i], "-td")){
         opts |= HDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
+        opts |= HDBTBZIP;
+      } else if(!strcmp(argv[i], "-tt")){
         opts |= HDBTTCBS;
+      } else if(!strcmp(argv[i], "-tx")){
+        opts |= HDBTEXCODEC;
       } else {
         usage();
       }
@@ -202,9 +191,9 @@ static int runcreate(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
+  int bnum = bstr ? tcatoi(bstr) : -1;
+  int apow = astr ? tcatoi(astr) : -1;
+  int fpow = fstr ? tcatoi(fstr) : -1;
   int rv = proccreate(path, bnum, apow, fpow, opts);
   return rv;
 }
@@ -272,8 +261,8 @@ static int runput(int argc, char **argv){
   int ksiz, vsiz;
   char *kbuf, *vbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
-    vbuf = hextoobj(value, &vsiz);
+    kbuf = tchexdecode(key, &ksiz);
+    vbuf = tchexdecode(value, &vsiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -316,7 +305,7 @@ static int runout(int argc, char **argv){
   int ksiz;
   char *kbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
+    kbuf = tchexdecode(key, &ksiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -362,7 +351,7 @@ static int runget(int argc, char **argv){
   int ksiz;
   char *kbuf;
   if(sx){
-    kbuf = hextoobj(key, &ksiz);
+    kbuf = tchexdecode(key, &ksiz);
   } else {
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
@@ -389,7 +378,7 @@ static int runlist(int argc, char **argv){
         omode |= HDBOLCKNB;
       } else if(!strcmp(argv[i], "-m")){
         if(++i >= argc) usage();
-        max = atoi(argv[i]);
+        max = tcatoi(argv[i]);
       } else if(!strcmp(argv[i], "-pv")){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -430,7 +419,13 @@ static int runoptimize(int argc, char **argv){
         opts |= HDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
         if(opts == UINT8_MAX) opts = 0;
+        opts |= HDBTBZIP;
+      } else if(!strcmp(argv[i], "-tt")){
+        if(opts == UINT8_MAX) opts = 0;
         opts |= HDBTTCBS;
+      } else if(!strcmp(argv[i], "-tx")){
+        if(opts == UINT8_MAX) opts = 0;
+        opts |= HDBTEXCODEC;
       } else if(!strcmp(argv[i], "-tz")){
         if(opts == UINT8_MAX) opts = 0;
       } else if(!strcmp(argv[i], "-nl")){
@@ -453,9 +448,9 @@ static int runoptimize(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
+  int bnum = bstr ? tcatoi(bstr) : -1;
+  int apow = astr ? tcatoi(astr) : -1;
+  int fpow = fstr ? tcatoi(fstr) : -1;
   int rv = procoptimize(path, bnum, apow, fpow, opts, omode);
   return rv;
 }
@@ -503,6 +498,7 @@ static int runversion(int argc, char **argv){
 static int proccreate(const char *path, int bnum, int apow, int fpow, int opts){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -527,6 +523,7 @@ static int proccreate(const char *path, int bnum, int apow, int fpow, int opts){
 static int procinform(const char *path, int omode){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL);
   if(!tchdbopen(hdb, path, HDBOREADER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -561,7 +558,9 @@ static int procinform(const char *path, int omode){
   printf("options:");
   if(opts & HDBTLARGE) printf(" large");
   if(opts & HDBTDEFLATE) printf(" deflate");
+  if(opts & HDBTBZIP) printf(" bzip");
   if(opts & HDBTTCBS) printf(" tcbs");
+  if(opts & HDBTEXCODEC) printf(" excodec");
   printf("\n");
   printf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
   printf("file size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
@@ -579,6 +578,7 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
                    int omode, int dmode){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -618,6 +618,7 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
 static int procout(const char *path, const char *kbuf, int ksiz, int omode){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -641,6 +642,7 @@ static int procout(const char *path, const char *kbuf, int ksiz, int omode){
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOREADER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -670,6 +672,7 @@ static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool
 static int proclist(const char *path, int omode, int max, bool pv, bool px, const char *fmstr){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOREADER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -727,6 +730,7 @@ static int proclist(const char *path, int omode, int max, bool pv, bool px, cons
 static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
@@ -748,17 +752,18 @@ static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts
 
 /* perform importtsv command */
 static int procimporttsv(const char *path, const char *file, int omode, bool sc){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
   FILE *ifp = file ? fopen(file, "rb") : stdin;
   if(!ifp){
     fprintf(stderr, "%s: could not open\n", file ? file : "(stdin)");
-    tchdbdel(hdb);
     return 1;
   }
+  TCHDB *hdb = tchdbnew();
+  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
   if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | omode)){
     printerr(hdb);
     tchdbdel(hdb);
+    if(ifp != stdin) fclose(ifp);
     return 1;
   }
   bool err = false;
@@ -766,10 +771,13 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
   int cnt = 0;
   while(!err && (line = mygetline(ifp)) != NULL){
     char *pv = strchr(line, '\t');
-    if(!pv) continue;
+    if(!pv){
+      tcfree(line);
+      continue;
+    }
     *pv = '\0';
     if(sc) tcstrtolower(line);
-    if(!tchdbput2(hdb, line, pv + 1) && tchdbecode(hdb) != TCEKEEP){
+    if(!tchdbput2(hdb, line, pv + 1)){
       printerr(hdb);
       err = true;
     }
@@ -795,7 +803,7 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
 /* perform version command */
 static int procversion(void){
   printf("Tokyo Cabinet version %s (%d:%s)\n", tcversion, _TC_LIBVER, _TC_FORMATVER);
-  printf("Copyright (C) 2006-2008 Mikio Hirabayashi\n");
+  printf("Copyright (C) 2006-2009 Mikio Hirabayashi\n");
   return 0;
 }
 

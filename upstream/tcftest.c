@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the fixed-length database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -31,7 +31,9 @@ int g_dbgfd;                             // debugging output
 int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
+static void iputchar(int c);
 static void eprint(TCFDB *fdb, const char *func);
+static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op);
 static void mprint(TCFDB *fdb);
 static int myrand(int range);
 static int runwrite(int argc, char **argv);
@@ -45,7 +47,7 @@ static int procwrite(const char *path, int rnum, int width, int64_t limsiz,
 static int procread(const char *path, bool mt, int omode, bool wb, bool rnd);
 static int procremove(const char *path, bool mt, int omode, bool rnd);
 static int procrcat(const char *path, int rnum, int width, int64_t limsiz,
-                    bool mt, int omode, int pnum, bool rl);
+                    bool mt, int omode, int pnum, bool dai, bool dad, bool rl);
 static int procmisc(const char *path, int rnum, bool mt, int omode);
 static int procwicked(const char *path, int rnum, bool mt, int omode);
 
@@ -55,7 +57,7 @@ int main(int argc, char **argv){
   g_progname = argv[0];
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
-  if(ebuf) g_dbgfd = atoi(ebuf);
+  if(ebuf) g_dbgfd = tcatoi(ebuf);
   srand((unsigned int)(tctime() * 1000) % UINT_MAX);
   if(argc < 2) usage();
   int rv = 0;
@@ -87,8 +89,8 @@ static void usage(void){
   fprintf(stderr, "  %s write [-mt] [-nl|-nb] [-rnd] path rnum [width [limsiz]]\n", g_progname);
   fprintf(stderr, "  %s read [-mt] [-nl|-nb] [-wb] [-rnd] path\n", g_progname);
   fprintf(stderr, "  %s remove [-mt] [-nl|-nb] [-rnd] path\n", g_progname);
-  fprintf(stderr, "  %s rcat [-mt] [-nl|-nb] [-pn num] [-rl] path rnum [width [limsiz]]\n",
-          g_progname);
+  fprintf(stderr, "  %s rcat [-mt] [-nl|-nb] [-pn num] [-dai|-dad|-rl]"
+          " path rnum [width [limsiz]]\n", g_progname);
   fprintf(stderr, "  %s misc [-mt] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-mt] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "\n");
@@ -103,6 +105,13 @@ static void iprintf(const char *format, ...){
   vprintf(format, ap);
   fflush(stdout);
   va_end(ap);
+}
+
+
+/* print a character and flush the buffer */
+static void iputchar(int c){
+  putchar(c);
+  fflush(stdout);
 }
 
 
@@ -126,6 +135,19 @@ static void mprint(TCFDB *fdb){
   iprintf("cnt_writerec: %lld\n", (long long)fdb->cnt_writerec);
   iprintf("cnt_readrec: %lld\n", (long long)fdb->cnt_readrec);
   iprintf("cnt_truncfile: %lld\n", (long long)fdb->cnt_truncfile);
+}
+
+
+/* iterator function */
+static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op){
+  unsigned int sum = 0;
+  while(--ksiz >= 0){
+    sum += ((char *)kbuf)[ksiz];
+  }
+  while(--vsiz >= 0){
+    sum += ((char *)vbuf)[vsiz];
+  }
+  return myrand(100 + (sum & 0xff)) > 0;
 }
 
 
@@ -170,9 +192,9 @@ static int runwrite(int argc, char **argv){
     }
   }
   if(!path || !rstr) usage();
-  int rnum = atoi(rstr);
+  int rnum = tcatoi(rstr);
   if(rnum < 1) usage();
-  int width = wstr ? atoi(wstr) : -1;
+  int width = wstr ? tcatoi(wstr) : -1;
   int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
   int rv = procwrite(path, rnum, width, limsiz, mt, omode, rnd);
   return rv;
@@ -253,6 +275,8 @@ static int runrcat(int argc, char **argv){
   bool mt = false;
   int omode = 0;
   int pnum = 0;
+  bool dai = false;
+  bool dad = false;
   bool rl = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
@@ -264,7 +288,11 @@ static int runrcat(int argc, char **argv){
         omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-pn")){
         if(++i >= argc) usage();
-        pnum = atoi(argv[i]);
+        pnum = tcatoi(argv[i]);
+      } else if(!strcmp(argv[i], "-dai")){
+        dai = true;
+      } else if(!strcmp(argv[i], "-dad")){
+        dad = true;
       } else if(!strcmp(argv[i], "-rl")){
         rl = true;
       } else {
@@ -283,11 +311,11 @@ static int runrcat(int argc, char **argv){
     }
   }
   if(!path || !rstr) usage();
-  int rnum = atoi(rstr);
+  int rnum = tcatoi(rstr);
   if(rnum < 1) usage();
-  int width = wstr ? atoi(wstr) : -1;
+  int width = wstr ? tcatoi(wstr) : -1;
   int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
-  int rv = procrcat(path, rnum, width, limsiz, mt, omode, pnum, rl);
+  int rv = procrcat(path, rnum, width, limsiz, mt, omode, pnum, dai, dad, rl);
   return rv;
 }
 
@@ -318,7 +346,7 @@ static int runmisc(int argc, char **argv){
     }
   }
   if(!path || !rstr) usage();
-  int rnum = atoi(rstr);
+  int rnum = tcatoi(rstr);
   if(rnum < 1) usage();
   int rv = procmisc(path, rnum, mt, omode);
   return rv;
@@ -351,7 +379,7 @@ static int runwicked(int argc, char **argv){
     }
   }
   if(!path || !rstr) usage();
-  int rnum = atoi(rstr);
+  int rnum = tcatoi(rstr);
   if(rnum < 1) usage();
   int rv = procwicked(path, rnum, mt, omode);
   return rv;
@@ -389,8 +417,7 @@ static int procwrite(const char *path, int rnum, int width, int64_t limsiz,
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -447,8 +474,7 @@ static int procread(const char *path, bool mt, int omode, bool wb, bool rnd){
       tcfree(vbuf);
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -491,8 +517,7 @@ static int procremove(const char *path, bool mt, int omode, bool rnd){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -512,10 +537,11 @@ static int procremove(const char *path, bool mt, int omode, bool rnd){
 
 /* perform rcat command */
 static int procrcat(const char *path, int rnum, int width, int64_t limsiz,
-                    bool mt, int omode, int pnum, bool rl){
+                    bool mt, int omode, int pnum, bool dai, bool dad, bool rl){
   iprintf("<Random Concatenating Test>\n"
-          "  path=%s  rnum=%d  width=%d  limsiz=%lld  mt=%d  omode=%d  pnum=%d  rl=%d\n\n",
-          path, rnum, width, (long long)limsiz, mt, omode, pnum, rl);
+          "  path=%s  rnum=%d  width=%d  limsiz=%lld  mt=%d  omode=%d  pnum=%d"
+          "  dai=%d  dad=%d  rl=%d\n\n",
+          path, rnum, width, (long long)limsiz, mt, omode, pnum, dai, dad, rl);
   if(pnum < 1) pnum = rnum;
   bool err = false;
   double stime = tctime();
@@ -536,7 +562,19 @@ static int procrcat(const char *path, int rnum, int width, int64_t limsiz,
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
     int ksiz = sprintf(kbuf, "%d", myrand(pnum) + 1);
-    if(rl){
+    if(dai){
+      if(tcfdbaddint(fdb, tcfdbkeytoid(kbuf, ksiz), myrand(3)) == INT_MIN){
+        eprint(fdb, "tcfdbaddint");
+        err = true;
+        break;
+      }
+    } else if(dad){
+      if(isnan(tcfdbadddouble(fdb, tcfdbkeytoid(kbuf, ksiz), myrand(3)))){
+        eprint(fdb, "tcfdbadddouble");
+        err = true;
+        break;
+      }
+    } else if(rl){
       char vbuf[PATH_MAX];
       int vsiz = myrand(PATH_MAX);
       for(int j = 0; j < vsiz; j++){
@@ -555,8 +593,7 @@ static int procrcat(const char *path, int rnum, int width, int64_t limsiz,
       }
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -603,8 +640,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -626,8 +662,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
     }
     tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -661,8 +696,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
     tcfree(rbuf);
@@ -677,8 +711,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -706,8 +739,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       }
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -728,8 +760,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       }
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -762,8 +793,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
     }
     tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -789,8 +819,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -804,8 +833,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -827,12 +855,11 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
     }
     tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
-  iprintf("iterator checking:\n");
+  iprintf("checking iterator:\n");
   if(!tcfdbiterinit(fdb)){
     eprint(fdb, "tcfdbiterinit");
     err = true;
@@ -852,8 +879,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
     tcfree(vbuf);
     tcfree(kbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -885,8 +911,7 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
     }
     tcfree(kbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -901,6 +926,33 @@ static int procmisc(const char *path, int rnum, bool mt, int omode){
   if(!tcfdbvanish(fdb)){
     eprint(fdb, "tcfdbvanish");
     err = true;
+  }
+  if(rnum >= 100){
+    if(!tcfdbput3(fdb, "99", "hirabayashi")){
+      eprint(fdb, "tcfdbput3");
+      err = true;
+    }
+    for(int i = 0; i < 10; i++){
+      char buf[RECBUFSIZ];
+      int size = sprintf(buf, "%d", myrand(rnum) + 1);
+      if(!tcfdbput2(fdb, buf, size, buf, size)){
+        eprint(fdb, "tcfdbput2");
+        err = true;
+      }
+    }
+    for(int i = myrand(3) + 1; i < PATH_MAX; i = i * 2 + myrand(3)){
+      char vbuf[i];
+      memset(vbuf, '@', i - 1);
+      vbuf[i-1] = '\0';
+      if(!tcfdbput3(fdb, "99", vbuf)){
+        eprint(fdb, "tcfdbput3");
+        err = true;
+      }
+    }
+    if(!tcfdbforeach(fdb, iterfunc, NULL)){
+      eprint(fdb, "tcfdbforeach");
+      err = true;
+    }
   }
   iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
   iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
@@ -952,7 +1004,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
     char *rbuf;
     switch(myrand(16)){
     case 0:
-      putchar('0');
+      iputchar('0');
       if(!tcfdbput2(fdb, kbuf, ksiz, vbuf, vsiz)){
         eprint(fdb, "tcfdbput2");
         err = true;
@@ -960,7 +1012,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapput(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 1:
-      putchar('1');
+      iputchar('1');
       if(!tcfdbput3(fdb, kbuf, vbuf)){
         eprint(fdb, "tcfdbput3");
         err = true;
@@ -968,7 +1020,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapput2(map, kbuf, vbuf);
       break;
     case 2:
-      putchar('2');
+      iputchar('2');
       if(!tcfdbputkeep2(fdb, kbuf, ksiz, vbuf, vsiz) && tcfdbecode(fdb) != TCEKEEP){
         eprint(fdb, "tcfdbputkeep2");
         err = true;
@@ -976,7 +1028,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 3:
-      putchar('3');
+      iputchar('3');
       if(!tcfdbputkeep3(fdb, kbuf, vbuf) && tcfdbecode(fdb) != TCEKEEP){
         eprint(fdb, "tcfdbputkeep3");
         err = true;
@@ -984,7 +1036,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapputkeep2(map, kbuf, vbuf);
       break;
     case 4:
-      putchar('4');
+      iputchar('4');
       if(!tcfdbputcat2(fdb, kbuf, ksiz, vbuf, vsiz)){
         eprint(fdb, "tcfdbputcat2");
         err = true;
@@ -992,7 +1044,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 5:
-      putchar('5');
+      iputchar('5');
       if(!tcfdbputcat3(fdb, kbuf, vbuf)){
         eprint(fdb, "tcfdbputcat3");
         err = true;
@@ -1000,7 +1052,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcmapputcat2(map, kbuf, vbuf);
       break;
     case 6:
-      putchar('6');
+      iputchar('6');
       if(myrand(10) == 0){
         if(!tcfdbout2(fdb, kbuf, ksiz) && tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbout2");
@@ -1010,7 +1062,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       }
       break;
     case 7:
-      putchar('7');
+      iputchar('7');
       if(myrand(10) == 0){
         if(!tcfdbout3(fdb, kbuf) && tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbout3");
@@ -1020,7 +1072,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       }
       break;
     case 8:
-      putchar('8');
+      iputchar('8');
       if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz))){
         if(tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbget2");
@@ -1042,7 +1094,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcfree(rbuf);
       break;
     case 9:
-      putchar('9');
+      iputchar('9');
       if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz)) && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbget2");
         err = true;
@@ -1050,7 +1102,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcfree(rbuf);
       break;
     case 10:
-      putchar('A');
+      iputchar('A');
       if(!(rbuf = tcfdbget3(fdb, kbuf)) && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbget3");
         err = true;
@@ -1058,7 +1110,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       tcfree(rbuf);
       break;
     case 11:
-      putchar('B');
+      iputchar('B');
       if(myrand(1) == 0) vsiz = 1;
       if((vsiz = tcfdbget4(fdb, id, vbuf, vsiz)) < 0 && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbget4");
@@ -1066,7 +1118,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       }
       break;
     case 12:
-      putchar('C');
+      iputchar('C');
       if(myrand(rnum / 50) == 0){
         if(!tcfdbiterinit(fdb)){
           eprint(fdb, "tcfdbiterinit");
@@ -1084,7 +1136,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
       }
       break;
     default:
-      putchar('@');
+      iputchar('@');
       if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
       if(myrand(rnum / 16 + 1) == 0){
         int cnt = myrand(30);
@@ -1153,7 +1205,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
     int rsiz;
     char *rbuf = tcfdbget2(fdb, kbuf, ksiz, &rsiz);
     if(vbuf){
-      putchar('.');
+      iputchar('.');
       if(vsiz > RECBUFSIZ) vsiz = RECBUFSIZ;
       if(!rbuf){
         eprint(fdb, "tcfdbget2");
@@ -1163,7 +1215,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
         err = true;
       }
     } else {
-      putchar('*');
+      iputchar('*');
       if(rbuf || tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "(validation)");
         err = true;
@@ -1177,7 +1229,7 @@ static int procwicked(const char *path, int rnum, bool mt, int omode){
   int ksiz;
   const char *kbuf;
   for(int i = 1; (kbuf = tcmapiternext(map, &ksiz)) != NULL; i++){
-    putchar('+');
+    iputchar('+');
     int vsiz;
     const char *vbuf = tcmapiterval(kbuf, &vsiz);
     if(vsiz > RECBUFSIZ) vsiz = RECBUFSIZ;

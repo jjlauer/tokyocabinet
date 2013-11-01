@@ -55,5 +55,23 @@ int main(int argc, char **argv){
     tcmapdel(map);
   }
 
+  { /* example to use a tree object */
+    TCTREE *tree;
+    const char *key;
+    /* create the object */
+    tree = tctreenew();
+    /* add records */
+    tctreeput2(tree, "foo", "hop");
+    tctreeput2(tree, "bar", "step");
+    tctreeput2(tree, "baz", "jump");
+    /* print all records */
+    tctreeiterinit(tree);
+    while((key = tctreeiternext2(tree)) != NULL){
+      printf("%s:%s\n", key, tctreeget2(tree, key));
+    }
+    /* delete the object */
+    tctreedel(tree);
+  }
+
   return 0;
 }

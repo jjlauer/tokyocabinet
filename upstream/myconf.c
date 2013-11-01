@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * System-dependent configurations of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -60,9 +60,6 @@ unsigned int (*_tc_getcrc)(const char *, int) = _tc_getcrc_impl;
 static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
   assert(ptr && size >= 0 && sp);
   z_stream zs;
-  char *buf, *swap;
-  unsigned char obuf[ZLIBBUFSIZ];
-  int rv, asiz, bsiz, osiz;
   zs.zalloc = Z_NULL;
   zs.zfree = Z_NULL;
   zs.opaque = Z_NULL;
@@ -80,21 +77,25 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
       return NULL;
     break;
   }
-  asiz = size + 16;
+  int asiz = size + 16;
   if(asiz < ZLIBBUFSIZ) asiz = ZLIBBUFSIZ;
+  char *buf;
   if(!(buf = MYMALLOC(asiz))){
     deflateEnd(&zs);
     return NULL;
   }
-  bsiz = 0;
+  unsigned char obuf[ZLIBBUFSIZ];
+  int bsiz = 0;
   zs.next_in = (unsigned char *)ptr;
   zs.avail_in = size;
   zs.next_out = obuf;
   zs.avail_out = ZLIBBUFSIZ;
+  int rv;
   while((rv = deflate(&zs, Z_FINISH)) == Z_OK){
-    osiz = ZLIBBUFSIZ - zs.avail_out;
+    int osiz = ZLIBBUFSIZ - zs.avail_out;
     if(bsiz + osiz > asiz){
       asiz = asiz * 2 + osiz;
+      char *swap;
       if(!(swap = MYREALLOC(buf, asiz))){
         MYFREE(buf);
         deflateEnd(&zs);
@@ -112,9 +113,10 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
     deflateEnd(&zs);
     return NULL;
   }
-  osiz = ZLIBBUFSIZ - zs.avail_out;
+  int osiz = ZLIBBUFSIZ - zs.avail_out;
   if(bsiz + osiz + 1 > asiz){
     asiz = asiz * 2 + osiz;
+    char *swap;
     if(!(swap = MYREALLOC(buf, asiz))){
       MYFREE(buf);
       deflateEnd(&zs);
@@ -135,9 +137,6 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
 static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
   assert(ptr && size >= 0 && sp);
   z_stream zs;
-  char *buf, *swap;
-  unsigned char obuf[ZLIBBUFSIZ];
-  int rv, asiz, bsiz, osiz;
   zs.zalloc = Z_NULL;
   zs.zfree = Z_NULL;
   zs.opaque = Z_NULL;
@@ -152,21 +151,25 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
     if(inflateInit2(&zs, 15) != Z_OK) return NULL;
     break;
   }
-  asiz = size * 2 + 16;
+  int asiz = size * 2 + 16;
   if(asiz < ZLIBBUFSIZ) asiz = ZLIBBUFSIZ;
+  char *buf;
   if(!(buf = MYMALLOC(asiz))){
     inflateEnd(&zs);
     return NULL;
   }
-  bsiz = 0;
+  unsigned char obuf[ZLIBBUFSIZ];
+  int bsiz = 0;
   zs.next_in = (unsigned char *)ptr;
   zs.avail_in = size;
   zs.next_out = obuf;
   zs.avail_out = ZLIBBUFSIZ;
+  int rv;
   while((rv = inflate(&zs, Z_NO_FLUSH)) == Z_OK){
-    osiz = ZLIBBUFSIZ - zs.avail_out;
+    int osiz = ZLIBBUFSIZ - zs.avail_out;
     if(bsiz + osiz >= asiz){
       asiz = asiz * 2 + osiz;
+      char *swap;
       if(!(swap = MYREALLOC(buf, asiz))){
         MYFREE(buf);
         inflateEnd(&zs);
@@ -184,9 +187,10 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
     inflateEnd(&zs);
     return NULL;
   }
-  osiz = ZLIBBUFSIZ - zs.avail_out;
+  int osiz = ZLIBBUFSIZ - zs.avail_out;
   if(bsiz + osiz >= asiz){
     asiz = asiz * 2 + osiz;
+    char *swap;
     if(!(swap = MYREALLOC(buf, asiz))){
       MYFREE(buf);
       inflateEnd(&zs);
@@ -216,6 +220,267 @@ static unsigned int _tc_getcrc_impl(const char *ptr, int size){
 char *(*_tc_deflate)(const char *, int, int *, int) = NULL;
 char *(*_tc_inflate)(const char *, int, int *, int) = NULL;
 unsigned int (*_tc_getcrc)(const char *, int) = NULL;
+
+
+#endif
+
+
+
+/*************************************************************************************************
+ * for BZIP2
+ *************************************************************************************************/
+
+
+#if TCUSEBZIP
+
+
+#include <bzlib.h>
+
+#define BZIPBUFSIZ     8192
+
+
+static char *_tc_bzcompress_impl(const char *ptr, int size, int *sp);
+static char *_tc_bzdecompress_impl(const char *ptr, int size, int *sp);
+
+
+char *(*_tc_bzcompress)(const char *, int, int *) = _tc_bzcompress_impl;
+char *(*_tc_bzdecompress)(const char *, int, int *) = _tc_bzdecompress_impl;
+
+
+static char *_tc_bzcompress_impl(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  bz_stream zs;
+  zs.bzalloc = NULL;
+  zs.bzfree = NULL;
+  zs.opaque = NULL;
+  if(BZ2_bzCompressInit(&zs, 9, 0, 0) != BZ_OK) return NULL;
+  int asiz = size + 16;
+  if(asiz < BZIPBUFSIZ) asiz = BZIPBUFSIZ;
+  char *buf;
+  if(!(buf = MYMALLOC(asiz))){
+    BZ2_bzCompressEnd(&zs);
+    return NULL;
+  }
+  char obuf[BZIPBUFSIZ];
+  int bsiz = 0;
+  zs.next_in = (char *)ptr;
+  zs.avail_in = size;
+  zs.next_out = obuf;
+  zs.avail_out = BZIPBUFSIZ;
+  int rv;
+  while((rv = BZ2_bzCompress(&zs, BZ_FINISH)) == BZ_FINISH_OK){
+    int osiz = BZIPBUFSIZ - zs.avail_out;
+    if(bsiz + osiz > asiz){
+      asiz = asiz * 2 + osiz;
+      char *swap;
+      if(!(swap = MYREALLOC(buf, asiz))){
+        MYFREE(buf);
+        BZ2_bzCompressEnd(&zs);
+        return NULL;
+      }
+      buf = swap;
+    }
+    memcpy(buf + bsiz, obuf, osiz);
+    bsiz += osiz;
+    zs.next_out = obuf;
+    zs.avail_out = BZIPBUFSIZ;
+  }
+  if(rv != BZ_STREAM_END){
+    MYFREE(buf);
+    BZ2_bzCompressEnd(&zs);
+    return NULL;
+  }
+  int osiz = BZIPBUFSIZ - zs.avail_out;
+  if(bsiz + osiz + 1 > asiz){
+    asiz = asiz * 2 + osiz;
+    char *swap;
+    if(!(swap = MYREALLOC(buf, asiz))){
+      MYFREE(buf);
+      BZ2_bzCompressEnd(&zs);
+      return NULL;
+    }
+    buf = swap;
+  }
+  memcpy(buf + bsiz, obuf, osiz);
+  bsiz += osiz;
+  buf[bsiz] = '\0';
+  *sp = bsiz;
+  BZ2_bzCompressEnd(&zs);
+  return buf;
+}
+
+
+static char *_tc_bzdecompress_impl(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  bz_stream zs;
+  zs.bzalloc = NULL;
+  zs.bzfree = NULL;
+  zs.opaque = NULL;
+  if(BZ2_bzDecompressInit(&zs, 0, 0) != BZ_OK) return NULL;
+  int asiz = size * 2 + 16;
+  if(asiz < BZIPBUFSIZ) asiz = BZIPBUFSIZ;
+  char *buf;
+  if(!(buf = MYMALLOC(asiz))){
+    BZ2_bzDecompressEnd(&zs);
+    return NULL;
+  }
+  char obuf[BZIPBUFSIZ];
+  int bsiz = 0;
+  zs.next_in = (char *)ptr;
+  zs.avail_in = size;
+  zs.next_out = obuf;
+  zs.avail_out = BZIPBUFSIZ;
+  int rv;
+  while((rv = BZ2_bzDecompress(&zs)) == BZ_OK){
+    int osiz = BZIPBUFSIZ - zs.avail_out;
+    if(bsiz + osiz >= asiz){
+      asiz = asiz * 2 + osiz;
+      char *swap;
+      if(!(swap = MYREALLOC(buf, asiz))){
+        MYFREE(buf);
+        BZ2_bzDecompressEnd(&zs);
+        return NULL;
+      }
+      buf = swap;
+    }
+    memcpy(buf + bsiz, obuf, osiz);
+    bsiz += osiz;
+    zs.next_out = obuf;
+    zs.avail_out = BZIPBUFSIZ;
+  }
+  if(rv != BZ_STREAM_END){
+    MYFREE(buf);
+    BZ2_bzDecompressEnd(&zs);
+    return NULL;
+  }
+  int osiz = BZIPBUFSIZ - zs.avail_out;
+  if(bsiz + osiz >= asiz){
+    asiz = asiz * 2 + osiz;
+    char *swap;
+    if(!(swap = MYREALLOC(buf, asiz))){
+      MYFREE(buf);
+      BZ2_bzDecompressEnd(&zs);
+      return NULL;
+    }
+    buf = swap;
+  }
+  memcpy(buf + bsiz, obuf, osiz);
+  bsiz += osiz;
+  buf[bsiz] = '\0';
+  *sp = bsiz;
+  BZ2_bzDecompressEnd(&zs);
+  return buf;
+}
+
+
+#else
+
+
+char *(*_tc_bzcompress)(const char *, int, int *) = NULL;
+char *(*_tc_bzdecompress)(const char *, int, int *) = NULL;
+
+
+#endif
+
+
+
+/*************************************************************************************************
+ * for test of custom codec functions
+ *************************************************************************************************/
+
+
+#if TCUSEEXLZMA
+
+
+#include <lzmalib.h>
+
+
+void *_tc_recencode(const void *ptr, int size, int *sp, void *op){
+  return lzma_compress(ptr, size, sp);
+}
+
+
+void *_tc_recdecode(const void *ptr, int size, int *sp, void *op){
+  return lzma_decompress(ptr, size, sp);
+}
+
+
+#elif TCUSEEXLZO
+
+
+#include <lzo/lzo1x.h>
+
+
+bool _tc_lzo_init = false;
+
+
+void *_tc_recencode(const void *ptr, int size, int *sp, void *op){
+  if(!_tc_lzo_init){
+    if(lzo_init() != LZO_E_OK) return NULL;
+    _tc_lzo_init = false;
+  }
+  lzo_bytep buf = MYMALLOC(size + (size >> 4) + 80);
+  if(!buf) return NULL;
+  lzo_uint bsiz;
+  char wrkmem[LZO1X_1_MEM_COMPRESS];
+  if(lzo1x_1_compress((lzo_bytep)ptr, size, buf, &bsiz, wrkmem) != LZO_E_OK){
+    MYFREE(buf);
+    return NULL;
+  }
+  buf[bsiz] = '\0';
+  *sp = bsiz;
+  return (char *)buf;
+}
+
+
+void *_tc_recdecode(const void *ptr, int size, int *sp, void *op){
+  if(!_tc_lzo_init){
+    if(lzo_init() != LZO_E_OK) return NULL;
+    _tc_lzo_init = false;
+  }
+  lzo_bytep buf;
+  lzo_uint bsiz;
+  int rat = 6;
+  while(true){
+    bsiz = (size + 256) * rat + 3;
+    buf = MYMALLOC(bsiz + 1);
+    if(!buf) return NULL;
+    int rv = lzo1x_decompress_safe((lzo_bytep)ptr, size, buf, &bsiz, NULL);
+    if(rv == LZO_E_OK){
+      break;
+    } else if(rv == LZO_E_OUTPUT_OVERRUN){
+      MYFREE(buf);
+      rat *= 2;
+    } else {
+      MYFREE(buf);
+      return NULL;
+    }
+  }
+  buf[bsiz] = '\0';
+  if(sp) *sp = bsiz;
+  return (char *)buf;
+}
+
+
+#else
+
+
+void *_tc_recencode(const void *ptr, int size, int *sp, void *op){
+  char *res = MYMALLOC(size + 1);
+  if(!res) return NULL;
+  memcpy(res, ptr, size);
+  *sp = size;
+  return res;
+}
+
+
+void *_tc_recdecode(const void *ptr, int size, int *sp, void *op){
+  char *res = MYMALLOC(size + 1);
+  if(!res) return NULL;
+  memcpy(res, ptr, size);
+  *sp = size;
+  return res;
+}
 
 
 #endif

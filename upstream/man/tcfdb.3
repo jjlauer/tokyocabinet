@@ -1,4 +1,4 @@
-.TH "TCFDB" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCFDB" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcfdb \- the fixed-length database API
@@ -76,7 +76,7 @@ The function `tcfdbecode' is used in order to get the last happened error code o
 The return value is the last happened error code.
 .RE
 .RS
-The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
+The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN' for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error, `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK' for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for miscellaneous error.
 .RE
 .RE
 .PP
@@ -766,6 +766,50 @@ The return value is a list object of the corresponding decimal keys.  This funct
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
+.RE
+.RE
+.PP
+The function `tcfdbaddint' is used in order to add an integer to a record in a fixed\-length database object.
+.PP
+.RS
+.br
+\fBint tcfdbaddint(TCFDB *\fIfdb\fB, int64_t \fIid\fB, int \fInum\fB);\fR
+.RS
+`\fIfdb\fR' specifies the fixed\-length database object connected as a writer.
+.RE
+.RS
+`\fIid\fR' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID number of existing records is specified.  If it is `FDBIDPREV', the number less by one than the minimum ID number of existing records is specified.  If it is `FDBIDMAX', the maximum ID number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than the maximum ID number of existing records is specified.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `INT_MIN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as an integer and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
+The function `tcfdbadddouble' is used in order to add a real number to a record in a fixed\-length database object.
+.PP
+.RS
+.br
+\fBdouble tcfdbadddouble(TCFDB *\fIfdb\fB, int64_t \fIid\fB, double \fInum\fB);\fR
+.RS
+`\fIfdb\fR' specifies the fixed\-length database object connected as a writer.
+.RE
+.RS
+`\fIid\fR' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID number of existing records is specified.  If it is `FDBIDPREV', the number less by one than the minimum ID number of existing records is specified.  If it is `FDBIDMAX', the maximum ID number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than the maximum ID number of existing records is specified.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If successful, the return value is the summation value, else, it is `NAN'.
+.RE
+.RS
+If the corresponding record exists, the value is treated as a real number and is added to.  If no record corresponds, a new record of the additional value is stored.
 .RE
 .RE
 .PP

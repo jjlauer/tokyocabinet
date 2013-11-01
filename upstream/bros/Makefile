@@ -11,7 +11,7 @@
 SHELL = /bin/sh
 
 # Targets
-MYBINS = tctest qdbmtest ndbmtest sdbmtest gdbmtest tdbtest cdbtest bdbtest
+MYBINS = tctest qdbmtest ndbmtest sdbmtest gdbmtest tdbtest cdbtest bdbtest maptest
 
 
 
@@ -100,6 +100,16 @@ bdbtest : bdbtest.c
 	gcc -I/usr/local/bdb/include -D_GNU_SOURCE=1 \
 	  -Wall -O3 -o $@ bdbtest.c \
 	  -static -L/usr/local/bdb/lib -ldb -lpthread -lc
+
+
+maptest : maptest.cc
+	LD_LIBRARY_PATH="$(LD_LIBRARY_PATH):.:.." ; PATH="$(PATH):.:.." ; \
+	  export LD_LIBRARY_PATH PATH ; ldflags=`tcucodec conf -l` ; \
+	  [ -z "$$ldflags" ] && \
+	    ldflags="-L/usr/local/lib -ltokyocabinet -lz -lpthread -lm -lc" ; \
+	  g++ -I.. -I/usr/local/include -D_GNU_SOURCE=1 \
+	    -Wall -ansi -pedantic -O3 -o $@ maptest.cc \
+	    -static -L. -L.. -lstdc++ $$ldflags
 
 
 

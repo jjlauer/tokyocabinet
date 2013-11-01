@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the on-memory database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -21,6 +21,7 @@
 
 typedef struct {                         // type of structure for combo thread
   TCMDB *mdb;
+  TCNDB *ndb;
   int rnum;
   bool rnd;
   int id;
@@ -28,6 +29,7 @@ typedef struct {                         // type of structure for combo thread
 
 typedef struct {                         // type of structure for typical thread
   TCMDB *mdb;
+  TCNDB *ndb;
   int rnum;
   bool nc;
   int rratio;
@@ -43,13 +45,14 @@ const char *g_progname;                  // program name
 int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
+static void iputchar(int c);
 static void eprint(const char *func);
 static int myrand(int range);
 static int myrandnd(int range);
 static int runcombo(int argc, char **argv);
 static int runtypical(int argc, char **argv);
-static int proccombo(int tnum, int rnum, int bnum, bool rnd);
-static int proctypical(int tnum, int rnum, int bnum, bool nc, int rratio);
+static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd);
+static int proctypical(int tnum, int rnum, int bnum, bool tr, bool nc, int rratio);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
 static void *threadremove(void *targ);
@@ -78,8 +81,8 @@ static void usage(void){
   fprintf(stderr, "%s: test cases of the on-memory database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s combo [-rnd] tnum rnum [bnum]\n", g_progname);
-  fprintf(stderr, "  %s typical [-nc] [-rr num] tnum rnum [bnum]\n", g_progname);
+  fprintf(stderr, "  %s combo [-tr] [-rnd] tnum rnum [bnum]\n", g_progname);
+  fprintf(stderr, "  %s typical [-tr] [-nc] [-rr num] tnum rnum [bnum]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -92,6 +95,13 @@ static void iprintf(const char *format, ...){
   vprintf(format, ap);
   fflush(stdout);
   va_end(ap);
+}
+
+
+/* print a character and flush the buffer */
+static void iputchar(int c){
+  putchar(c);
+  fflush(stdout);
 }
 
 
@@ -119,10 +129,13 @@ static int runcombo(int argc, char **argv){
   char *tstr = NULL;
   char *rstr = NULL;
   char *bstr = NULL;
+  bool tr = false;
   bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!tstr && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-rnd")){
+      if(!strcmp(argv[i], "-tr")){
+        tr = true;
+      } else if(!strcmp(argv[i], "-rnd")){
         rnd = true;
       } else {
         usage();
@@ -138,11 +151,11 @@ static int runcombo(int argc, char **argv){
     }
   }
   if(!tstr || !rstr) usage();
-  int tnum = atoi(tstr);
-  int rnum = atoi(rstr);
+  int tnum = tcatoi(tstr);
+  int rnum = tcatoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int rv = proccombo(tnum, rnum, bnum, rnd);
+  int bnum = bstr ? tcatoi(bstr) : -1;
+  int rv = proccombo(tnum, rnum, bnum, tr, rnd);
   return rv;
 }
 
@@ -152,15 +165,18 @@ static int runtypical(int argc, char **argv){
   char *tstr = NULL;
   char *rstr = NULL;
   char *bstr = NULL;
+  bool tr = false;
   int rratio = -1;
   bool nc = false;
   for(int i = 2; i < argc; i++){
     if(!tstr && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-nc")){
+      if(!strcmp(argv[i], "-tr")){
+        tr = true;
+      } else if(!strcmp(argv[i], "-nc")){
         nc = true;
       } else if(!strcmp(argv[i], "-rr")){
         if(++i >= argc) usage();
-        rratio = atoi(argv[i]);
+        rratio = tcatoi(argv[i]);
       } else {
         usage();
       }
@@ -175,25 +191,28 @@ static int runtypical(int argc, char **argv){
     }
   }
   if(!tstr || !rstr) usage();
-  int tnum = atoi(tstr);
-  int rnum = atoi(rstr);
+  int tnum = tcatoi(tstr);
+  int rnum = tcatoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int rv = proctypical(tnum, rnum, bnum, nc, rratio);
+  int bnum = bstr ? tcatoi(bstr) : -1;
+  int rv = proctypical(tnum, rnum, bnum, tr, nc, rratio);
   return rv;
 }
 
 
 /* perform combo command */
-static int proccombo(int tnum, int rnum, int bnum, bool rnd){
-  iprintf("<Combination Test>\n  tnum=%d  rnum=%d  bnum=%d  rnd=%d\n\n", tnum, rnum, bnum, rnd);
+static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
+  iprintf("<Combination Test>\n  tnum=%d  rnum=%d  bnum=%d  tr=%d  rnd=%d\n\n",
+          tnum, rnum, bnum, tr, rnd);
   bool err = false;
   double stime = tctime();
   TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
+  TCNDB *ndb = tcndbnew();
   TARGCOMBO targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
     targs[0].mdb = mdb;
+    targs[0].ndb = tr ? ndb : NULL;
     targs[0].rnum = rnum;
     targs[0].rnd = rnd;
     targs[0].id = 0;
@@ -201,6 +220,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].mdb = mdb;
+      targs[i].ndb = tr ? ndb : NULL;
       targs[i].rnum = rnum;
       targs[i].rnd = rnd;
       targs[i].id = i;
@@ -223,6 +243,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
   }
   if(tnum == 1){
     targs[0].mdb = mdb;
+    targs[0].ndb = tr ? ndb : NULL;
     targs[0].rnum = rnum;
     targs[0].rnd = rnd;
     targs[0].id = 0;
@@ -230,6 +251,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].mdb = mdb;
+      targs[i].ndb = tr ? ndb : NULL;
       targs[i].rnum = rnum;
       targs[i].rnd = rnd;
       targs[i].id = i;
@@ -252,6 +274,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
   }
   if(tnum == 1){
     targs[0].mdb = mdb;
+    targs[0].ndb = tr ? ndb : NULL;
     targs[0].rnum = rnum;
     targs[0].rnd = rnd;
     targs[0].id = 0;
@@ -259,6 +282,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].mdb = mdb;
+      targs[i].ndb = tr ? ndb : NULL;
       targs[i].rnum = rnum;
       targs[i].rnd = rnd;
       targs[i].id = i;
@@ -279,7 +303,14 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
+  if(tr){
+    iprintf("record number: %llu\n", (unsigned long long)tcndbrnum(ndb));
+    iprintf("size: %llu\n", (unsigned long long)tcndbmsiz(ndb));
+  } else {
+    iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
+    iprintf("size: %llu\n", (unsigned long long)tcmdbmsiz(mdb));
+  }
+  tcndbdel(ndb);
   tcmdbdel(mdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
@@ -288,16 +319,18 @@ static int proccombo(int tnum, int rnum, int bnum, bool rnd){
 
 
 /* perform typical command */
-static int proctypical(int tnum, int rnum, int bnum, bool nc, int rratio){
-  iprintf("<Typical Access Test>\n  tnum=%d  rnum=%d  bnum=%d  nc=%d  rratio=%d\n\n",
-          tnum, rnum, bnum, nc, rratio);
+static int proctypical(int tnum, int rnum, int bnum, bool tr, bool nc, int rratio){
+  iprintf("<Typical Access Test>\n  tnum=%d  rnum=%d  bnum=%d  tr=%d  nc=%d  rratio=%d\n\n",
+          tnum, rnum, bnum, tr, nc, rratio);
   bool err = false;
   double stime = tctime();
   TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
+  TCNDB *ndb = tcndbnew();
   TARGTYPICAL targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
     targs[0].mdb = mdb;
+    targs[0].ndb = tr ? ndb : NULL;
     targs[0].rnum = rnum;
     targs[0].nc = nc;
     targs[0].rratio = rratio;
@@ -306,6 +339,7 @@ static int proctypical(int tnum, int rnum, int bnum, bool nc, int rratio){
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].mdb = mdb;
+      targs[i].ndb = tr ? ndb : NULL;
       targs[i].rnum = rnum;
       targs[i].nc = nc;
       targs[i].rratio= rratio;
@@ -327,7 +361,14 @@ static int proctypical(int tnum, int rnum, int bnum, bool nc, int rratio){
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
+  if(tr){
+    iprintf("record number: %llu\n", (unsigned long long)tcndbrnum(ndb));
+    iprintf("size: %llu\n", (unsigned long long)tcndbmsiz(ndb));
+  } else {
+    iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
+    iprintf("size: %llu\n", (unsigned long long)tcmdbmsiz(mdb));
+  }
+  tcndbdel(ndb);
   tcmdbdel(mdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
@@ -338,6 +379,7 @@ static int proctypical(int tnum, int rnum, int bnum, bool nc, int rratio){
 /* thread the write function */
 static void *threadwrite(void *targ){
   TCMDB *mdb = ((TARGCOMBO *)targ)->mdb;
+  TCNDB *ndb = ((TARGCOMBO *)targ)->ndb;
   int rnum = ((TARGCOMBO *)targ)->rnum;
   bool rnd = ((TARGCOMBO *)targ)->rnd;
   int id = ((TARGCOMBO *)targ)->id;
@@ -347,10 +389,13 @@ static void *threadwrite(void *targ){
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", base + (rnd ? myrand(i) : i));
-    tcmdbput(mdb, buf, len, buf, len);
+    if(ndb){
+      tcndbput(ndb, buf, len, buf, len);
+    } else {
+      tcmdbput(mdb, buf, len, buf, len);
+    }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -362,6 +407,7 @@ static void *threadwrite(void *targ){
 /* thread the read function */
 static void *threadread(void *targ){
   TCMDB *mdb = ((TARGCOMBO *)targ)->mdb;
+  TCNDB *ndb = ((TARGCOMBO *)targ)->ndb;
   int rnum = ((TARGCOMBO *)targ)->rnum;
   bool rnd = ((TARGCOMBO *)targ)->rnd;
   int id = ((TARGCOMBO *)targ)->id;
@@ -372,11 +418,10 @@ static void *threadread(void *targ){
     char kbuf[RECBUFSIZ];
     int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrand(i) : i));
     int vsiz;
-    char *vbuf = tcmdbget(mdb, kbuf, ksiz, &vsiz);
+    char *vbuf = ndb ? tcndbget(ndb, kbuf, ksiz, &vsiz) : tcmdbget(mdb, kbuf, ksiz, &vsiz);
     if(vbuf) tcfree(vbuf);
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -388,6 +433,7 @@ static void *threadread(void *targ){
 /* thread the remove function */
 static void *threadremove(void *targ){
   TCMDB *mdb = ((TARGCOMBO *)targ)->mdb;
+  TCNDB *ndb = ((TARGCOMBO *)targ)->ndb;
   int rnum = ((TARGCOMBO *)targ)->rnum;
   bool rnd = ((TARGCOMBO *)targ)->rnd;
   int id = ((TARGCOMBO *)targ)->id;
@@ -397,10 +443,13 @@ static void *threadremove(void *targ){
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", base + (rnd ? myrand(i) : i));
-    tcmdbout(mdb, buf, len);
+    if(ndb){
+      tcndbout(ndb, buf, len);
+    } else {
+      tcmdbout(mdb, buf, len);
+    }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -412,6 +461,7 @@ static void *threadremove(void *targ){
 /* thread the typical function */
 static void *threadtypical(void *targ){
   TCMDB *mdb = ((TARGTYPICAL *)targ)->mdb;
+  TCNDB *ndb = ((TARGCOMBO *)targ)->ndb;
   int rnum = ((TARGTYPICAL *)targ)->rnum;
   bool nc = ((TARGTYPICAL *)targ)->nc;
   int rratio = ((TARGTYPICAL *)targ)->rratio;
@@ -425,27 +475,43 @@ static void *threadtypical(void *targ){
     int len = sprintf(buf, "%08d", base + myrandnd(i));
     int rnd = myrand(mrange);
     if(rnd < 10){
-      tcmdbput(mdb, buf, len, buf, len);
+      if(ndb){
+        tcndbput(ndb, buf, len, buf, len);
+      } else {
+        tcmdbput(mdb, buf, len, buf, len);
+      }
       if(map) tcmapput(map, buf, len, buf, len);
     } else if(rnd < 15){
-      tcmdbputkeep(mdb, buf, len, buf, len);
+      if(ndb){
+        tcndbputkeep(ndb, buf, len, buf, len);
+      } else {
+        tcmdbputkeep(mdb, buf, len, buf, len);
+      }
       if(map) tcmapputkeep(map, buf, len, buf, len);
     } else if(rnd < 20){
-      tcmdbputcat(mdb, buf, len, buf, len);
+      if(ndb){
+        tcndbputcat(ndb, buf, len, buf, len);
+      } else {
+        tcmdbputcat(mdb, buf, len, buf, len);
+      }
       if(map) tcmapputcat(map, buf, len, buf, len);
     } else if(rnd < 30){
-      tcmdbout(mdb, buf, len);
+      if(ndb){
+        tcndbout(ndb, buf, len);
+      } else {
+        tcmdbout(mdb, buf, len);
+      }
       if(map) tcmapout(map, buf, len);
     } else if(rnd < 31){
       if(myrand(10) == 0) tcmdbiterinit(mdb);
       for(int j = 0; !err && j < 10; j++){
         int ksiz;
-        char *kbuf = tcmdbiternext(mdb, &ksiz);
+        char *kbuf = ndb ? tcndbiternext(ndb, &ksiz) : tcmdbiternext(mdb, &ksiz);
         if(kbuf) tcfree(kbuf);
       }
     } else {
       int vsiz;
-      char *vbuf = tcmdbget(mdb, buf, len, &vsiz);
+      char *vbuf = ndb ? tcndbget(ndb, buf, len, &vsiz) : tcmdbget(mdb, buf, len, &vsiz);
       if(vbuf){
         if(map){
           int msiz;
@@ -464,8 +530,7 @@ static void *threadtypical(void *targ){
       }
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -475,7 +540,7 @@ static void *threadtypical(void *targ){
     const char *kbuf;
     while(!err && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
       int vsiz;
-      char *vbuf = tcmdbget(mdb, kbuf, ksiz, &vsiz);
+      char *vbuf = ndb ? tcndbget(ndb, kbuf, ksiz, &vsiz) : tcmdbget(mdb, kbuf, ksiz, &vsiz);
       if(vbuf){
         int msiz;
         const char *mbuf = tcmapget(map, kbuf, ksiz, &msiz);

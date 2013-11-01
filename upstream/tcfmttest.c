@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the fixed-length database API
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -69,8 +69,10 @@ int g_dbgfd;                             // debugging output
 int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
+static void iputchar(int c);
 static void eprint(TCFDB *fdb, const char *func);
 static void mprint(TCFDB *fdb);
+static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op);
 static int myrand(int range);
 static int myrandnd(int range);
 static int runwrite(int argc, char **argv);
@@ -97,7 +99,7 @@ int main(int argc, char **argv){
   g_progname = argv[0];
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
-  if(ebuf) g_dbgfd = atoi(ebuf);
+  if(ebuf) g_dbgfd = tcatoi(ebuf);
   srand((unsigned int)(tctime() * 1000) % UINT_MAX);
   if(argc < 2) usage();
   int rv = 0;
@@ -145,6 +147,13 @@ static void iprintf(const char *format, ...){
 }
 
 
+/* print a character and flush the buffer */
+static void iputchar(int c){
+  putchar(c);
+  fflush(stdout);
+}
+
+
 /* print error message of fixed-length database */
 static void eprint(TCFDB *fdb, const char *func){
   const char *path = tcfdbpath(fdb);
@@ -165,6 +174,19 @@ static void mprint(TCFDB *fdb){
   iprintf("cnt_writerec: %lld\n", (long long)fdb->cnt_writerec);
   iprintf("cnt_readrec: %lld\n", (long long)fdb->cnt_readrec);
   iprintf("cnt_truncfile: %lld\n", (long long)fdb->cnt_truncfile);
+}
+
+
+/* iterator function */
+static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op){
+  unsigned int sum = 0;
+  while(--ksiz >= 0){
+    sum += ((char *)kbuf)[ksiz];
+  }
+  while(--vsiz >= 0){
+    sum += ((char *)vbuf)[vsiz];
+  }
+  return myrand(100 + (sum & 0xff)) > 0;
 }
 
 
@@ -216,10 +238,10 @@ static int runwrite(int argc, char **argv){
     }
   }
   if(!path || !tstr || !rstr) usage();
-  int tnum = atoi(tstr);
-  int rnum = atoi(rstr);
+  int tnum = tcatoi(tstr);
+  int rnum = tcatoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int width = wstr ? atoi(wstr) : -1;
+  int width = wstr ? tcatoi(wstr) : -1;
   int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
   int rv = procwrite(path, tnum, rnum, width, limsiz, omode, rnd);
   return rv;
@@ -255,7 +277,7 @@ static int runread(int argc, char **argv){
     }
   }
   if(!path || !tstr) usage();
-  int tnum = atoi(tstr);
+  int tnum = tcatoi(tstr);
   if(tnum < 1) usage();
   int rv = procread(path, tnum, omode, wb, rnd);
   return rv;
@@ -288,7 +310,7 @@ static int runremove(int argc, char **argv){
     }
   }
   if(!path || !tstr) usage();
-  int tnum = atoi(tstr);
+  int tnum = tcatoi(tstr);
   if(tnum < 1) usage();
   int rv = procremove(path, tnum, omode, rnd);
   return rv;
@@ -324,8 +346,8 @@ static int runwicked(int argc, char **argv){
     }
   }
   if(!path || !tstr || !rstr) usage();
-  int tnum = atoi(tstr);
-  int rnum = atoi(rstr);
+  int tnum = tcatoi(tstr);
+  int rnum = tcatoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
   int rv = procwicked(path, tnum, rnum, omode, nc);
   return rv;
@@ -352,7 +374,7 @@ static int runtypical(int argc, char **argv){
         nc = true;
       } else if(!strcmp(argv[i], "-rr")){
         if(++i >= argc) usage();
-        rratio = atoi(argv[i]);
+        rratio = tcatoi(argv[i]);
       } else {
         usage();
       }
@@ -371,10 +393,10 @@ static int runtypical(int argc, char **argv){
     }
   }
   if(!path || !tstr || !rstr) usage();
-  int tnum = atoi(tstr);
-  int rnum = atoi(rstr);
+  int tnum = tcatoi(tstr);
+  int rnum = tcatoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int width = wstr ? atoi(wstr) : -1;
+  int width = wstr ? tcatoi(wstr) : -1;
   int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
   int rv = proctypical(path, tnum, rnum, width, limsiz, omode, nc, rratio);
   return rv;
@@ -648,7 +670,7 @@ static int procwicked(const char *path, int tnum, int rnum, int omode, bool nc){
       int rsiz;
       char *rbuf = tcfdbget2(fdb, kbuf, ksiz, &rsiz);
       if(vbuf){
-        putchar('.');
+        iputchar('.');
         if(vsiz > RECBUFSIZ) vsiz = RECBUFSIZ;
         if(!rbuf){
           eprint(fdb, "tcfdbget");
@@ -658,7 +680,7 @@ static int procwicked(const char *path, int tnum, int rnum, int omode, bool nc){
           err = true;
         }
       } else {
-        putchar('*');
+        iputchar('*');
         if(rbuf || tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "(validation)");
           err = true;
@@ -770,8 +792,7 @@ static void *threadwrite(void *targ){
       break;
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -807,8 +828,7 @@ static void *threadread(void *targ){
       tcfree(vbuf);
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -833,8 +853,7 @@ static void *threadremove(void *targ){
       break;
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
@@ -862,7 +881,7 @@ static void *threadwicked(void *targ){
     if(!nc) tcglobalmutexlock();
     switch(myrand(16)){
     case 0:
-      if(id == 0) putchar('0');
+      if(id == 0) iputchar('0');
       if(!tcfdbput2(fdb, kbuf, ksiz, vbuf, vsiz)){
         eprint(fdb, "tcfdbput2");
         err = true;
@@ -870,7 +889,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapput(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 1:
-      if(id == 0) putchar('1');
+      if(id == 0) iputchar('1');
       if(!tcfdbput3(fdb, kbuf, vbuf)){
         eprint(fdb, "tcfdbput3");
         err = true;
@@ -878,7 +897,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapput2(map, kbuf, vbuf);
       break;
     case 2:
-      if(id == 0) putchar('2');
+      if(id == 0) iputchar('2');
       if(!tcfdbputkeep2(fdb, kbuf, ksiz, vbuf, vsiz) && tcfdbecode(fdb) != TCEKEEP){
         eprint(fdb, "tcfdbputkeep2");
         err = true;
@@ -886,7 +905,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 3:
-      if(id == 0) putchar('3');
+      if(id == 0) iputchar('3');
       if(!tcfdbputkeep3(fdb, kbuf, vbuf) && tcfdbecode(fdb) != TCEKEEP){
         eprint(fdb, "tcfdbputkeep3");
         err = true;
@@ -894,7 +913,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapputkeep2(map, kbuf, vbuf);
       break;
     case 4:
-      if(id == 0) putchar('4');
+      if(id == 0) iputchar('4');
       if(!tcfdbputcat2(fdb, kbuf, ksiz, vbuf, vsiz)){
         eprint(fdb, "tcfdbputcat2");
         err = true;
@@ -902,7 +921,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 5:
-      if(id == 0) putchar('5');
+      if(id == 0) iputchar('5');
       if(!tcfdbputcat3(fdb, kbuf, vbuf)){
         eprint(fdb, "tcfdbputcat3");
         err = true;
@@ -910,7 +929,7 @@ static void *threadwicked(void *targ){
       if(!nc) tcmapputcat2(map, kbuf, vbuf);
       break;
     case 6:
-      if(id == 0) putchar('6');
+      if(id == 0) iputchar('6');
       if(myrand(10) == 0){
         if(!tcfdbout2(fdb, kbuf, ksiz) && tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbout2");
@@ -920,7 +939,7 @@ static void *threadwicked(void *targ){
       }
       break;
     case 7:
-      if(id == 0) putchar('7');
+      if(id == 0) iputchar('7');
       if(myrand(10) == 0){
         if(!tcfdbout3(fdb, kbuf) && tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbout3");
@@ -930,7 +949,7 @@ static void *threadwicked(void *targ){
       }
       break;
     case 8:
-      if(id == 0) putchar('8');
+      if(id == 0) iputchar('8');
       if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz))){
         if(tcfdbecode(fdb) != TCENOREC){
           eprint(fdb, "tcfdbget2");
@@ -953,7 +972,7 @@ static void *threadwicked(void *targ){
       tcfree(rbuf);
       break;
     case 9:
-      if(id == 0) putchar('9');
+      if(id == 0) iputchar('9');
       if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz)) && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbget2");
         err = true;
@@ -961,7 +980,7 @@ static void *threadwicked(void *targ){
       tcfree(rbuf);
       break;
     case 10:
-      if(id == 0) putchar('A');
+      if(id == 0) iputchar('A');
       if(!(rbuf = tcfdbget3(fdb, kbuf)) && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbge3");
         err = true;
@@ -969,7 +988,7 @@ static void *threadwicked(void *targ){
       tcfree(rbuf);
       break;
     case 11:
-      if(id == 0) putchar('B');
+      if(id == 0) iputchar('B');
       if(myrand(1) == 0) vsiz = 1;
       if((vsiz = tcfdbget4(fdb, kid, vbuf, vsiz)) < 0 && tcfdbecode(fdb) != TCENOREC){
         eprint(fdb, "tcfdbget4");
@@ -977,7 +996,7 @@ static void *threadwicked(void *targ){
       }
       break;
     case 14:
-      if(id == 0) putchar('E');
+      if(id == 0) iputchar('E');
       if(myrand(rnum / 50) == 0){
         if(!tcfdbiterinit(fdb)){
           eprint(fdb, "tcfdbiterinit");
@@ -995,7 +1014,13 @@ static void *threadwicked(void *targ){
       }
       break;
     default:
-      if(id == 0) putchar('@');
+      if(id == 0) iputchar('@');
+      if(myrand(1000) == 0){
+        if(!tcfdbforeach(fdb, iterfunc, NULL)){
+          eprint(fdb, "tcfdbforeach");
+          err = true;
+        }
+      }
       if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
       break;
     }
@@ -1096,8 +1121,7 @@ static void *threadtypical(void *targ){
       }
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
+      iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }

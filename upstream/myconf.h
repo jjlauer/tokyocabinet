@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * System-dependent configurations of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -153,10 +153,35 @@
 #define TCITOHLL(TC_num)  (TC_num)
 #endif
 
+#if defined(_SYS_LINUX_) || defined(_SYS_FREEBSD_) || defined(_SYS_NETBSD_) || \
+  defined(_SYS_MACOSX_) || defined(_SYS_SUNOS_)
+#define TCUBCACHE      1
+#else
+#define TCUBCACHE      0
+#endif
+
 #if defined(_MYNOZLIB)
 #define TCUSEZLIB      0
 #else
 #define TCUSEZLIB      1
+#endif
+
+#if defined(_MYNOBZIP)
+#define TCUSEBZIP      0
+#else
+#define TCUSEBZIP      1
+#endif
+
+#if defined(_MYEXLZMA)
+#define TCUSEEXLZMA    1
+#else
+#define TCUSEEXLZMA    0
+#endif
+
+#if defined(_MYEXLZO)
+#define TCUSEEXLZO     1
+#else
+#define TCUSEEXLZO     0
 #endif
 
 #if defined(_MYNOPTHREAD)
@@ -204,11 +229,13 @@
 #include <stdint.h>
 
 #include <unistd.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <regex.h>
@@ -227,7 +254,21 @@
 
 #define sizeof(a)      ((int)sizeof(a))
 
+#if defined(_SYS_FREEBSD_) || defined(_SYS_NETBSD_) || defined(_SYS_OPENBSD_)
+#define nan(TC_a)      strtod("nan", NULL)
+#endif
+
+#if ! defined(PATH_MAX)
+#if defined(MAXPATHLEN)
+#define PATH_MAX       MAXPATHLEN
+#else
+#define PATH_MAX       4096
+#endif
+#endif
+
+
 int _tc_dummyfunc(void);
+
 int _tc_dummyfuncv(int a, ...);
 
 
@@ -267,51 +308,76 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 
 /*************************************************************************************************
+ * for BZIP2
+ *************************************************************************************************/
+
+
+extern char *(*_tc_bzcompress)(const char *, int, int *);
+
+extern char *(*_tc_bzdecompress)(const char *, int, int *);
+
+
+
+/*************************************************************************************************
+ * for test of custom codec functions
+ *************************************************************************************************/
+
+
+void *_tc_recencode(const void *ptr, int size, int *sp, void *op);
+
+void *_tc_recdecode(const void *ptr, int size, int *sp, void *op);
+
+
+
+/*************************************************************************************************
  * for POSIX thread disability
  *************************************************************************************************/
 
 
 #if ! TCUSEPTHREAD
 
-#define pthread_once_t                   int
+#define pthread_t                        intptr_t
+
+#define pthread_once_t                   intptr_t
 #undef PTHREAD_ONCE_INIT
 #define PTHREAD_ONCE_INIT                0
-#define pthread_once(TC_a, TC_b)         _tc_dummyfuncv((int)(TC_a), (TC_b))
+#define pthread_once(TC_a, TC_b)         _tc_dummyfuncv((intptr_t)(TC_a), (TC_b))
 
-#define pthread_mutexattr_t              int
+#define pthread_mutexattr_t              intptr_t
 #undef PTHREAD_MUTEX_RECURSIVE
 #define PTHREAD_MUTEX_RECURSIVE          0
-#define pthread_mutexattr_init(TC_a)     _tc_dummyfuncv((int)(TC_a))
-#define pthread_mutexattr_destroy(TC_a)  _tc_dummyfuncv((int)(TC_a))
-#define pthread_mutexattr_settype(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a), (TC_b))
+#define pthread_mutexattr_init(TC_a)     _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_mutexattr_destroy(TC_a)  _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_mutexattr_settype(TC_a, TC_b)  _tc_dummyfuncv((intptr_t)(TC_a), (TC_b))
 
-#define pthread_mutex_t                  int
+#define pthread_mutex_t                  intptr_t
 #undef PTHREAD_MUTEX_INITIALIZER
 #define PTHREAD_MUTEX_INITIALIZER        0
-#define pthread_mutex_init(TC_a, TC_b)   _tc_dummyfuncv((int)(TC_a), (TC_b))
-#define pthread_mutex_destroy(TC_a)      _tc_dummyfuncv((int)(TC_a))
-#define pthread_mutex_lock(TC_a)         _tc_dummyfuncv((int)(TC_a))
-#define pthread_mutex_unlock(TC_a)       _tc_dummyfuncv((int)(TC_a))
+#define pthread_mutex_init(TC_a, TC_b)   _tc_dummyfuncv((intptr_t)(TC_a), (TC_b))
+#define pthread_mutex_destroy(TC_a)      _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_mutex_lock(TC_a)         _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_mutex_unlock(TC_a)       _tc_dummyfuncv((intptr_t)(TC_a))
 
-#define pthread_rwlock_t                 int
+#define pthread_rwlock_t                 intptr_t
 #undef PTHREAD_RWLOCK_INITIALIZER
 #define PTHREAD_RWLOCK_INITIALIZER       0
-#define pthread_rwlock_init(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a), (TC_b))
-#define pthread_rwlock_destroy(TC_a)     _tc_dummyfuncv((int)(TC_a))
-#define pthread_rwlock_rdlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
-#define pthread_rwlock_wrlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
-#define pthread_rwlock_unlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
+#define pthread_rwlock_init(TC_a, TC_b)  _tc_dummyfuncv((intptr_t)(TC_a), (TC_b))
+#define pthread_rwlock_destroy(TC_a)     _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_rwlock_rdlock(TC_a)      _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_rwlock_wrlock(TC_a)      _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_rwlock_unlock(TC_a)      _tc_dummyfuncv((intptr_t)(TC_a))
 
-#define pthread_key_create(TC_a, TC_b)   _tc_dummyfuncv((int)(TC_a), (TC_b))
-#define pthread_key_delete(TC_a)         _tc_dummyfuncv((int)(TC_a))
-#define pthread_setspecific(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a))
-#define pthread_getspecific(TC_a)        _tc_dummyfuncv((int)(TC_a))
+#define pthread_key_t                    intptr_t
+#define pthread_key_create(TC_a, TC_b)   _tc_dummyfuncv((intptr_t)(TC_a), (TC_b))
+#define pthread_key_delete(TC_a)         _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_setspecific(TC_a, TC_b)  _tc_dummyfuncv((intptr_t)(TC_a))
+#define pthread_getspecific(TC_a)        _tc_dummyfuncv((intptr_t)(TC_a))
 
 #define pthread_create(TC_th, TC_attr, TC_func, TC_arg) \
   (*(TC_th) = 0, (TC_func)(TC_arg), 0)
-#define pthread_join(TC_th, TC_rv) \
-  (*(TC_rv) = NULL, 0)
-#define pthread_detach(TC_th)         0
+#define pthread_join(TC_th, TC_rv)       (*(TC_rv) = NULL, 0)
+#define pthread_detach(TC_th)            0
+#define pthread_yield()                  _tc_dummyfunc()
 
 #endif
 
@@ -337,6 +403,10 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 #define TCTESTYIELD() \
   do { \
   } while(false);
+#endif
+
+#if defined(_SYS_MACOSX_) && TCUSEPTHREAD
+#define pthread_yield()                  usleep(1000 * 20)
 #endif
 
 

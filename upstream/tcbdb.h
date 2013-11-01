@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The B+ tree database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -31,6 +31,8 @@ __TCBDB_CLINKAGEBEGIN
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <limits.h>
+#include <math.h>
 #include <tcutil.h>
 #include <tchdb.h>
 
@@ -41,20 +43,9 @@ __TCBDB_CLINKAGEBEGIN
  *************************************************************************************************/
 
 
-/* type of the pointer to a comparison function.
-   `aptr' specifies the pointer to the region of one key.
-   `asiz' specifies the size of the region of one key.
-   `bptr' specifies the pointer to the region of the other key.
-   `bsiz' specifies the size of the region of the other key.
-   `op' specifies the pointer to the optional opaque object.
-   The return value is positive if the former is big, negative if the latter is big, 0 if both
-   are equivalent. */
-typedef int (*BDBCMP)(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
-
 typedef struct {                         /* type of structure for a B+ tree database */
   void *mmtx;                            /* mutex for method */
   void *cmtx;                            /* mutex for cache */
-  void *tmtx;                            /* mutex for transaction */
   TCHDB *hdb;                            /* internal database object */
   char *opaque;                          /* opaque buffer */
   bool open;                             /* whether the internal database is opened */
@@ -70,7 +61,7 @@ typedef struct {                         /* type of structure for a B+ tree data
   uint64_t rnum;                         /* number of records */
   TCMAP *leafc;                          /* cache for leaves */
   TCMAP *nodec;                          /* cache for nodes */
-  BDBCMP cmp;                            /* pointer to the comparison function */
+  TCCMP cmp;                             /* pointer to the comparison function */
   void *cmpop;                           /* opaque object for the comparison function */
   uint32_t lcnum;                        /* max number of cached leaves */
   uint32_t ncnum;                        /* max number of cached nodes */
@@ -100,7 +91,9 @@ enum {                                   /* enumeration for additional flags */
 enum {                                   /* enumeration for tuning options */
   BDBTLARGE = 1 << 0,                    /* use 64-bit bucket array */
   BDBTDEFLATE = 1 << 1,                  /* compress each page with Deflate */
-  BDBTTCBS = 1 << 2                      /* compress each page with TCBS */
+  BDBTBZIP = 1 << 2,                     /* compress each record with BZIP2 */
+  BDBTTCBS = 1 << 3,                     /* compress each page with TCBS */
+  BDBTEXCODEC = 1 << 4                   /* compress each record with outer functions */
 };
 
 enum {                                   /* enumeration for open modes */
@@ -109,7 +102,8 @@ enum {                                   /* enumeration for open modes */
   BDBOCREAT = 1 << 2,                    /* writer creating */
   BDBOTRUNC = 1 << 3,                    /* writer truncating */
   BDBONOLCK = 1 << 4,                    /* open without locking */
-  BDBOLCKNB = 1 << 5                     /* lock without blocking */
+  BDBOLCKNB = 1 << 5,                    /* lock without blocking */
+  BDBOTSYNC = 1 << 6                     /* synchronize every transaction */
 };
 
 typedef struct {                         /* type of structure for a B+ tree cursor */
@@ -147,7 +141,7 @@ void tcbdbdel(TCBDB *bdb);
 /* Get the last happened error code of a B+ tree database object.
    `bdb' specifies the B+ tree database object.
    The return value is the last happened error code.
-   The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading
+   The following error codes are defined: `TCESUCCESS' for success, `TCETHREAD' for threading
    error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no
    permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN'
    for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync
@@ -174,11 +168,10 @@ bool tcbdbsetmutex(TCBDB *bdb);
    If it is not needed, `NULL' can be specified.
    If successful, the return value is true, else, it is false.
    The default comparison function compares keys of two records by lexical order.  The functions
-   `tcbdbcmplexical' (dafault), `tcbdbcmpdecimal', `tcbdbcmpint32', and `tcbdbcmpint64' are
-   built-in.  Note that the comparison function should be set before the database is opened.
-   Moreover, user-defined comparison functions should be set every time the database is being
-   opened. */
-bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
+   `tctccmplexical' (dafault), `tctccmpdecimal', `tctccmpint32', and `tctccmpint64' are built-in.
+   Note that the comparison function should be set before the database is opened.  Moreover,
+   user-defined comparison functions should be set every time the database is being opened. */
+bool tcbdbsetcmpfunc(TCBDB *bdb, TCCMP cmp, void *cmpop);
 
 
 /* Set the tuning parameters of a B+ tree database object.
@@ -188,7 +181,7 @@ bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
    `nmemb' specifies the number of members in each non-leaf page.  If it is not more than 0, the
    default value is specified.  The default value is 256.
    `bnum' specifies the number of elements of the bucket array.  If it is not more than 0, the
-   default value is specified.  The default value is 16381.  Suggested size of the bucket array
+   default value is specified.  The default value is 32749.  Suggested size of the bucket array
    is about from 1 to 4 times of the number of all pages to be stored.
    `apow' specifies the size of record alignment by power of 2.  If it is negative, the default
    value is specified.  The default value is 8 standing for 2^8=256.
@@ -196,8 +189,8 @@ bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
    is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
    `opts' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `BDBTDEFLATE' specifies that each page
-   is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with
-   TCBS encoding.
+   is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with
+   BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.
    If successful, the return value is true, else, it is false.
    Note that the tuning parameters should be set before the database is opened. */
 bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
@@ -215,13 +208,23 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
 bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum);
 
 
+/* Set the size of the extra mapped memory of a B+ tree database object.
+   `bdb' specifies the B+ tree database object which is not opened.
+   `xmsiz' specifies the size of the extra mapped memory.  If it is not more than 0, the extra
+   mapped memory is disabled.  It is disabled by default.
+   If successful, the return value is true, else, it is false.
+   Note that the mapping parameters should be set before the database is opened. */
+bool tcbdbsetxmsiz(TCBDB *bdb, int64_t xmsiz);
+
+
 /* Open a database file and connect a B+ tree database object.
    `bdb' specifies the B+ tree database object which is not opened.
    `path' specifies the path of the database file.
    `omode' specifies the connection mode: `BDBOWRITER' as a writer, `BDBOREADER' as a reader.
    If the mode is `BDBOWRITER', the following may be added by bitwise or: `BDBOCREAT', which
-   means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database
-   regardless if one exists.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by
+   means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new
+   database regardless if one exists, `BDBOTSYNC', which means every transaction synchronizes
+   updated contents with the device.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by
    bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or
    `BDBOLCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
@@ -506,6 +509,28 @@ TCLIST *tcbdbfwmkeys(TCBDB *bdb, const void *pbuf, int psiz, int max);
 TCLIST *tcbdbfwmkeys2(TCBDB *bdb, const char *pstr, int max);
 
 
+/* Add an integer to a record in a B+ tree database object.
+   `bdb' specifies the B+ tree database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `INT_MIN'.
+   If the corresponding record exists, the value is treated as an integer and is added to.  If no
+   record corresponds, a new record of the additional value is stored. */
+int tcbdbaddint(TCBDB *bdb, const void *kbuf, int ksiz, int num);
+
+
+/* Add a real number to a record in a B+ tree database object.
+   `bdb' specifies the B+ tree database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If successful, the return value is the summation value, else, it is `NAN'.
+   If the corresponding record exists, the value is treated as a real number and is added to.  If
+   no record corresponds, a new record of the additional value is stored. */
+double tcbdbadddouble(TCBDB *bdb, const void *kbuf, int ksiz, double num);
+
+
 /* Synchronize updated contents of a B+ tree database object with the file and the device.
    `bdb' specifies the B+ tree database object connected as a writer.
    If successful, the return value is true, else, it is false.
@@ -527,8 +552,9 @@ bool tcbdbsync(TCBDB *bdb);
    is negative, the current setting is not changed.
    `opts' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `BDBTDEFLATE' specifies that each record
-   is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with
-   TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+   is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with
+   BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.  If it
+   is `UINT8_MAX', the current setting is not changed.
    If successful, the return value is true, else, it is false.
    This function is useful to reduce the size of the database file with data fragmentation by
    successive updating. */
@@ -692,7 +718,7 @@ bool tcbdbcurput(BDBCUR *cur, const void *vbuf, int vsiz, int cpmode);
 bool tcbdbcurput2(BDBCUR *cur, const char *vstr, int cpmode);
 
 
-/* Delete the record where a cursor object is.
+/* Remove the record where a cursor object is.
    `cur' specifies the cursor object of writer connection.
    If successful, the return value is true, else, it is false.  False is returned when the cursor
    is at invalid position.
@@ -806,17 +832,23 @@ void tcbdbsetdbgfd(TCBDB *bdb, int fd);
 int tcbdbdbgfd(TCBDB *bdb);
 
 
-/* Synchronize updating contents on memory.
+/* Synchronize updating contents on memory of a B+ tree database object.
    `bdb' specifies the B+ tree database object connected as a writer.
    `phys' specifies whether to synchronize physically.
    If successful, the return value is true, else, it is false. */
 bool tcbdbmemsync(TCBDB *bdb, bool phys);
 
 
+/* Clear the cache of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   If successful, the return value is true, else, it is false. */
+bool tcbdbcacheclear(TCBDB *bdb);
+
+
 /* Get the comparison function of a B+ tree database object.
    `bdb' specifies the B+ tree database object.
    The return value is the pointer to the comparison function. */
-BDBCMP tcbdbcmpfunc(TCBDB *bdb);
+TCCMP tcbdbcmpfunc(TCBDB *bdb);
 
 
 /* Get the opaque object for the comparison function of a B+ tree database object.
@@ -930,6 +962,20 @@ bool tcbdbsetlsmax(TCBDB *bdb, uint32_t lsmax);
 bool tcbdbsetcapnum(TCBDB *bdb, uint64_t capnum);
 
 
+/* Set the custom codec functions of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `enc' specifies the pointer to the custom encoding function.
+   `encop' specifies an arbitrary pointer to be given as a parameter of the encoding function.
+   If it is not needed, `NULL' can be specified.
+   `dec' specifies the pointer to the custom decoding function.
+   `decop' specifies an arbitrary pointer to be given as a parameter of the decoding function.
+   If it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false.
+   Note that the custom codec functions should be set before the database is opened and should be
+   set every time the database is being opened. */
+bool tcbdbsetcodecfunc(TCBDB *bdb, TCCODEC enc, void *encop, TCCODEC dec, void *decop);
+
+
 /* Store a new record into a B+ tree database object with backward duplication.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kbuf' specifies the pointer to the region of the key.
@@ -973,52 +1019,13 @@ bool tcbdbcurjumpback(BDBCUR *cur, const void *kbuf, int ksiz);
 bool tcbdbcurjumpback2(BDBCUR *cur, const char *kstr);
 
 
-/* Compare two keys by lexical order.
-   `aptr' specifies the pointer to the region of one key.
-   `asiz' specifies the size of the region of one key.
-   `bptr' specifies the pointer to the region of the other key.
-   `bsiz' specifies the size of the region of the other key.
-   `op' specifies the pointer to the optional opaque object.
-   The return value is positive if the former is big, negative if the latter is big, 0 if both
-   are equivalent. */
-int tcbdbcmplexical(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
-
-
-/* Compare two keys as decimal strings of real numbers.
-   `aptr' specifies the pointer to the region of one key.
-   `asiz' specifies the size of the region of one key.
-   `bptr' specifies the pointer to the region of the other key.
-   `bsiz' specifies the size of the region of the other key.
-   `op' is ignored.
-   The return value is positive if the former is big, negative if the latter is big, 0 if both
-   are equivalent. */
-int tcbdbcmpdecimal(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
-
-
-/* Compare two keys as 32-bit integers in the native byte order.
-   `aptr' specifies the pointer to the region of one key.
-   `asiz' specifies the size of the region of one key.
-   `bptr' specifies the pointer to the region of the other key.
-   `bsiz' specifies the size of the region of the other key.
-   `op' is ignored.
-   The return value is positive if the former is big, negative if the latter is big, 0 if both
-   are equivalent. */
-int tcbdbcmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
-
-
-/* Compare two keys as 64-bit integers in the native byte order.
-   `aptr' specifies the pointer to the region of one key.
-   `asiz' specifies the size of the region of one key.
-   `bptr' specifies the pointer to the region of the other key.
-   `bsiz' specifies the size of the region of the other key.
-   `op' is ignored.
-   The return value is positive if the former is big, negative if the latter is big, 0 if both
-   are equivalent. */
-int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
-
-
-/* tricks for backward compatibility */
-#define tcbdbrange3 tcbdbfwmkeys2
+/* Process each record atomically of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `func' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false. */
+bool tcbdbforeach(TCBDB *bdb, TCITER iter, void *op);
 
 
 

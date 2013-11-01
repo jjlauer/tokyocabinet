@@ -52,6 +52,7 @@ CPPFLAGS = @MYCPPFLAGS@ \
   -D_TC_APPINC="\"-I$(INCLUDEDIR)\"" -D_TC_APPLIBS="\"-L$(LIBDIR) -ltokyocabinet @LIBS@\""
 CFLAGS = @MYCFLAGS@
 LDFLAGS = @MYLDFLAGS@
+CMDLDFLAGS = @MYCMDLDFLAGS@
 LIBS = @LIBS@
 LDENV = LD_RUN_PATH=/lib:/usr/lib:$(LIBDIR):$(HOME)/lib:/usr/local/lib:@MYRUNPATH@:.
 RUNENV = @MYLDLIBPATHENV@=.:/lib:/usr/lib:$(LIBDIR):$(HOME)/lib:/usr/local/lib:@MYRUNPATH@
@@ -87,7 +88,8 @@ all : $(LIBRARYFILES) $(COMMANDFILES) $(CGIFILES)
 
 clean :
 	rm -rf $(LIBRARYFILES) $(LIBOBJFILES) $(COMMANDFILES) $(CGIFILES) \
-	  *.o a.out check.in check.out gmon.out leak.log casket casket-* casket.* *~ hoge moge
+	  *.o a.out check.in check.out gmon.out leak.log words.tsv \
+	  casket casket-* casket.* *.wal *~ hoge moge
 
 
 version :
@@ -96,6 +98,7 @@ version :
 	    -e "s/_TC_LIBVER.*/_TC_LIBVER     $$vernum/" \
 	    -e 's/_TC_FORMATVER.*/_TC_FORMATVER  "$(FORMATVER)"/' tcutil.h > tcutil.h~
 	[ -f tcutil.h~ ] && mv -f tcutil.h~ tcutil.h
+
 
 untabify :
 	ls *.c *.h *.idl | while read name ; \
@@ -162,9 +165,15 @@ check :
 	rm -rf casket*
 	$(RUNENV) $(RUNCMD) ./tcamgr version
 	$(RUNENV) $(RUNCMD) ./tcutest xstr 50000
-	$(RUNENV) $(RUNCMD) ./tcutest list 50000
-	$(RUNENV) $(RUNCMD) ./tcutest map 50000
-	$(RUNENV) $(RUNCMD) ./tcutest mdb 50000
+	$(RUNENV) $(RUNCMD) ./tcutest list -rd 50000
+	$(RUNENV) $(RUNCMD) ./tcutest map -rd -tr 50000
+	$(RUNENV) $(RUNCMD) ./tcutest map -rd -tr -rnd -dc 50000
+	$(RUNENV) $(RUNCMD) ./tcutest tree -rd -tr 50000
+	$(RUNENV) $(RUNCMD) ./tcutest tree -rd -tr -rnd -dc 50000
+	$(RUNENV) $(RUNCMD) ./tcutest mdb -rd -tr 50000
+	$(RUNENV) $(RUNCMD) ./tcutest mdb -rd -tr -rnd -dc 50000
+	$(RUNENV) $(RUNCMD) ./tcutest ndb -rd -tr 50000
+	$(RUNENV) $(RUNCMD) ./tcutest ndb -rd -tr -rnd -dc 50000
 	$(RUNENV) $(RUNCMD) ./tcutest misc 500
 	$(RUNENV) $(RUNCMD) ./tcutest wicked 50000
 	$(RUNENV) $(RUNCMD) ./tcumttest combo 5 50000 500
@@ -172,6 +181,11 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcumttest typical 5 50000 5000
 	$(RUNENV) $(RUNCMD) ./tcumttest typical -rr 1000 5 50000 5000
 	$(RUNENV) $(RUNCMD) ./tcumttest typical -nc 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest combo -tr 5 50000 500
+	$(RUNENV) $(RUNCMD) ./tcumttest combo -tr -rnd 5 50000 500
+	$(RUNENV) $(RUNCMD) ./tcumttest typical -tr 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest typical -tr -rr 1000 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest typical -tr -nc 5 50000 5000
 	$(RUNENV) $(RUNCMD) ./tcucodec url Makefile > check.in
 	$(RUNENV) $(RUNCMD) ./tcucodec url -d check.in > check.out
 	$(RUNENV) $(RUNCMD) ./tcucodec base Makefile > check.in
@@ -195,13 +209,13 @@ check :
 	$(RUNENV) $(RUNCMD) ./tchtest write casket 50000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest read casket
 	$(RUNENV) $(RUNCMD) ./tchtest remove casket
-	$(RUNENV) $(RUNCMD) ./tchtest write -mt -tl -td -rc 50 casket 50000 5000 5 5
-	$(RUNENV) $(RUNCMD) ./tchtest read -mt -nb -rc 50 casket
-	$(RUNENV) $(RUNCMD) ./tchtest remove -mt -rc 50 casket
-	$(RUNENV) $(RUNCMD) ./tchtest write -as -tb -rc 50 casket 50000 50000 5 5
-	$(RUNENV) $(RUNCMD) ./tchtest read -nl -rc 50 casket
-	$(RUNENV) $(RUNCMD) ./tchtest remove -rc 50 casket
-	$(RUNENV) $(RUNCMD) ./tchtest rcat -pn 500 casket 50000 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest write -mt -tl -td -rc 50 -xm 500000 casket 50000 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest read -mt -nb -rc 50 -xm 500000 casket
+	$(RUNENV) $(RUNCMD) ./tchtest remove -mt -rc 50 -xm 500000 casket
+	$(RUNENV) $(RUNCMD) ./tchtest write -as -tb -rc 50 -xm 500000 casket 50000 50000 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest read -nl -rc 50 -xm 500000 casket
+	$(RUNENV) $(RUNCMD) ./tchtest remove -rc 50 -xm 500000 casket
+	$(RUNENV) $(RUNCMD) ./tchtest rcat -pn 500 -xm 50000 casket 50000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -tl -td -pn 5000 casket 50000 500 5 15
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -nl -pn 500 -rl casket 5000 500 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -tb -pn 500 casket 5000 500 5 5
@@ -213,10 +227,12 @@ check :
 	$(RUNENV) $(RUNCMD) ./tchtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -tl -td casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -mt -tb casket 5000
-	$(RUNENV) $(RUNCMD) ./tchmttest write -tl casket 5 5000 500 5
-	$(RUNENV) $(RUNCMD) ./tchmttest read casket 5
-	$(RUNENV) $(RUNCMD) ./tchmttest read -rnd casket 5
-	$(RUNENV) $(RUNCMD) ./tchmttest remove casket 5
+	$(RUNENV) $(RUNCMD) ./tchtest wicked -tt casket 5000
+	$(RUNENV) $(RUNCMD) ./tchtest wicked -tx casket 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest write -xm 500000 -tl casket 5 5000 500 5
+	$(RUNENV) $(RUNCMD) ./tchmttest read -xm 500000 casket 5
+	$(RUNENV) $(RUNCMD) ./tchmttest read -xm 500000 -rnd casket 5
+	$(RUNENV) $(RUNCMD) ./tchmttest remove -xm 500000 casket 5
 	$(RUNENV) $(RUNCMD) ./tchmttest wicked -nc casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tl -td casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tb casket 5 5000
@@ -253,7 +269,7 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcbtest write -mt -tl -td -ls 1024 casket 50000 5000 5000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest read -mt -nb casket
 	$(RUNENV) $(RUNCMD) ./tcbtest remove -mt casket
-	$(RUNENV) $(RUNCMD) ./tcbtest write -tb casket 50000 5 5 50000 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest write -tb -xm 50000 casket 50000 5 5 50000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest read -nl casket
 	$(RUNENV) $(RUNCMD) ./tcbtest remove casket
 	$(RUNENV) $(RUNCMD) ./tcbtest rcat -lc 5 -nc 5 -pn 500 casket 50000 5 5 5000 5 5
@@ -268,6 +284,8 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked -tl -td casket 50000
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked -mt -tb casket 5000
+	$(RUNENV) $(RUNCMD) ./tcbtest wicked -tt casket 5000
+	$(RUNENV) $(RUNCMD) ./tcbtest wicked -tx casket 5000
 	$(RUNENV) $(RUNCMD) ./tcbtest write -cd -lc 5 -nc 5 casket 5000 5 5 5 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest read -cd -lc 5 -nc 5 casket
 	$(RUNENV) $(RUNCMD) ./tcbtest remove -cd -lc 5 -nc 5 casket
@@ -375,6 +393,7 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcatest write '*#bnum=5000#cap=100' 50000
 	$(RUNENV) $(RUNCMD) ./tcatest misc '*' 5000
 	$(RUNENV) $(RUNCMD) ./tcatest wicked '*' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest compare casket 50 500
 	$(RUNENV) $(RUNCMD) ./tcamgr create 'casket.tch#mode=wct#bnum=3'
 	$(RUNENV) $(RUNCMD) ./tcamgr inform 'casket.tch'
 	$(RUNENV) $(RUNCMD) ./tcamgr put casket.tch one first
@@ -395,6 +414,9 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch three > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch four > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch five > check.out
+	$(RUNENV) $(RUNCMD) ./tcamgr misc casket.tch putlist six sixth seven seventh
+	$(RUNENV) $(RUNCMD) ./tcamgr misc casket.tch outlist six
+	$(RUNENV) $(RUNCMD) ./tcamgr misc casket.tch getlist three four five six > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr list -pv casket.tch > check.out
 	rm -rf casket*
 	@printf '\n'
@@ -441,16 +463,19 @@ check-forever :
 	  done
 
 
-dicthdb :
-	rm -f casket
-	sed -e 's/.*$$/&\t&/' /usr/share/dict/words | \
-	  ./tchmgr importtsv -sc casket
-
-
-dictbdb :
-	rm -f casket
-	sed -e 's/.*$$/&\t&/' /usr/share/dict/words | \
-	  ./tcbmgr importtsv -sc casket
+words :
+	rm -f casket-* words.tsv
+	cat /usr/share/dict/words | \
+	  tr '\t\r' '  ' | grep -v '^ *$$' | cat -n | sort | \
+	  sed -e 's/^ *//' -e 's/\(^[0-9]*\)\t\(.*\)/\2\t\1/' > words.tsv
+	./tchmgr create casket-hash -1 0 ; ./tchmgr importtsv casket-hash words.tsv
+	./tcbmgr create casket-btree 8192 ; ./tcbmgr importtsv casket-btree words.tsv
+	./tcbmgr create -td casket-btree-td 8192 ; ./tcbmgr importtsv casket-btree-td words.tsv
+	./tcbmgr create -tb casket-btree-tb 8192 ; ./tcbmgr importtsv casket-btree-tb words.tsv
+	./tcbmgr create -tt casket-btree-tt 8192 ; ./tcbmgr importtsv casket-btree-tt words.tsv
+	./tcbmgr create -tx casket-btree-tx 8192 ; ./tcbmgr importtsv casket-btree-tx words.tsv
+	wc -c words.tsv casket-hash casket-btree \
+	  casket-btree-td casket-btree-tb casket-btree-tt casket-btree-tx
 
 
 .PHONY : all clean install check
@@ -467,8 +492,14 @@ libtokyocabinet.a : $(LIBOBJFILES)
 
 
 libtokyocabinet.so.$(LIBVER).$(LIBREV).0 : $(LIBOBJFILES)
-	$(CC) -shared -Wl,-soname,libtokyocabinet.so.$(LIBVER) -o $@ $(LIBOBJFILES) \
-	  $(LDFLAGS) $(LIBS)
+	if uname -a | egrep -i 'SunOS' > /dev/null ; \
+	  then \
+	    $(CC) -shared -Wl,-G,-h,libtokyocabinet.so.$(LIBVER) -o $@ $(LIBOBJFILES) \
+	      $(LDFLAGS) $(LIBS) ; \
+	  else \
+	    $(CC) -shared -Wl,-soname,libtokyocabinet.so.$(LIBVER) -o $@ $(LIBOBJFILES) \
+	      $(LDFLAGS) $(LIBS) ; \
+	  fi
 
 
 libtokyocabinet.so.$(LIBVER) : libtokyocabinet.so.$(LIBVER).$(LIBREV).0
@@ -495,68 +526,68 @@ libtokyocabinet.dylib : libtokyocabinet.$(LIBVER).$(LIBREV).0.dylib
 
 
 tcutest : tcutest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcumttest : tcumttest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcucodec : tcucodec.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tchtest : tchtest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tchmttest : tchmttest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tchmgr : tchmgr.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcbtest : tcbtest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcbmttest : tcbmttest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcbmgr : tcbmgr.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcftest : tcftest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcfmttest : tcfmttest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcfmgr : tcfmgr.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcatest : tcatest.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcamgr : tcamgr.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcawmgr.cgi : tcawmgr.o $(LIBRARYFILES)
-	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(CMDLDFLAGS) -ltokyocabinet $(LIBS)
 
 
 myconf.o : myconf.h
 
-tcutil.o : tcutil.h myconf.h
+tcutil.o : tcutil.h myconf.h md5.h
 
 tchdb.o : tchdb.h tcutil.h myconf.h
 

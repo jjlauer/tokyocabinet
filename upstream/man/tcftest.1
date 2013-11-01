@@ -1,4 +1,4 @@
-.TH "TCFTEST" 1 "2008-06-18" "Man Page" "Tokyo Cabinet"
+.TH "TCFTEST" 1 "2008-11-25" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcftest \- test cases of the fixed-length database API
@@ -24,7 +24,7 @@ Retrieve all records of the database above.
 Remove all records of the database above.
 .RE
 .br
-\fBtcftest rcat \fR[\fB\-mt\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-pn \fInum\fB\fR]\fB \fR[\fB\-rl\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlimsiz\fB\fR]\fB\fR]\fB\fR
+\fBtcftest rcat \fR[\fB\-mt\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-pn \fInum\fB\fR]\fB \fR[\fB\-dai\fR|\fB\-dad\fR|\fB\-rl\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlimsiz\fB\fR]\fB\fR]\fB\fR
 .RS
 Store records with partway duplicated keys using concatenate mode.
 .RE
@@ -53,7 +53,11 @@ Options feature the following.
 .br
 \fB\-wb\fR : use the function `tcfdbget4' instead of `tcfdbget2'.
 .br
-\fB\-pn\fR \fInum\fR : specify the number of patterns.
+\fB\-pn \fInum\fR\fR : specify the number of patterns.
+.br
+\fB\-dai\fR : use the function `tcfdbaddint' instead of `tcfdbputcat'.
+.br
+\fB\-dad\fR : use the function `tcfdbadddouble' instead of `tcfdbputcat'.
 .br
 \fB\-rl\fR : set the length of values at random.
 .br

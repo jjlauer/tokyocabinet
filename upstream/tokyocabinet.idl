@@ -52,6 +52,7 @@ module TokyoCabinet {
     const long EKEEP = 21;
     const long ENOREC = 22;
     const long EMISC = 9999;
+    long ecode();
     string errmsg(in long ecode);
   };
   //----------------------------------------------------------------
@@ -60,16 +61,17 @@ module TokyoCabinet {
   interface HDB :ECODE {
     const long TLARGE = 1 << 0;
     const long TDEFLATE = 1 << 1;
-    const long TTCBS = 1 << 2;
+    const long TBZIP = 1 << 2;
+    const long TTCBS = 1 << 7;
     const long OREADER = 1 << 0;
     const long OWRITER = 1 << 1;
     const long OCREAT = 1 << 2;
     const long OTRUNC = 1 << 3;
     const long ONOLCK = 1 << 4;
     const long OLCKNB = 1 << 5;
-    long ecode();
     boolean tune(in long long bnum, in long apow, in long fpow, in long opts);
     boolean setcache(in long rcnum);
+    boolean setxmsiz(in long long xmsiz);
     boolean open(in string path, in long omode);
     boolean close();
     boolean put(in string key, in string value);
@@ -82,10 +84,15 @@ module TokyoCabinet {
     boolean iterinit();
     string iternext();
     List fwmkeys(in string prefix, in long max);
+    int addint(in string key, in long num);
+    double adddouble(in string key, in double num);
     boolean sync();
     boolean optimize(in long long bnum, in long apow, in long fpow, in long opts);
     boolean vanish();
     boolean copy(in string path);
+    boolean tranbegin();
+    boolean trancommit();
+    boolean tranabort();
     string path();
     long long rnum();
     long long fsiz();
@@ -96,7 +103,8 @@ module TokyoCabinet {
   interface BDB :ECODE {
     const long TLARGE = 1 << 0;
     const long TDEFLATE = 1 << 1;
-    const long TTCBS = 1 << 2;
+    const long TBZIP = 1 << 2;
+    const long TTCBS = 1 << 7;
     const long OREADER = 1 << 0;
     const long OWRITER = 1 << 1;
     const long OCREAT = 1 << 2;
@@ -107,6 +115,7 @@ module TokyoCabinet {
     boolean tune(in long lmemb, in long nmemb,
                  in long long bnum, in long apow, in long fpow, in long opts);
     boolean setcache(in long lcnum, in long ncnum);
+    boolean setxmsiz(in long long xmsiz);
     boolean open(in string path, in long omode);
     boolean close();
     boolean put(in string key, in string value);
@@ -122,6 +131,8 @@ module TokyoCabinet {
     long vsiz(in string key);
     List range(in string bkey, in boolean binc, in string ekey, in boolean einc, in long max);
     List fwmkeys(in string prefix, in long max);
+    int addint(in string key, in long num);
+    double adddouble(in string key, in double num);
     boolean sync();
     boolean optimize(in long lmemb, in long nmemb,
                      in long long bnum, in long apow, in long fpow, in long opts);
@@ -168,13 +179,14 @@ module TokyoCabinet {
     boolean put(in string key, in string value);
     boolean putkeep(in string key, in string value);
     boolean putcat(in string key, in string value);
-    boolean putasync(in string key, in string value);
     boolean out(in string key);
     string get(in string key);
     long vsiz(in string key);
     boolean iterinit();
     string iternext();
     List range(in string interval, in long max);
+    int addint(in string key, in long num);
+    double adddouble(in string key, in double num);
     boolean sync();
     boolean optimize(in long width, in long long limsiz);
     boolean vanish();

@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The utility API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -16,6 +16,7 @@
 
 #include "tcutil.h"
 #include "myconf.h"
+#include "md5.h"
 
 
 /*************************************************************************************************
@@ -219,28 +220,6 @@ void tcxstrclear(TCXSTR *xstr){
 }
 
 
-/* Convert an extensible string object into a usual allocated region. */
-void *tcxstrtomalloc(TCXSTR *xstr){
-  assert(xstr);
-  char *ptr;
-  ptr = xstr->ptr;
-  TCFREE(xstr);
-  return ptr;
-}
-
-
-/* Create an extensible string object from an allocated region. */
-TCXSTR *tcxstrfrommalloc(void *ptr, int size){
-  TCXSTR *xstr;
-  TCMALLOC(xstr, sizeof(*xstr));
-  TCREALLOC(xstr->ptr, ptr, size + 1);
-  xstr->ptr[size] = '\0';
-  xstr->size = size;
-  xstr->asize = size;
-  return xstr;
-}
-
-
 /* Perform formatted output into an extensible string object. */
 void tcxstrprintf(TCXSTR *xstr, const char *format, ...){
   assert(xstr && format);
@@ -281,7 +260,7 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
       cbuf[cblen++] = *format;
       cbuf[cblen] = '\0';
       int tlen;
-      char *tmp, tbuf[TCNUMBUFSIZ*2];
+      char *tmp, tbuf[TCNUMBUFSIZ*4];
       switch(*format){
       case 's':
         tmp = va_arg(ap, char *);
@@ -310,9 +289,13 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
         break;
       case 'e': case 'E': case 'f': case 'g': case 'G':
         if(lnum >= 1){
-          tlen = sprintf(tbuf, cbuf, va_arg(ap, long double));
+          tlen = snprintf(tbuf, sizeof(tbuf), cbuf, va_arg(ap, long double));
         } else {
-          tlen = sprintf(tbuf, cbuf, va_arg(ap, double));
+          tlen = snprintf(tbuf, sizeof(tbuf), cbuf, va_arg(ap, double));
+        }
+        if(tlen < 0 || tlen > sizeof(tbuf)){
+          tbuf[sizeof(tbuf)-1] = '*';
+          tlen = sizeof(tbuf);
         }
         TCXSTRCAT(xstr, tbuf, tlen);
         break;
@@ -348,6 +331,19 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
           tmp++;
         }
         break;
+      case 'b':
+        if(lnum >= 2){
+          tlen = tcnumtostrbin(va_arg(ap, unsigned long long), tbuf,
+                               atoi(cbuf + 1), cbuf[1] == '0' ? '0' : ' ');
+        } else if(lnum >= 1){
+          tlen = tcnumtostrbin(va_arg(ap, unsigned long), tbuf,
+                               atoi(cbuf + 1), cbuf[1] == '0' ? '0' : ' ');
+        } else {
+          tlen = tcnumtostrbin(va_arg(ap, unsigned int), tbuf,
+                               atoi(cbuf + 1), cbuf[1] == '0' ? '0' : ' ');
+        }
+        TCXSTRCAT(xstr, tbuf, tlen);
+        break;
       case '%':
         TCXSTRCAT(xstr, "%", 1);
         break;
@@ -357,6 +353,34 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
     }
     format++;
   }
+}
+
+
+
+/*************************************************************************************************
+ * extensible string (for experts)
+ *************************************************************************************************/
+
+
+/* Convert an extensible string object into a usual allocated region. */
+void *tcxstrtomalloc(TCXSTR *xstr){
+  assert(xstr);
+  char *ptr;
+  ptr = xstr->ptr;
+  TCFREE(xstr);
+  return ptr;
+}
+
+
+/* Create an extensible string object from an allocated region. */
+TCXSTR *tcxstrfrommalloc(void *ptr, int size){
+  TCXSTR *xstr;
+  TCMALLOC(xstr, sizeof(*xstr));
+  TCREALLOC(xstr->ptr, ptr, size + 1);
+  xstr->ptr[size] = '\0';
+  xstr->size = size;
+  xstr->asize = size;
+  return xstr;
 }
 
 
@@ -403,12 +427,12 @@ TCLIST *tclistnew2(int anum){
 TCLIST *tclistdup(const TCLIST *list){
   assert(list);
   int num = list->num;
-  if(num < 1) tclistnew();
+  if(num < 1) return tclistnew();
   const TCLISTDATUM *array = list->array + list->start;
   TCLIST *nlist;
   TCMALLOC(nlist, sizeof(*nlist));
   TCLISTDATUM *narray;
-  TCMALLOC(narray, sizeof(list->array[0]) * tclmax(num, 1));
+  TCMALLOC(narray, sizeof(list->array[0]) * num);
   for(int i = 0; i < num; i++){
     int size = array[i].size;
     TCMALLOC(narray[i].ptr, tclmax(size + 1, TCXSTRUNIT));
@@ -491,22 +515,6 @@ void tclistpush2(TCLIST *list, const char *str){
   TCLISTDATUM *array = list->array;
   TCMALLOC(array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(array[index].ptr, str, size + 1);
-  array[index].size = size;
-  list->num++;
-}
-
-
-/* Add an allocated element at the end of a list object. */
-void tclistpushmalloc(TCLIST *list, void *ptr, int size){
-  assert(list && ptr && size >= 0);
-  int index = list->start + list->num;
-  if(index >= list->anum){
-    list->anum += list->num + 1;
-    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
-  }
-  TCLISTDATUM *array = list->array;
-  TCREALLOC(array[index].ptr, ptr, size + 1);
-  array[index].ptr[size] = '\0';
   array[index].size = size;
   list->num++;
 }
@@ -652,12 +660,12 @@ void *tclistremove(TCLIST *list, int index, int *sp){
   assert(list && index >= 0 && sp);
   if(index >= list->num) return NULL;
   index += list->start;
-  char *ptr = list->array[index].ptr;
+  void *rv = list->array[index].ptr;
   *sp = list->array[index].size;
   list->num--;
   memmove(list->array + index, list->array + index + 1,
           sizeof(list->array[0]) * (list->start + list->num - index));
-  return ptr;
+  return rv;
 }
 
 
@@ -666,11 +674,11 @@ char *tclistremove2(TCLIST *list, int index){
   assert(list && index >= 0);
   if(index >= list->num) return NULL;
   index += list->start;
-  char *ptr = list->array[index].ptr;
+  void *rv = list->array[index].ptr;
   list->num--;
   memmove(list->array + index, list->array + index + 1,
           sizeof(list->array[0]) * (list->start + list->num - index));
-  return ptr;
+  return rv;
 }
 
 
@@ -704,21 +712,6 @@ void tclistover2(TCLIST *list, int index, const char *str){
 void tclistsort(TCLIST *list){
   assert(list);
   qsort(list->array + list->start, list->num, sizeof(list->array[0]), tclistelemcmp);
-}
-
-
-/* Sort elements of a list object in case-insensitive lexical order. */
-void tclistsortci(TCLIST *list){
-  assert(list);
-  qsort(list->array + list->start, list->num, sizeof(list->array[0]), tclistelemcmpci);
-}
-
-
-/* Sort elements of a list object by an arbitrary comparison function. */
-void tclistsortex(TCLIST *list, int (*cmp)(const TCLISTDATUM *, const TCLISTDATUM *)){
-  assert(list && cmp);
-  qsort(list->array + list->start, list->num, sizeof(list->array[0]),
-        (int (*)(const void *, const void *))cmp);
 }
 
 
@@ -872,11 +865,49 @@ static int tclistelemcmpci(const void *a, const void *b){
 
 
 /*************************************************************************************************
+ * array list (for experts)
+ *************************************************************************************************/
+
+
+/* Add an allocated element at the end of a list object. */
+void tclistpushmalloc(TCLIST *list, void *ptr, int size){
+  assert(list && ptr && size >= 0);
+  int index = list->start + list->num;
+  if(index >= list->anum){
+    list->anum += list->num + 1;
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
+  }
+  TCLISTDATUM *array = list->array;
+  TCREALLOC(array[index].ptr, ptr, size + 1);
+  array[index].ptr[size] = '\0';
+  array[index].size = size;
+  list->num++;
+}
+
+
+/* Sort elements of a list object in case-insensitive lexical order. */
+void tclistsortci(TCLIST *list){
+  assert(list);
+  qsort(list->array + list->start, list->num, sizeof(list->array[0]), tclistelemcmpci);
+}
+
+
+/* Sort elements of a list object by an arbitrary comparison function. */
+void tclistsortex(TCLIST *list, int (*cmp)(const TCLISTDATUM *, const TCLISTDATUM *)){
+  assert(list && cmp);
+  qsort(list->array + list->start, list->num, sizeof(list->array[0]),
+        (int (*)(const void *, const void *))cmp);
+}
+
+
+
+/*************************************************************************************************
  * hash map
  *************************************************************************************************/
 
 
 #define TCMAPBNUM      4093              // allocation unit number of a map
+#define TCMAPZMMINSIZ  131072            // minimum memory size to use nullified region
 #define TCMAPCSUNIT    52                // small allocation unit size of map concatenation
 #define TCMAPCBUNIT    252               // big allocation unit size of map concatenation
 
@@ -886,7 +917,7 @@ static int tclistelemcmpci(const void *a, const void *b){
     const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf); \
     int _TC_ksiz = TC_ksiz; \
     for((TC_res) = 19780211; _TC_ksiz--;){ \
-      (TC_res) = ((TC_res) << 5) + ((TC_res) << 2) + (TC_res) + *(_TC_p)++; \
+      (TC_res) = (TC_res) * 37 + *(_TC_p)++; \
     } \
   } while(false)
 
@@ -896,13 +927,9 @@ static int tclistelemcmpci(const void *a, const void *b){
     const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf) + TC_ksiz - 1; \
     int _TC_ksiz = TC_ksiz; \
     for((TC_res) = 0x13579bdf; _TC_ksiz--;){ \
-      (TC_res) = ((TC_res) << 5) - (TC_res) + *(_TC_p)--; \
+      (TC_res) = (TC_res) * 31 + *(_TC_p)--; \
     } \
   } while(false)
-
-/* get the size of padding bytes for pointer alignment */
-#define TCALIGNPAD(TC_hsiz) \
-  (((TC_hsiz | ~-(int)sizeof(void *)) + 1) - TC_hsiz)
 
 /* compare two keys */
 #define TCKEYCMP(TC_abuf, TC_asiz, TC_bbuf, TC_bsiz) \
@@ -921,7 +948,11 @@ TCMAP *tcmapnew2(uint32_t bnum){
   TCMAP *map;
   TCMALLOC(map, sizeof(*map));
   TCMAPREC **buckets;
-  TCCALLOC(buckets, bnum, sizeof(map->buckets[0]));
+  if(bnum >= TCMAPZMMINSIZ / sizeof(*buckets)){
+    buckets = tczeromap(bnum * sizeof(*buckets));
+  } else {
+    TCCALLOC(buckets, bnum, sizeof(*buckets));
+  }
   map->buckets = buckets;
   map->first = NULL;
   map->last = NULL;
@@ -937,16 +968,12 @@ TCMAP *tcmapnew2(uint32_t bnum){
 TCMAP *tcmapdup(const TCMAP *map){
   assert(map);
   TCMAP *nmap = tcmapnew2(tclmax(tclmax(map->bnum, map->rnum), TCMAPBNUM));
-  TCMAPREC *cur = map->cur;
-  const char *kbuf;
-  int ksiz;
-  ((TCMAP *)map)->cur = map->first;
-  while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    int vsiz;
-    const char *vbuf = tcmapiterval(kbuf, &vsiz);
-    tcmapputkeep(nmap, kbuf, ksiz, vbuf, vsiz);
+  TCMAPREC *rec = map->first;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    tcmapput(nmap, dbuf, rec->ksiz, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
+    rec = rec->next;
   }
-  ((TCMAP *)map)->cur = cur;
   return nmap;
 }
 
@@ -960,7 +987,11 @@ void tcmapdel(TCMAP *map){
     TCFREE(rec);
     rec = next;
   }
-  TCFREE(map->buckets);
+  if(map->bnum >= TCMAPZMMINSIZ / sizeof(map->buckets[0])){
+    tczerounmap(map->buckets);
+  } else {
+    TCFREE(map->buckets);
+  }
   TCFREE(map);
 }
 
@@ -1000,7 +1031,7 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
             if(map->first == old) map->first = rec;
             if(map->last == old) map->last = rec;
             if(map->cur == old) map->cur = rec;
-            if(*entp == old) *entp = rec;
+            *entp = rec;
             if(rec->prev) rec->prev->next = rec;
             if(rec->next) rec->next->prev = rec;
             dbuf = (char *)rec + sizeof(*rec);
@@ -1040,84 +1071,6 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
 void tcmapput2(TCMAP *map, const char *kstr, const char *vstr){
   assert(map && kstr && vstr);
   tcmapput(map, kstr, strlen(kstr), vstr, strlen(vstr));
-}
-
-
-/* Store a record of the value of two regions into a map object. */
-void tcmapput3(TCMAP *map, const char *kbuf, int ksiz,
-               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz){
-  assert(map && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
-  unsigned int hash;
-  TCMAPHASH1(hash, kbuf, ksiz);
-  int bidx = hash % map->bnum;
-  TCMAPREC *rec = map->buckets[bidx];
-  TCMAPREC **entp = map->buckets + bidx;
-  TCMAPHASH2(hash, kbuf, ksiz);
-  while(rec){
-    if(hash > rec->hash){
-      entp = &(rec->left);
-      rec = rec->left;
-    } else if(hash < rec->hash){
-      entp = &(rec->right);
-      rec = rec->right;
-    } else {
-      char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
-      if(kcmp < 0){
-        entp = &(rec->left);
-        rec = rec->left;
-      } else if(kcmp > 0){
-        entp = &(rec->right);
-        rec = rec->right;
-      } else {
-        int vsiz = fvsiz + lvsiz;
-        map->msiz += vsiz - rec->vsiz;
-        int psiz = TCALIGNPAD(ksiz);
-        ksiz += psiz;
-        if(vsiz > rec->vsiz){
-          TCMAPREC *old = rec;
-          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + vsiz + 1);
-          if(rec != old){
-            if(map->first == old) map->first = rec;
-            if(map->last == old) map->last = rec;
-            if(map->cur == old) map->cur = rec;
-            if(*entp == old) *entp = rec;
-            if(rec->prev) rec->prev->next = rec;
-            if(rec->next) rec->next->prev = rec;
-            dbuf = (char *)rec + sizeof(*rec);
-          }
-        }
-        memcpy(dbuf + ksiz, fvbuf, fvsiz);
-        memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
-        dbuf[ksiz+vsiz] = '\0';
-        rec->vsiz = vsiz;
-        return;
-      }
-    }
-  }
-  int vsiz = fvsiz + lvsiz;
-  int psiz = TCALIGNPAD(ksiz);
-  map->msiz += ksiz + vsiz;
-  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
-  char *dbuf = (char *)rec + sizeof(*rec);
-  memcpy(dbuf, kbuf, ksiz);
-  dbuf[ksiz] = '\0';
-  rec->ksiz = ksiz;
-  ksiz += psiz;
-  memcpy(dbuf + ksiz, fvbuf, fvsiz);
-  memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
-  dbuf[ksiz+vsiz] = '\0';
-  rec->vsiz = vsiz;
-  rec->hash = hash;
-  rec->left = NULL;
-  rec->right = NULL;
-  rec->prev = map->last;
-  rec->next = NULL;
-  *entp = rec;
-  if(!map->first) map->first = rec;
-  if(map->last) map->last->next = rec;
-  map->last = rec;
-  map->rnum++;
 }
 
 
@@ -1175,12 +1128,7 @@ bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int 
 }
 
 
-/* Store a new string record into a map object.
-   `map' specifies the map object.
-   `kstr' specifies the string of the key.
-   `vstr' specifies the string of the value.
-   If successful, the return value is true, else, it is false.
-   If a record with the same key exists in the database, this function has no effect. */
+/* Store a new string record into a map object. */
 bool tcmapputkeep2(TCMAP *map, const char *kstr, const char *vstr){
   assert(map && kstr && vstr);
   return tcmapputkeep(map, kstr, strlen(kstr), vstr, strlen(vstr));
@@ -1224,14 +1172,14 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
           if(map->first == old) map->first = rec;
           if(map->last == old) map->last = rec;
           if(map->cur == old) map->cur = rec;
-          if(*entp == old) *entp = rec;
+          *entp = rec;
           if(rec->prev) rec->prev->next = rec;
           if(rec->next) rec->next->prev = rec;
           dbuf = (char *)rec + sizeof(*rec);
         }
         memcpy(dbuf + ksiz + psiz + rec->vsiz, vbuf, vsiz);
-        dbuf[ksiz+psiz+rec->vsiz+vsiz] = '\0';
         rec->vsiz += vsiz;
+        dbuf[ksiz+psiz+rec->vsiz] = '\0';
         return;
       }
     }
@@ -1390,44 +1338,6 @@ const char *tcmapget2(const TCMAP *map, const char *kstr){
 }
 
 
-/* Retrieve a semivolatile record in a map object. */
-const void *tcmapget3(TCMAP *map, const void *kbuf, int ksiz, int *sp){
-  assert(map && kbuf && ksiz >= 0 && sp);
-  unsigned int hash;
-  TCMAPHASH1(hash, kbuf, ksiz);
-  TCMAPREC *rec = map->buckets[hash%map->bnum];
-  TCMAPHASH2(hash, kbuf, ksiz);
-  while(rec){
-    if(hash > rec->hash){
-      rec = rec->left;
-    } else if(hash < rec->hash){
-      rec = rec->right;
-    } else {
-      char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
-      if(kcmp < 0){
-        rec = rec->left;
-      } else if(kcmp > 0){
-        rec = rec->right;
-      } else {
-        if(map->last != rec){
-          if(map->first == rec) map->first = rec->next;
-          if(rec->prev) rec->prev->next = rec->next;
-          if(rec->next) rec->next->prev = rec->prev;
-          rec->prev = map->last;
-          rec->next = NULL;
-          map->last->next = rec;
-          map->last = rec;
-        }
-        *sp = rec->vsiz;
-        return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
-      }
-    }
-  }
-  return NULL;
-}
-
-
 /* Move a record to the edge of a map object. */
 bool tcmapmove(TCMAP *map, const void *kbuf, int ksiz, bool head){
   assert(map && kbuf && ksiz >= 0);
@@ -1512,23 +1422,6 @@ const char *tcmapiternext2(TCMAP *map){
 }
 
 
-/* Get the value bound to the key fetched from the iterator of a map object. */
-const void *tcmapiterval(const void *kbuf, int *sp){
-  assert(kbuf && sp);
-  TCMAPREC *rec = (TCMAPREC *)((char *)kbuf - sizeof(*rec));
-  *sp = rec->vsiz;
-  return (char *)kbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
-}
-
-
-/* Get the value string bound to the key fetched from the iterator of a map object. */
-const char *tcmapiterval2(const char *kstr){
-  assert(kstr);
-  TCMAPREC *rec = (TCMAPREC *)(kstr - sizeof(*rec));
-  return kstr + rec->ksiz + TCALIGNPAD(rec->ksiz);
-}
-
-
 /* Get the number of records stored in a map object. */
 uint64_t tcmaprnum(const TCMAP *map){
   assert(map);
@@ -1548,14 +1441,12 @@ uint64_t tcmapmsiz(const TCMAP *map){
 TCLIST *tcmapkeys(const TCMAP *map){
   assert(map);
   TCLIST *list = tclistnew2(map->rnum);
-  TCMAPREC *cur = map->cur;
-  const char *kbuf;
-  int ksiz;
-  ((TCMAP *)map)->cur = map->first;
-  while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    TCLISTPUSH(list, kbuf, ksiz);
+  TCMAPREC *rec = map->first;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    TCLISTPUSH(list, dbuf, rec->ksiz);
+    rec = rec->next;
   }
-  ((TCMAP *)map)->cur = cur;
   return list;
 }
 
@@ -1564,22 +1455,18 @@ TCLIST *tcmapkeys(const TCMAP *map){
 TCLIST *tcmapvals(const TCMAP *map){
   assert(map);
   TCLIST *list = tclistnew2(map->rnum);
-  TCMAPREC *cur = map->cur;
-  const char *kbuf;
-  int ksiz;
-  ((TCMAP *)map)->cur = map->first;
-  while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    int vsiz;
-    const char *vbuf = tcmapiterval(kbuf, &vsiz);
-    TCLISTPUSH(list, vbuf, vsiz);
+  TCMAPREC *rec = map->first;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    TCLISTPUSH(list, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
+    rec = rec->next;
   }
-  ((TCMAP *)map)->cur = cur;
   return list;
 }
 
 
 /* Add an integer to a record in a map object. */
-void tcmapaddint(TCMAP *map, const char *kbuf, int ksiz, int num){
+int tcmapaddint(TCMAP *map, const void *kbuf, int ksiz, int num){
   assert(map && kbuf && ksiz >= 0);
   unsigned int hash;
   TCMAPHASH1(hash, kbuf, ksiz);
@@ -1604,9 +1491,9 @@ void tcmapaddint(TCMAP *map, const char *kbuf, int ksiz, int num){
         entp = &(rec->right);
         rec = rec->right;
       } else {
-        int psiz = TCALIGNPAD(ksiz);
-        *(int *)(dbuf + ksiz + psiz) += num;
-        return;
+        if(rec->vsiz != sizeof(num)) return INT_MIN;
+        int *resp = (int *)(dbuf + ksiz + TCALIGNPAD(ksiz));
+        return *resp += num;
       }
     }
   }
@@ -1629,6 +1516,62 @@ void tcmapaddint(TCMAP *map, const char *kbuf, int ksiz, int num){
   if(map->last) map->last->next = rec;
   map->last = rec;
   map->rnum++;
+  return num;
+}
+
+
+/* Add a real number to a record in a map object. */
+double tcmapadddouble(TCMAP *map, const void *kbuf, int ksiz, double num){
+  assert(map && kbuf && ksiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        if(rec->vsiz != sizeof(num)) return nan("");
+        double *resp = (double *)(dbuf + ksiz + TCALIGNPAD(ksiz));
+        return *resp += num;
+      }
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+  dbuf[ksiz+psiz+sizeof(num)] = '\0';
+  rec->vsiz = sizeof(num);
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
+  return num;
 }
 
 
@@ -1670,21 +1613,21 @@ void tcmapcutfront(TCMAP *map, int num){
 /* Serialize a map object into a byte array. */
 void *tcmapdump(const TCMAP *map, int *sp){
   assert(map && sp);
-  TCMAPREC *cur = map->cur;
   int tsiz = 0;
-  const char *kbuf, *vbuf;
-  int ksiz, vsiz;
-  ((TCMAP *)map)->cur = map->first;
-  while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    vbuf = tcmapiterval(kbuf, &vsiz);
-    tsiz += ksiz + vsiz + sizeof(int) * 2;
+  TCMAPREC *rec = map->first;
+  while(rec){
+    tsiz += rec->ksiz + rec->vsiz + sizeof(int) * 2;
+    rec = rec->next;
   }
   char *buf;
   TCMALLOC(buf, tsiz + 1);
   char *wp = buf;
-  ((TCMAP *)map)->cur = map->first;
-  while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    vbuf = tcmapiterval(kbuf, &vsiz);
+  rec = map->first;
+  while(rec){
+    const char *kbuf = (char *)rec + sizeof(*rec);
+    int ksiz = rec->ksiz;
+    const char *vbuf = kbuf + ksiz + TCALIGNPAD(ksiz);
+    int vsiz = rec->vsiz;
     int step;
     TCSETVNUMBUF(step, wp, ksiz);
     wp += step;
@@ -1694,8 +1637,8 @@ void *tcmapdump(const TCMAP *map, int *sp){
     wp += step;
     memcpy(wp, vbuf, vsiz);
     wp += vsiz;
+    rec = rec->next;
   }
-  ((TCMAP *)map)->cur = cur;
   *sp = wp - buf;
   return buf;
 }
@@ -1719,6 +1662,341 @@ TCMAP *tcmapload(const void *ptr, int size){
     rp += vsiz;
   }
   return map;
+}
+
+
+
+/*************************************************************************************************
+ * hash map (for experts)
+ *************************************************************************************************/
+
+
+/* Store a record and make it semivolatile in a map object. */
+void tcmapput3(TCMAP *map, const void *kbuf, int ksiz, const char *vbuf, int vsiz){
+  assert(map && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        map->msiz += vsiz - rec->vsiz;
+        int psiz = TCALIGNPAD(ksiz);
+        if(vsiz > rec->vsiz){
+          TCMAPREC *old = rec;
+          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+          if(rec != old){
+            if(map->first == old) map->first = rec;
+            if(map->last == old) map->last = rec;
+            if(map->cur == old) map->cur = rec;
+            *entp = rec;
+            if(rec->prev) rec->prev->next = rec;
+            if(rec->next) rec->next->prev = rec;
+            dbuf = (char *)rec + sizeof(*rec);
+          }
+        }
+        memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+        dbuf[ksiz+psiz+vsiz] = '\0';
+        rec->vsiz = vsiz;
+        if(map->last != rec){
+          if(map->first == rec) map->first = rec->next;
+          if(rec->prev) rec->prev->next = rec->next;
+          if(rec->next) rec->next->prev = rec->prev;
+          rec->prev = map->last;
+          rec->next = NULL;
+          map->last->next = rec;
+          map->last = rec;
+        }
+        return;
+      }
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  map->msiz += ksiz + vsiz;
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+  dbuf[ksiz+psiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
+}
+
+
+/* Store a record of the value of two regions into a map object. */
+void tcmapput4(TCMAP *map, const void *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const void *lvbuf, int lvsiz){
+  assert(map && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        int vsiz = fvsiz + lvsiz;
+        map->msiz += vsiz - rec->vsiz;
+        int psiz = TCALIGNPAD(ksiz);
+        ksiz += psiz;
+        if(vsiz > rec->vsiz){
+          TCMAPREC *old = rec;
+          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + vsiz + 1);
+          if(rec != old){
+            if(map->first == old) map->first = rec;
+            if(map->last == old) map->last = rec;
+            if(map->cur == old) map->cur = rec;
+            *entp = rec;
+            if(rec->prev) rec->prev->next = rec;
+            if(rec->next) rec->next->prev = rec;
+            dbuf = (char *)rec + sizeof(*rec);
+          }
+        }
+        memcpy(dbuf + ksiz, fvbuf, fvsiz);
+        memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
+        dbuf[ksiz+vsiz] = '\0';
+        rec->vsiz = vsiz;
+        return;
+      }
+    }
+  }
+  int vsiz = fvsiz + lvsiz;
+  int psiz = TCALIGNPAD(ksiz);
+  map->msiz += ksiz + vsiz;
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  ksiz += psiz;
+  memcpy(dbuf + ksiz, fvbuf, fvsiz);
+  memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
+  dbuf[ksiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
+}
+
+
+/* Concatenate a value at the existing record and make it semivolatile in a map object. */
+void tcmapputcat3(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(map && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        map->msiz += vsiz;
+        int psiz = TCALIGNPAD(ksiz);
+        int asiz = sizeof(*rec) + ksiz + psiz + rec->vsiz + vsiz + 1;
+        int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
+        asiz = (asiz - 1) + unit - (asiz - 1) % unit;
+        TCMAPREC *old = rec;
+        TCREALLOC(rec, rec, asiz);
+        if(rec != old){
+          if(map->first == old) map->first = rec;
+          if(map->last == old) map->last = rec;
+          if(map->cur == old) map->cur = rec;
+          *entp = rec;
+          if(rec->prev) rec->prev->next = rec;
+          if(rec->next) rec->next->prev = rec;
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+        memcpy(dbuf + ksiz + psiz + rec->vsiz, vbuf, vsiz);
+        rec->vsiz += vsiz;
+        dbuf[ksiz+psiz+rec->vsiz] = '\0';
+        if(map->last != rec){
+          if(map->first == rec) map->first = rec->next;
+          if(rec->prev) rec->prev->next = rec->next;
+          if(rec->next) rec->next->prev = rec->prev;
+          rec->prev = map->last;
+          rec->next = NULL;
+          map->last->next = rec;
+          map->last = rec;
+        }
+        return;
+      }
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  int asiz = sizeof(*rec) + ksiz + psiz + vsiz + 1;
+  int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
+  asiz = (asiz - 1) + unit - (asiz - 1) % unit;
+  map->msiz += ksiz + vsiz;
+  TCMALLOC(rec, asiz);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+  dbuf[ksiz+psiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
+}
+
+
+/* Retrieve a semivolatile record in a map object. */
+const void *tcmapget3(TCMAP *map, const void *kbuf, int ksiz, int *sp){
+  assert(map && kbuf && ksiz >= 0 && sp);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  TCMAPREC *rec = map->buckets[hash%map->bnum];
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        rec = rec->left;
+      } else if(kcmp > 0){
+        rec = rec->right;
+      } else {
+        if(map->last != rec){
+          if(map->first == rec) map->first = rec->next;
+          if(rec->prev) rec->prev->next = rec->next;
+          if(rec->next) rec->next->prev = rec->prev;
+          rec->prev = map->last;
+          rec->next = NULL;
+          map->last->next = rec;
+          map->last = rec;
+        }
+        *sp = rec->vsiz;
+        return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+      }
+    }
+  }
+  return NULL;
+}
+
+
+/* Get the value bound to the key fetched from the iterator of a map object. */
+const void *tcmapiterval(const void *kbuf, int *sp){
+  assert(kbuf && sp);
+  TCMAPREC *rec = (TCMAPREC *)((char *)kbuf - sizeof(*rec));
+  *sp = rec->vsiz;
+  return (char *)kbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+}
+
+
+/* Get the value string bound to the key fetched from the iterator of a map object. */
+const char *tcmapiterval2(const char *kstr){
+  assert(kstr);
+  TCMAPREC *rec = (TCMAPREC *)(kstr - sizeof(*rec));
+  return kstr + rec->ksiz + TCALIGNPAD(rec->ksiz);
+}
+
+
+/* Create an array of strings of all keys in a map object. */
+const char **tcmapkeys2(const TCMAP *map, int *np){
+  assert(map && np);
+  const char **ary;
+  TCMALLOC(ary, sizeof(*ary) * map->rnum + 1);
+  int anum = 0;
+  TCMAPREC *rec = map->first;
+  while(rec){
+    ary[(anum++)] = (char *)rec + sizeof(*rec);
+    rec = rec->next;
+  }
+  *np = anum;
+  return ary;
+}
+
+
+/* Create an array of strings of all values in a map object. */
+const char **tcmapvals2(const TCMAP *map, int *np){
+  assert(map && np);
+  const char **ary;
+  TCMALLOC(ary, sizeof(*ary) * map->rnum + 1);
+  int anum = 0;
+  TCMAPREC *rec = map->first;
+  while(rec){
+    ary[(anum++)] = (char *)rec + sizeof(*rec) + rec->ksiz + TCALIGNPAD(rec->ksiz);
+    rec = rec->next;
+  }
+  *np = anum;
+  return ary;
 }
 
 
@@ -1751,7 +2029,1198 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
 
 
 /*************************************************************************************************
- * on-memory database
+ * ordered tree
+ *************************************************************************************************/
+
+
+#define TREESTACKNUM   2048              // capacity of the stack of ordered tree
+#define TCTREECSUNIT   52                // small allocation unit size of map concatenation
+#define TCTREECBUNIT   252               // big allocation unit size of map concatenation
+
+
+/* private function prototypes */
+static TCTREEREC* tctreesplay(TCTREE *tree, const void *kbuf, int ksiz);
+
+
+/* Create a tree object. */
+TCTREE *tctreenew(void){
+  return tctreenew2(tccmplexical, NULL);
+}
+
+
+/* Create a tree object with specifying the custom comparison function. */
+TCTREE *tctreenew2(TCCMP cmp, void *cmpop){
+  assert(cmp);
+  TCTREE *tree;
+  TCMALLOC(tree, sizeof(*tree));
+  tree->root = NULL;
+  tree->cur = NULL;
+  tree->rnum = 0;
+  tree->msiz = 0;
+  tree->cmp = cmp;
+  tree->cmpop = cmpop;
+  return tree;
+}
+
+
+/* Copy a tree object. */
+TCTREE *tctreedup(const TCTREE *tree){
+  assert(tree);
+  TCTREE *ntree = tctreenew2(tree->cmp, tree->cmpop);
+  if(tree->root){
+    TCTREEREC *histbuf[TREESTACKNUM];
+    TCTREEREC **history = histbuf;
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(hnum >= TREESTACKNUM - 2 && history == histbuf){
+        TCMALLOC(history, sizeof(*history) * tree->rnum);
+        memcpy(history, histbuf, sizeof(*history) * hnum);
+      }
+      if(rec->left) history[hnum++] = rec->left;
+      if(rec->right) history[hnum++] = rec->right;
+      char *dbuf = (char *)rec + sizeof(*rec);
+      tctreeput(ntree, dbuf, rec->ksiz, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
+    }
+    if(history != histbuf) TCFREE(history);
+  }
+  return ntree;
+}
+
+
+/* Delete a tree object. */
+void tctreedel(TCTREE *tree){
+  assert(tree);
+  if(tree->root){
+    TCTREEREC *histbuf[TREESTACKNUM];
+    TCTREEREC **history = histbuf;
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(hnum >= TREESTACKNUM - 2 && history == histbuf){
+        TCMALLOC(history, sizeof(*history) * tree->rnum);
+        memcpy(history, histbuf, sizeof(*history) * hnum);
+      }
+      if(rec->left) history[hnum++] = rec->left;
+      if(rec->right) history[hnum++] = rec->right;
+      TCFREE(rec);
+    }
+    if(history != histbuf) TCFREE(history);
+  }
+  TCFREE(tree);
+}
+
+
+/* Store a record into a tree object. */
+void tctreeput(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = NULL;
+    rec->right = NULL;
+    tree->root = rec;
+    tree->rnum = 1;
+    tree->msiz = ksiz + vsiz;
+    return;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv < 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top->left;
+    rec->right = top;
+    top->left = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else if(cv > 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top;
+    rec->right = top->right;
+    top->right = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else {
+    tree->msiz += vsiz - top->vsiz;
+    int psiz = TCALIGNPAD(ksiz);
+    if(vsiz > top->vsiz){
+      TCTREEREC *old = top;
+      TCREALLOC(top, top, sizeof(*top) + ksiz + psiz + vsiz + 1);
+      if(top != old){
+        if(tree->cur == old) tree->cur = top;
+        dbuf = (char *)top + sizeof(*top);
+      }
+    }
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    top->vsiz = vsiz;
+    tree->root = top;
+  }
+}
+
+
+/* Store a string record into a tree object. */
+void tctreeput2(TCTREE *tree, const char *kstr, const char *vstr){
+  assert(tree && kstr && vstr);
+  tctreeput(tree, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Store a new record into a tree object. */
+bool tctreeputkeep(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = NULL;
+    rec->right = NULL;
+    tree->root = rec;
+    tree->rnum = 1;
+    tree->msiz = ksiz + vsiz;
+    return true;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv < 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top->left;
+    rec->right = top;
+    top->left = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else if(cv > 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top;
+    rec->right = top->right;
+    top->right = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else {
+    tree->root = top;
+    return false;
+  }
+  return true;
+}
+
+
+/* Store a new string record into a tree object. */
+bool tctreeputkeep2(TCTREE *tree, const char *kstr, const char *vstr){
+  assert(tree && kstr && vstr);
+  return tctreeputkeep(tree, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Concatenate a value at the end of the value of the existing record in a tree object. */
+void tctreeputcat(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = NULL;
+    rec->right = NULL;
+    tree->root = rec;
+    tree->rnum = 1;
+    tree->msiz = ksiz + vsiz;
+    return;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv < 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top->left;
+    rec->right = top;
+    top->left = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else if(cv > 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+    dbuf[ksiz+psiz+vsiz] = '\0';
+    rec->vsiz = vsiz;
+    rec->left = top;
+    rec->right = top->right;
+    top->right = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + vsiz;
+    tree->root = rec;
+  } else {
+    tree->msiz += vsiz;
+    int psiz = TCALIGNPAD(ksiz);
+    int asiz = sizeof(*top) + ksiz + psiz + top->vsiz + vsiz + 1;
+    int unit = (asiz <= TCTREECSUNIT) ? TCTREECSUNIT : TCTREECBUNIT;
+    asiz = (asiz - 1) + unit - (asiz - 1) % unit;
+    TCTREEREC *old = top;
+    TCREALLOC(top, top, asiz);
+    if(top != old){
+      if(tree->cur == old) tree->cur = top;
+      dbuf = (char *)top + sizeof(*top);
+    }
+    memcpy(dbuf + ksiz + psiz + top->vsiz, vbuf, vsiz);
+    top->vsiz += vsiz;
+    dbuf[ksiz+psiz+top->vsiz] = '\0';
+    tree->root = top;
+  }
+}
+
+
+/* Concatenate a string value at the end of the value of the existing record in a tree object. */
+void tctreeputcat2(TCTREE *tree, const char *kstr, const char *vstr){
+  assert(tree && kstr && vstr);
+  tctreeputcat(tree, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Remove a record of a tree object. */
+bool tctreeout(TCTREE *tree, const void *kbuf, int ksiz){
+  assert(tree && kbuf && ksiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top) return false;
+  if(tree->cur == top){
+    TCTREEREC *rec = top->right;
+    if(rec){
+      while(rec->left){
+        rec = rec->left;
+      }
+    }
+    tree->cur = rec;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv != 0){
+    tree->root = top;
+    return false;
+  }
+  tree->rnum--;
+  tree->msiz -= top->ksiz + top->vsiz;
+  if(!top->left){
+    tree->root = top->right;
+  } else if(!top->right){
+    tree->root = top->left;
+  } else {
+    tree->root = top->left;
+    TCTREEREC *rec = tctreesplay(tree, kbuf, ksiz);
+    rec->right = top->right;
+    tree->root = rec;
+  }
+  TCFREE(top);
+  return true;
+}
+
+
+/* Remove a string record of a tree object. */
+bool tctreeout2(TCTREE *tree, const char *kstr){
+  assert(tree && kstr);
+  return tctreeout(tree, kstr, strlen(kstr));
+}
+
+
+/* Retrieve a record in a tree object. */
+const void *tctreeget(TCTREE *tree, const void *kbuf, int ksiz, int *sp){
+  assert(tree && kbuf && ksiz >= 0 && sp);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top) return NULL;
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv != 0){
+    tree->root = top;
+    return NULL;
+  }
+  tree->root = top;
+  *sp = top->vsiz;
+  return dbuf + top->ksiz + TCALIGNPAD(top->ksiz);
+}
+
+
+/* Retrieve a string record in a tree object. */
+const char *tctreeget2(TCTREE *tree, const char *kstr){
+  assert(tree && kstr);
+  int vsiz;
+  return tctreeget(tree, kstr, strlen(kstr), &vsiz);
+}
+
+
+/* Initialize the iterator of a tree object. */
+void tctreeiterinit(TCTREE *tree){
+  assert(tree);
+  TCTREEREC *rec = tree->root;
+  if(!rec) return;
+  while(rec->left){
+    rec = rec->left;
+  }
+  tree->cur = rec;
+}
+
+
+/* Initialize the iterator of a tree object in front of records corresponding a key. */
+void tctreeiterinit2(TCTREE *tree, const void *kbuf, int ksiz){
+  assert(tree && kbuf && ksiz >= 0);
+  TCTREEREC *rec = tree->root;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int cv = tree->cmp(kbuf, ksiz, dbuf, rec->ksiz, tree->cmpop);
+    if(cv < 0){
+      tree->cur = rec;
+      rec = rec->left;
+    } else if(cv > 0){
+      rec = rec->right;
+    } else {
+      tree->cur = rec;
+      return;
+    }
+  }
+}
+
+
+/* Initialize the iterator of a tree object in front of records corresponding a key string. */
+void tctreeiterinit3(TCTREE *tree, const char *kstr){
+  assert(tree);
+  tctreeiterinit2(tree, kstr, strlen(kstr));
+}
+
+
+/* Get the next key of the iterator of a tree object. */
+const void *tctreeiternext(TCTREE *tree, int *sp){
+  assert(tree && sp);
+  if(!tree->cur) return NULL;
+  TCTREEREC *rec = tree->cur;
+  const char *kbuf = (char *)rec + sizeof(*rec);
+  int ksiz = rec->ksiz;
+  rec = tctreesplay(tree, kbuf, ksiz);
+  if(!rec) return NULL;
+  tree->root = rec;
+  rec = rec->right;
+  if(rec){
+    while(rec->left){
+      rec = rec->left;
+    }
+  }
+  tree->cur = rec;
+  *sp = ksiz;
+  return kbuf;
+}
+
+
+/* Get the next key string of the iterator of a tree object. */
+const char *tctreeiternext2(TCTREE *tree){
+  assert(tree);
+  int ksiz;
+  return tctreeiternext(tree, &ksiz);
+}
+
+
+/* Get the number of records stored in a tree object. */
+uint64_t tctreernum(const TCTREE *tree){
+  assert(tree);
+  return tree->rnum;
+}
+
+
+/* Get the total size of memory used in a tree object. */
+uint64_t tctreemsiz(const TCTREE *tree){
+  assert(tree);
+  return tree->msiz + tree->rnum * (sizeof(*tree->root) + sizeof(void *));
+}
+
+
+/* Create a list object containing all keys in a tree object. */
+TCLIST *tctreekeys(const TCTREE *tree){
+  assert(tree);
+  TCLIST *list = tclistnew2(tree->rnum);
+  if(tree->root){
+    TCTREEREC **history;
+    TCMALLOC(history, sizeof(*history) * tree->rnum);
+    TCTREEREC **result;
+    TCMALLOC(result, sizeof(*history) * tree->rnum);
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(!rec){
+        rec = result[hnum];
+        char *dbuf = (char *)rec + sizeof(*rec);
+        TCLISTPUSH(list, dbuf, rec->ksiz);
+        continue;
+      }
+      if(rec->right) history[hnum++] = rec->right;
+      history[hnum] = NULL;
+      result[hnum] = rec;
+      hnum++;
+      if(rec->left) history[hnum++] = rec->left;
+    }
+    TCFREE(result);
+    TCFREE(history);
+  }
+  return list;
+}
+
+
+/* Create a list object containing all values in a tree object. */
+TCLIST *tctreevals(const TCTREE *tree){
+  assert(tree);
+  TCLIST *list = tclistnew2(tree->rnum);
+  if(tree->root){
+    TCTREEREC **history;
+    TCMALLOC(history, sizeof(*history) * tree->rnum);
+    TCTREEREC **result;
+    TCMALLOC(result, sizeof(*history) * tree->rnum);
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(!rec){
+        rec = result[hnum];
+        char *dbuf = (char *)rec + sizeof(*rec);
+        TCLISTPUSH(list, dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz), rec->vsiz);
+        continue;
+      }
+      if(rec->right) history[hnum++] = rec->right;
+      history[hnum] = NULL;
+      result[hnum] = rec;
+      hnum++;
+      if(rec->left) history[hnum++] = rec->left;
+    }
+    TCFREE(result);
+    TCFREE(history);
+  }
+  return list;
+}
+
+
+/* Add an integer to a record in a tree object. */
+int tctreeaddint(TCTREE *tree, const void *kbuf, int ksiz, int num){
+  assert(tree && kbuf && ksiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = NULL;
+    rec->right = NULL;
+    tree->root = rec;
+    tree->rnum = 1;
+    tree->msiz = ksiz + sizeof(num);
+    return num;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv < 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = top->left;
+    rec->right = top;
+    top->left = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + sizeof(num);
+    tree->root = rec;
+  } else if(cv > 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = top;
+    rec->right = top->right;
+    top->right = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + sizeof(num);
+    tree->root = rec;
+  } else {
+    tree->root = top;
+    if(top->vsiz != sizeof(num)) return INT_MIN;
+    int *resp = (int *)(dbuf + ksiz + TCALIGNPAD(ksiz));
+    return *resp += num;
+  }
+  return num;
+}
+
+
+/* Add a real number to a record in a tree object. */
+double tctreeadddouble(TCTREE *tree, const void *kbuf, int ksiz, double num){
+  assert(tree && kbuf && ksiz >= 0);
+  TCTREEREC *top = tctreesplay(tree, kbuf, ksiz);
+  if(!top){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    char *dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = NULL;
+    rec->right = NULL;
+    tree->root = rec;
+    tree->rnum = 1;
+    tree->msiz = ksiz + sizeof(num);
+    return num;
+  }
+  char *dbuf = (char *)top + sizeof(*top);
+  int cv = tree->cmp(kbuf, ksiz, dbuf, top->ksiz, tree->cmpop);
+  if(cv < 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = top->left;
+    rec->right = top;
+    top->left = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + sizeof(num);
+    tree->root = rec;
+  } else if(cv > 0){
+    int psiz = TCALIGNPAD(ksiz);
+    TCTREEREC *rec;
+    TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+    dbuf = (char *)rec + sizeof(*rec);
+    memcpy(dbuf, kbuf, ksiz);
+    dbuf[ksiz] = '\0';
+    rec->ksiz = ksiz;
+    memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+    dbuf[ksiz+psiz+sizeof(num)] = '\0';
+    rec->vsiz = sizeof(num);
+    rec->left = top;
+    rec->right = top->right;
+    top->right = NULL;
+    tree->rnum++;
+    tree->msiz += ksiz + sizeof(num);
+    tree->root = rec;
+  } else {
+    tree->root = top;
+    if(top->vsiz != sizeof(num)) return nan("");
+    double *resp = (double *)(dbuf + ksiz + TCALIGNPAD(ksiz));
+    return *resp += num;
+  }
+  return num;
+}
+
+
+/* Clear a tree object. */
+void tctreeclear(TCTREE *tree){
+  assert(tree);
+  if(tree->root){
+    TCTREEREC *histbuf[TREESTACKNUM];
+    TCTREEREC **history = histbuf;
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(hnum >= TREESTACKNUM - 2 && history == histbuf){
+        TCMALLOC(history, sizeof(*history) * tree->rnum);
+        memcpy(history, histbuf, sizeof(*history) * hnum);
+      }
+      if(rec->left) history[hnum++] = rec->left;
+      if(rec->right) history[hnum++] = rec->right;
+      TCFREE(rec);
+    }
+    if(history != histbuf) TCFREE(history);
+  }
+  tree->root = NULL;
+  tree->cur = NULL;
+  tree->rnum = 0;
+  tree->msiz = 0;
+}
+
+
+/* Remove fringe records of a tree object. */
+void tctreecutfringe(TCTREE *tree, int num){
+  assert(tree && num >= 0);
+  if(!tree->root || num < 1) return;
+  TCTREEREC **history;
+  TCMALLOC(history, sizeof(*history) * tree->rnum);
+  int hnum = 0;
+  history[hnum++] = tree->root;
+  for(int i = 0; i < hnum; i++){
+    TCTREEREC *rec = history[i];
+    if(rec->left) history[hnum++] = rec->left;
+    if(rec->right) history[hnum++] = rec->right;
+  }
+  TCTREEREC *cur = NULL;
+  for(int i = hnum - 1; i >= 0; i--){
+    TCTREEREC *rec = history[i];
+    if(rec->left){
+      TCTREEREC *child = rec->left;
+      tree->rnum--;
+      tree->msiz -= child->ksiz + child->vsiz;
+      rec->left = NULL;
+      if(tree->cur == child){
+        tree->cur = NULL;
+        cur = child;
+      } else {
+        TCFREE(child);
+      }
+      if(--num < 1) break;
+    }
+    if(rec->right){
+      TCTREEREC *child = rec->right;
+      tree->rnum--;
+      tree->msiz -= child->ksiz + child->vsiz;
+      rec->right = NULL;
+      if(tree->cur == child){
+        tree->cur = NULL;
+        cur = child;
+      } else {
+        TCFREE(child);
+      }
+      if(--num < 1) break;
+    }
+  }
+  if(num > 0){
+    TCFREE(tree->root);
+    tree->root = NULL;
+    tree->cur = NULL;
+    tree->rnum = 0;
+    tree->msiz = 0;
+  }
+  if(cur){
+    char *dbuf = (char *)cur + sizeof(*cur);
+    tctreeiterinit2(tree, dbuf, cur->ksiz);
+    TCFREE(cur);
+  }
+  TCFREE(history);
+}
+
+
+/* Serialize a tree object into a byte array. */
+void *tctreedump(const TCTREE *tree, int *sp){
+  assert(tree && sp);
+  int tsiz = 0;
+  if(tree->root){
+    TCTREEREC *histbuf[TREESTACKNUM];
+    TCTREEREC **history = histbuf;
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(hnum >= TREESTACKNUM - 2 && history == histbuf){
+        TCMALLOC(history, sizeof(*history) * tree->rnum);
+        memcpy(history, histbuf, sizeof(*history) * hnum);
+      }
+      if(rec->left) history[hnum++] = rec->left;
+      if(rec->right) history[hnum++] = rec->right;
+      tsiz += rec->ksiz + rec->vsiz + sizeof(int) * 2;
+    }
+    if(history != histbuf) TCFREE(history);
+  }
+  char *buf;
+  TCMALLOC(buf, tsiz + 1);
+  char *wp = buf;
+  if(tree->root){
+    TCTREEREC *histbuf[TREESTACKNUM];
+    TCTREEREC **history = histbuf;
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(hnum >= TREESTACKNUM - 2 && history == histbuf){
+        TCMALLOC(history, sizeof(*history) * tree->rnum);
+        memcpy(history, histbuf, sizeof(*history) * hnum);
+      }
+      if(rec->left) history[hnum++] = rec->left;
+      if(rec->right) history[hnum++] = rec->right;
+      const char *kbuf = (char *)rec + sizeof(*rec);
+      int ksiz = rec->ksiz;
+      const char *vbuf = kbuf + ksiz + TCALIGNPAD(ksiz);
+      int vsiz = rec->vsiz;
+      int step;
+      TCSETVNUMBUF(step, wp, ksiz);
+      wp += step;
+      memcpy(wp, kbuf, ksiz);
+      wp += ksiz;
+      TCSETVNUMBUF(step, wp, vsiz);
+      wp += step;
+      memcpy(wp, vbuf, vsiz);
+      wp += vsiz;
+    }
+    if(history != histbuf) TCFREE(history);
+  }
+  *sp = wp - buf;
+  return buf;
+}
+
+
+/* Create a tree object from a serialized byte array. */
+TCTREE *tctreeload(const void *ptr, int size, TCCMP cmp, void *cmpop){
+  assert(ptr && size >= 0 && cmp);
+  TCTREE *tree = tctreenew2(cmp, cmpop);
+  const char *rp = ptr;
+  const char *ep = (char *)ptr + size;
+  while(rp < ep){
+    int step, ksiz, vsiz;
+    TCREADVNUMBUF(rp, ksiz, step);
+    rp += step;
+    const char *kbuf = rp;
+    rp += ksiz;
+    TCREADVNUMBUF(rp, vsiz, step);
+    rp += step;
+    tctreeputkeep(tree, kbuf, ksiz, rp, vsiz);
+    rp += vsiz;
+  }
+  return tree;
+}
+
+
+/* Perform the splay operation of a tree object.
+   `tree' specifies the tree object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   The return value is the pointer to the record corresponding the key. */
+static TCTREEREC* tctreesplay(TCTREE *tree, const void *kbuf, int ksiz){
+  assert(tree && kbuf && ksiz >= 0);
+  TCTREEREC *top = tree->root;
+  if(!top) return NULL;
+  TCCMP cmp = tree->cmp;
+  void *cmpop = tree->cmpop;
+  TCTREEREC ent;
+  ent.left = NULL;
+  ent.right = NULL;
+  TCTREEREC *lrec = &ent;
+  TCTREEREC *rrec = &ent;
+  while(true){
+    char *dbuf = (char *)top + sizeof(*top);
+    int cv = cmp(kbuf, ksiz, dbuf, top->ksiz, cmpop);
+    if(cv < 0){
+      if(!top->left) break;
+      dbuf = (char *)top->left + sizeof(*top);
+      cv = cmp(kbuf, ksiz, dbuf, top->left->ksiz, cmpop);
+      if(cv < 0){
+        TCTREEREC *swap = top->left;
+        top->left = swap->right;
+        swap->right = top;
+        top = swap;
+        if(!top->left) break;
+      }
+      rrec->left = top;
+      rrec = top;
+      top = top->left;
+    } else if(cv > 0){
+      if(!top->right) break;
+      dbuf = (char *)top->right + sizeof(*top);
+      cv = cmp(kbuf, ksiz, dbuf, top->right->ksiz, cmpop);
+      if(cv > 0){
+        TCTREEREC *swap = top->right;
+        top->right = swap->left;
+        swap->left = top;
+        top = swap;
+        if(!top->right) break;
+      }
+      lrec->right = top;
+      lrec = top;
+      top = top->right;
+    } else {
+      break;
+    }
+  }
+  lrec->right = top->left;
+  rrec->left = top->right;
+  top->left = ent.right;
+  top->right = ent.left;
+  return top;
+}
+
+
+
+/*************************************************************************************************
+ * ordered tree (for experts)
+ *************************************************************************************************/
+
+
+/* Store a record into a tree object without balancing nodes. */
+void tctreeput3(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *rec = tree->root;
+  TCTREEREC **entp = NULL;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int cv = tree->cmp(kbuf, ksiz, dbuf, rec->ksiz, tree->cmpop);
+    if(cv < 0){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(cv > 0){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      tree->msiz += vsiz - rec->vsiz;
+      int psiz = TCALIGNPAD(ksiz);
+      if(vsiz > rec->vsiz){
+        TCTREEREC *old = rec;
+        TCREALLOC(rec, rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+        if(rec != old){
+          if(tree->root == old) tree->root = rec;
+          if(tree->cur == old) tree->cur = rec;
+          if(entp) *entp = rec;
+          dbuf = (char *)rec + sizeof(*rec);
+        }
+      }
+      memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+      dbuf[ksiz+psiz+vsiz] = '\0';
+      rec->vsiz = vsiz;
+      return;
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+  dbuf[ksiz+psiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->left = NULL;
+  rec->right = NULL;
+  if(entp){
+    *entp = rec;
+  } else {
+    tree->root = rec;
+  }
+  tree->rnum++;
+  tree->msiz += ksiz + vsiz;
+}
+
+
+/* Store a new record into a map object without balancing nodes. */
+bool tctreeputkeep3(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *rec = tree->root;
+  TCTREEREC **entp = NULL;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int cv = tree->cmp(kbuf, ksiz, dbuf, rec->ksiz, tree->cmpop);
+    if(cv < 0){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(cv > 0){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      return false;
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+  dbuf[ksiz+psiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->left = NULL;
+  rec->right = NULL;
+  if(entp){
+    *entp = rec;
+  } else {
+    tree->root = rec;
+  }
+  tree->rnum++;
+  tree->msiz += ksiz + vsiz;
+  return true;
+}
+
+
+/* Concatenate a value at the existing record in a tree object without balancing nodes. */
+void tctreeputcat3(TCTREE *tree, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(tree && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  TCTREEREC *rec = tree->root;
+  TCTREEREC **entp = NULL;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int cv = tree->cmp(kbuf, ksiz, dbuf, rec->ksiz, tree->cmpop);
+    if(cv < 0){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(cv > 0){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      tree->msiz += vsiz;
+      int psiz = TCALIGNPAD(ksiz);
+      int asiz = sizeof(*rec) + ksiz + psiz + rec->vsiz + vsiz + 1;
+      int unit = (asiz <= TCTREECSUNIT) ? TCTREECSUNIT : TCTREECBUNIT;
+      asiz = (asiz - 1) + unit - (asiz - 1) % unit;
+      TCTREEREC *old = rec;
+      TCREALLOC(rec, rec, asiz);
+      if(rec != old){
+        if(tree->root == old) tree->root = rec;
+        if(tree->cur == old) tree->cur = rec;
+        if(entp) *entp = rec;
+        dbuf = (char *)rec + sizeof(*rec);
+      }
+      memcpy(dbuf + ksiz + psiz + rec->vsiz, vbuf, vsiz);
+      rec->vsiz += vsiz;
+      dbuf[ksiz+psiz+rec->vsiz] = '\0';
+      return;
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, vbuf, vsiz);
+  dbuf[ksiz+psiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->left = NULL;
+  rec->right = NULL;
+  if(entp){
+    *entp = rec;
+  } else {
+    tree->root = rec;
+  }
+  tree->rnum++;
+  tree->msiz += ksiz + vsiz;
+}
+
+
+/* Retrieve a record in a tree object without balancing nodes. */
+const void *tctreeget3(const TCTREE *tree, const void *kbuf, int ksiz, int *sp){
+  assert(tree && kbuf && ksiz >= 0 && sp);
+  TCTREEREC *rec = tree->root;
+  while(rec){
+    char *dbuf = (char *)rec + sizeof(*rec);
+    int cv = tree->cmp(kbuf, ksiz, dbuf, rec->ksiz, tree->cmpop);
+    if(cv < 0){
+      rec = rec->left;
+    } else if(cv > 0){
+      rec = rec->right;
+    } else {
+      *sp = rec->vsiz;
+      return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+    }
+  }
+  return NULL;
+}
+
+
+/* Get the value bound to the key fetched from the iterator of a tree object. */
+const void *tctreeiterval(const void *kbuf, int *sp){
+  assert(kbuf && sp);
+  TCTREEREC *rec = (TCTREEREC *)((char *)kbuf - sizeof(*rec));
+  *sp = rec->vsiz;
+  return (char *)kbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+}
+
+
+/* Get the value string bound to the key fetched from the iterator of a tree object. */
+const char *tctreeiterval2(const char *kstr){
+  assert(kstr);
+  TCTREEREC *rec = (TCTREEREC *)(kstr - sizeof(*rec));
+  return kstr + rec->ksiz + TCALIGNPAD(rec->ksiz);
+}
+
+
+/* Create an array of strings of all keys in a tree object. */
+const char **tctreekeys2(const TCTREE *tree, int *np){
+  assert(tree && np);
+  const char **ary;
+  TCMALLOC(ary, sizeof(*ary) * tree->rnum + 1);
+  int anum = 0;
+  if(tree->root){
+    TCTREEREC **history;
+    TCMALLOC(history, sizeof(*history) * tree->rnum);
+    TCTREEREC **result;
+    TCMALLOC(result, sizeof(*history) * tree->rnum);
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(!rec){
+        rec = result[hnum];
+        ary[(anum++)] = (char *)rec + sizeof(*rec);
+        continue;
+      }
+      if(rec->right) history[hnum++] = rec->right;
+      history[hnum] = NULL;
+      result[hnum] = rec;
+      hnum++;
+      if(rec->left) history[hnum++] = rec->left;
+    }
+    TCFREE(result);
+    TCFREE(history);
+  }
+  *np = anum;
+  return ary;
+}
+
+
+/* Create an array of strings of all values in a tree object. */
+const char **tctreevals2(const TCTREE *tree, int *np){
+  assert(tree && np);
+  const char **ary;
+  TCMALLOC(ary, sizeof(*ary) * tree->rnum + 1);
+  int anum = 0;
+  if(tree->root){
+    TCTREEREC **history;
+    TCMALLOC(history, sizeof(*history) * tree->rnum);
+    TCTREEREC **result;
+    TCMALLOC(result, sizeof(*history) * tree->rnum);
+    int hnum = 0;
+    history[hnum++] = tree->root;
+    while(hnum > 0){
+      TCTREEREC *rec = history[--hnum];
+      if(!rec){
+        rec = result[hnum];
+        ary[(anum++)] = (char *)rec + sizeof(*rec);
+        continue;
+      }
+      if(rec->right) history[hnum++] = rec->right;
+      history[hnum] = NULL;
+      result[hnum] = rec;
+      hnum++;
+      if(rec->left) history[hnum++] = rec->left;
+    }
+    TCFREE(result);
+    TCFREE(history);
+  }
+  *np = anum;
+  return ary;
+}
+
+
+/* Extract a tree record from a serialized byte array. */
+void *tctreeloadone(const void *ptr, int size, const void *kbuf, int ksiz, int *sp){
+  assert(ptr && size >= 0 && kbuf && ksiz >= 0 && sp);
+  const char *rp = ptr;
+  const char *ep = (char *)ptr + size;
+  while(rp < ep){
+    int step, rsiz;
+    TCREADVNUMBUF(rp, rsiz, step);
+    rp += step;
+    if(rsiz == ksiz && !memcmp(kbuf, rp, rsiz)){
+      rp += rsiz;
+      TCREADVNUMBUF(rp, rsiz, step);
+      rp += step;
+      *sp = rsiz;
+      char *rv;
+      TCMEMDUP(rv, rp, rsiz);
+      return rv;
+    }
+    rp += rsiz;
+    TCREADVNUMBUF(rp, rsiz, step);
+    rp += step;
+    rp += rsiz;
+  }
+  return NULL;
+}
+
+
+
+/*************************************************************************************************
+ * on-memory hash database
  *************************************************************************************************/
 
 
@@ -1764,19 +3233,19 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
     const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf) + TC_ksiz - 1; \
     int _TC_ksiz = TC_ksiz; \
     for((TC_res) = 0x20071123; _TC_ksiz--;){ \
-      (TC_res) = ((TC_res) << 5) + (TC_res) + *(_TC_p)--; \
+      (TC_res) = (TC_res) * 33 + *(_TC_p)--; \
     } \
     (TC_res) &= TCMDBMNUM - 1; \
   } while(false)
 
 
-/* Create an on-memory database object. */
+/* Create an on-memory hash database object. */
 TCMDB *tcmdbnew(void){
   return tcmdbnew2(TCMDBBNUM);
 }
 
 
-/* Create an on-memory database with specifying the number of the buckets. */
+/* Create an on-memory hash database with specifying the number of the buckets. */
 TCMDB *tcmdbnew2(uint32_t bnum){
   TCMDB *mdb;
   if(bnum < 1) bnum = TCMDBBNUM;
@@ -1796,7 +3265,7 @@ TCMDB *tcmdbnew2(uint32_t bnum){
 }
 
 
-/* Delete an on-memory database object. */
+/* Delete an on-memory hash database object. */
 void tcmdbdel(TCMDB *mdb){
   assert(mdb);
   for(int i = TCMDBMNUM - 1; i >= 0; i--){
@@ -1811,7 +3280,7 @@ void tcmdbdel(TCMDB *mdb){
 }
 
 
-/* Store a record into an on-memory database. */
+/* Store a record into an on-memory hash database. */
 void tcmdbput(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int mi;
@@ -1822,26 +3291,14 @@ void tcmdbput(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz
 }
 
 
-/* Store a string record into an on-memory database. */
+/* Store a string record into an on-memory hash database. */
 void tcmdbput2(TCMDB *mdb, const char *kstr, const char *vstr){
   assert(mdb && kstr && vstr);
   tcmdbput(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
 }
 
 
-/* Store a record of the value of two regions into an on-memory database object. */
-void tcmdbput3(TCMDB *mdb, const char *kbuf, int ksiz,
-               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz){
-  assert(mdb && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
-  unsigned int mi;
-  TCMDBHASH(mi, kbuf, ksiz);
-  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
-  tcmapput3(mdb->maps[mi], kbuf, ksiz, fvbuf, fvsiz, lvbuf, lvsiz);
-  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
-}
-
-
-/* Store a new record into an on-memory database. */
+/* Store a new record into an on-memory hash database. */
 bool tcmdbputkeep(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int mi;
@@ -1853,14 +3310,14 @@ bool tcmdbputkeep(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int 
 }
 
 
-/* Store a new string record into an on-memory database. */
+/* Store a new string record into an on-memory hash database. */
 bool tcmdbputkeep2(TCMDB *mdb, const char *kstr, const char *vstr){
   assert(mdb && kstr && vstr);
   return tcmdbputkeep(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
 }
 
 
-/* Concatenate a value at the end of the value of the existing record in an on-memory database. */
+/* Concatenate a value at the end of the existing record in an on-memory hash database. */
 void tcmdbputcat(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int mi;
@@ -1871,14 +3328,14 @@ void tcmdbputcat(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int v
 }
 
 
-/* Concatenate a string at the end of the value of the existing record in an on-memory database. */
+/* Concatenate a string at the end of the existing record in an on-memory hash database. */
 void tcmdbputcat2(TCMDB *mdb, const char *kstr, const char *vstr){
   assert(mdb && kstr && vstr);
   tcmdbputcat(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
 }
 
 
-/* Remove a record of an on-memory database. */
+/* Remove a record of an on-memory hash database. */
 bool tcmdbout(TCMDB *mdb, const void *kbuf, int ksiz){
   assert(mdb && kbuf && ksiz >= 0);
   unsigned int mi;
@@ -1890,14 +3347,14 @@ bool tcmdbout(TCMDB *mdb, const void *kbuf, int ksiz){
 }
 
 
-/* Remove a string record of an on-memory database. */
+/* Remove a string record of an on-memory hash database. */
 bool tcmdbout2(TCMDB *mdb, const char *kstr){
   assert(mdb && kstr);
   return tcmdbout(mdb, kstr, strlen(kstr));
 }
 
 
-/* Retrieve a record in an on-memory database. */
+/* Retrieve a record in an on-memory hash database. */
 void *tcmdbget(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
   assert(mdb && kbuf && ksiz >= 0 && sp);
   unsigned int mi;
@@ -1917,7 +3374,7 @@ void *tcmdbget(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
 }
 
 
-/* Retrieve a string record in an on-memory database. */
+/* Retrieve a string record in an on-memory hash database. */
 char *tcmdbget2(TCMDB *mdb, const char *kstr){
   assert(mdb && kstr);
   int vsiz;
@@ -1925,27 +3382,7 @@ char *tcmdbget2(TCMDB *mdb, const char *kstr){
 }
 
 
-/* Retrieve a record and move it astern in an on-memory database. */
-void *tcmdbget3(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
-  assert(mdb && kbuf && ksiz >= 0 && sp);
-  unsigned int mi;
-  TCMDBHASH(mi, kbuf, ksiz);
-  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return NULL;
-  int vsiz;
-  const char *vbuf = tcmapget3(mdb->maps[mi], kbuf, ksiz, &vsiz);
-  char *rv;
-  if(vbuf){
-    TCMEMDUP(rv, vbuf, vsiz);
-    *sp = vsiz;
-  } else {
-    rv = NULL;
-  }
-  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
-  return rv;
-}
-
-
-/* Get the size of the value of a record in an on-memory database object. */
+/* Get the size of the value of a record in an on-memory hash database object. */
 int tcmdbvsiz(TCMDB *mdb, const void *kbuf, int ksiz){
   assert(mdb && kbuf && ksiz >= 0);
   unsigned int mi;
@@ -1959,14 +3396,14 @@ int tcmdbvsiz(TCMDB *mdb, const void *kbuf, int ksiz){
 }
 
 
-/* Get the size of the value of a string record in an on-memory database object. */
+/* Get the size of the value of a string record in an on-memory hash database object. */
 int tcmdbvsiz2(TCMDB *mdb, const char *kstr){
   assert(mdb && kstr);
   return tcmdbvsiz(mdb, kstr, strlen(kstr));
 }
 
 
-/* Initialize the iterator of an on-memory database. */
+/* Initialize the iterator of an on-memory hash database. */
 void tcmdbiterinit(TCMDB *mdb){
   assert(mdb);
   if(pthread_mutex_lock(mdb->imtx) != 0) return;
@@ -1978,7 +3415,7 @@ void tcmdbiterinit(TCMDB *mdb){
 }
 
 
-/* Get the next key of the iterator of an on-memory database. */
+/* Get the next key of the iterator of an on-memory hash database. */
 void *tcmdbiternext(TCMDB *mdb, int *sp){
   assert(mdb && sp);
   if(pthread_mutex_lock(mdb->imtx) != 0) return NULL;
@@ -2014,7 +3451,7 @@ void *tcmdbiternext(TCMDB *mdb, int *sp){
 }
 
 
-/* Get the next key string of the iterator of an on-memory database. */
+/* Get the next key string of the iterator of an on-memory hash database. */
 char *tcmdbiternext2(TCMDB *mdb){
   assert(mdb);
   int ksiz;
@@ -2022,7 +3459,7 @@ char *tcmdbiternext2(TCMDB *mdb){
 }
 
 
-/* Get forward matching keys in an on-memory database object. */
+/* Get forward matching keys in an on-memory hash database object. */
 TCLIST *tcmdbfwmkeys(TCMDB *mdb, const void *pbuf, int psiz, int max){
   assert(mdb && pbuf && psiz >= 0);
   TCLIST* keys = tclistnew();
@@ -2033,10 +3470,10 @@ TCLIST *tcmdbfwmkeys(TCMDB *mdb, const void *pbuf, int psiz, int max){
       TCMAP *map = mdb->maps[i];
       TCMAPREC *cur = map->cur;
       tcmapiterinit(map);
-      int ksiz;
       const char *kbuf;
+      int ksiz;
       while(TCLISTNUM(keys) < max && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
-        if(ksiz >= psiz && !memcmp(kbuf, pbuf, psiz)) tclistpush(keys, kbuf, ksiz);
+        if(ksiz >= psiz && !memcmp(kbuf, pbuf, psiz)) TCLISTPUSH(keys, kbuf, ksiz);
       }
       map->cur = cur;
       pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
@@ -2047,14 +3484,14 @@ TCLIST *tcmdbfwmkeys(TCMDB *mdb, const void *pbuf, int psiz, int max){
 }
 
 
-/* Get forward matching string keys in an on-memory database object. */
+/* Get forward matching string keys in an on-memory hash database object. */
 TCLIST *tcmdbfwmkeys2(TCMDB *mdb, const char *pstr, int max){
   assert(mdb && pstr);
   return tcmdbfwmkeys(mdb, pstr, strlen(pstr), max);
 }
 
 
-/* Get the number of records stored in an on-memory database. */
+/* Get the number of records stored in an on-memory hash database. */
 uint64_t tcmdbrnum(TCMDB *mdb){
   assert(mdb);
   uint64_t rnum = 0;
@@ -2065,7 +3502,7 @@ uint64_t tcmdbrnum(TCMDB *mdb){
 }
 
 
-/* Get the total size of memory used in an on-memory database object. */
+/* Get the total size of memory used in an on-memory hash database object. */
 uint64_t tcmdbmsiz(TCMDB *mdb){
   assert(mdb);
   uint64_t msiz = 0;
@@ -2076,7 +3513,31 @@ uint64_t tcmdbmsiz(TCMDB *mdb){
 }
 
 
-/* Clear an on-memory database object. */
+/* Add an integer to a record in an on-memory hash database object. */
+int tcmdbaddint(TCMDB *mdb, const void *kbuf, int ksiz, int num){
+  assert(mdb && kbuf && ksiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return INT_MIN;
+  int rv = tcmapaddint(mdb->maps[mi], kbuf, ksiz, num);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Add a real number to a record in an on-memory hash database object. */
+double tcmdbadddouble(TCMDB *mdb, const void *kbuf, int ksiz, double num){
+  assert(mdb && kbuf && ksiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return nan("");
+  double rv = tcmapadddouble(mdb->maps[mi], kbuf, ksiz, num);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Clear an on-memory hash database object. */
 void tcmdbvanish(TCMDB *mdb){
   assert(mdb);
   for(int i = 0; i < TCMDBMNUM; i++){
@@ -2098,6 +3559,452 @@ void tcmdbcutfront(TCMDB *mdb, int num){
       pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
     }
   }
+}
+
+
+
+/*************************************************************************************************
+ * on-memory hash database (for experts)
+ *************************************************************************************************/
+
+
+/* Store a record and make it semivolatile in an on-memory hash database object. */
+void tcmdbput3(TCMDB *mdb, const void *kbuf, int ksiz, const char *vbuf, int vsiz){
+  assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapput3(mdb->maps[mi], kbuf, ksiz, vbuf, vsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Store a record of the value of two regions into an on-memory hash database object. */
+void tcmdbput4(TCMDB *mdb, const void *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const void *lvbuf, int lvsiz){
+  assert(mdb && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapput4(mdb->maps[mi], kbuf, ksiz, fvbuf, fvsiz, lvbuf, lvsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Concatenate a value and make it semivolatile in on-memory hash database object. */
+void tcmdbputcat3(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapputcat3(mdb->maps[mi], kbuf, ksiz, vbuf, vsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Retrieve a record and move it astern in an on-memory hash database. */
+void *tcmdbget3(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
+  assert(mdb && kbuf && ksiz >= 0 && sp);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return NULL;
+  int vsiz;
+  const char *vbuf = tcmapget3(mdb->maps[mi], kbuf, ksiz, &vsiz);
+  char *rv;
+  if(vbuf){
+    TCMEMDUP(rv, vbuf, vsiz);
+    *sp = vsiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Process each record atomically of an on-memory hash database object. */
+void tcmdbforeach(TCMDB *mdb, TCITER iter, void *op){
+  assert(mdb && iter);
+  for(int i = 0; i < TCMDBMNUM; i++){
+    if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + i) != 0){
+      while(i >= 0){
+        pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
+        i--;
+      }
+      return;
+    }
+  }
+  bool cont = true;
+  for(int i = 0; cont && i < TCMDBMNUM; i++){
+    TCMAP *map = mdb->maps[i];
+    TCMAPREC *cur = map->cur;
+    tcmapiterinit(map);
+    int ksiz;
+    const char *kbuf;
+    while(cont && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
+      int vsiz;
+      const char *vbuf = tcmapiterval(kbuf, &vsiz);
+      if(!iter(kbuf, ksiz, vbuf, vsiz, op)) cont = false;
+    }
+    map->cur = cur;
+  }
+  for(int i = TCMDBMNUM - 1; i >= 0; i--){
+    pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
+  }
+}
+
+
+
+/*************************************************************************************************
+ * on-memory tree database
+ *************************************************************************************************/
+
+
+/* Create an on-memory tree database object. */
+TCNDB *tcndbnew(void){
+  return tcndbnew2(tccmplexical, NULL);
+}
+
+
+/* Create an on-memory tree database object with specifying the custom comparison function. */
+TCNDB *tcndbnew2(TCCMP cmp, void *cmpop){
+  assert(cmp);
+  TCNDB *ndb;
+  TCMALLOC(ndb, sizeof(*ndb));
+  TCMALLOC(ndb->mmtx, sizeof(pthread_mutex_t));
+  if(pthread_mutex_init(ndb->mmtx, NULL) != 0) tcmyfatal("mutex error");
+  ndb->tree = tctreenew2(cmp, cmpop);
+  return ndb;
+}
+
+
+/* Delete an on-memory tree database object. */
+void tcndbdel(TCNDB *ndb){
+  assert(ndb);
+  tctreedel(ndb->tree);
+  pthread_mutex_destroy(ndb->mmtx);
+  TCFREE(ndb->mmtx);
+  TCFREE(ndb);
+}
+
+
+/* Store a record into an on-memory tree database object. */
+void tcndbput(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeput(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Store a string record into an on-memory tree database object. */
+void tcndbput2(TCNDB *ndb, const char *kstr, const char *vstr){
+  assert(ndb && kstr && vstr);
+  tcndbput(ndb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Store a new record into an on-memory tree database object. */
+bool tcndbputkeep(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return false;
+  bool rv = tctreeputkeep(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Store a new string record into an on-memory tree database object. */
+bool tcndbputkeep2(TCNDB *ndb, const char *kstr, const char *vstr){
+  assert(ndb && kstr && vstr);
+  return tcndbputkeep(ndb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Concatenate a value at the end of the existing record in an on-memory tree database. */
+void tcndbputcat(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeputcat(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Concatenate a string at the end of the existing record in an on-memory tree database. */
+void tcndbputcat2(TCNDB *ndb, const char *kstr, const char *vstr){
+  assert(ndb && kstr && vstr);
+  tcndbputcat(ndb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Remove a record of an on-memory tree database object. */
+bool tcndbout(TCNDB *ndb, const void *kbuf, int ksiz){
+  assert(ndb && kbuf && ksiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return false;
+  bool rv = tctreeout(ndb->tree, kbuf, ksiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Remove a string record of an on-memory tree database object. */
+bool tcndbout2(TCNDB *ndb, const char *kstr){
+  assert(ndb && kstr);
+  return tcndbout(ndb, kstr, strlen(kstr));
+}
+
+
+/* Retrieve a record in an on-memory tree database object. */
+void *tcndbget(TCNDB *ndb, const void *kbuf, int ksiz, int *sp){
+  assert(ndb && kbuf && ksiz >= 0 && sp);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return NULL;
+  int vsiz;
+  const char *vbuf = tctreeget(ndb->tree, kbuf, ksiz, &vsiz);
+  char *rv;
+  if(vbuf){
+    TCMEMDUP(rv, vbuf, vsiz);
+    *sp = vsiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Retrieve a string record in an on-memory tree database object. */
+char *tcndbget2(TCNDB *ndb, const char *kstr){
+  assert(ndb && kstr);
+  int vsiz;
+  return tcndbget(ndb, kstr, strlen(kstr), &vsiz);
+}
+
+
+/* Get the size of the value of a record in an on-memory tree database object. */
+int tcndbvsiz(TCNDB *ndb, const void *kbuf, int ksiz){
+  assert(ndb && kbuf && ksiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return -1;
+  int vsiz;
+  const char *vbuf = tctreeget(ndb->tree, kbuf, ksiz, &vsiz);
+  if(!vbuf) vsiz = -1;
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return vsiz;
+}
+
+
+/* Get the size of the value of a string record in an on-memory tree database object. */
+int tcndbvsiz2(TCNDB *ndb, const char *kstr){
+  assert(ndb && kstr);
+  return tcndbvsiz(ndb, kstr, strlen(kstr));
+}
+
+
+/* Initialize the iterator of an on-memory tree database object. */
+void tcndbiterinit(TCNDB *ndb){
+  assert(ndb);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeiterinit(ndb->tree);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Initialize the iterator of an on-memory tree database object in front of a key. */
+void tcndbiterinit2(TCNDB *ndb, const void *kbuf, int ksiz){
+  assert(ndb && kbuf && ksiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeiterinit2(ndb->tree, kbuf, ksiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Initialize the iterator of an on-memory tree database object in front of a key string. */
+void tcndbiterinit3(TCNDB *ndb, const char *kstr){
+  assert(ndb && kstr);
+  tcndbiterinit2(ndb, kstr, strlen(kstr));
+}
+
+
+/* Get the next key of the iterator of an on-memory tree database object. */
+void *tcndbiternext(TCNDB *ndb, int *sp){
+  assert(ndb && sp);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return NULL;
+  int ksiz;
+  const char *kbuf = tctreeiternext(ndb->tree, &ksiz);
+  char *rv;
+  if(kbuf){
+    TCMEMDUP(rv, kbuf, ksiz);
+    *sp = ksiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Get the next key string of the iterator of an on-memory tree database object. */
+char *tcndbiternext2(TCNDB *ndb){
+  assert(ndb);
+  int ksiz;
+  return tcndbiternext(ndb, &ksiz);
+}
+
+
+/* Get forward matching keys in an on-memory tree database object. */
+TCLIST *tcndbfwmkeys(TCNDB *ndb, const void *pbuf, int psiz, int max){
+  assert(ndb && pbuf && psiz >= 0);
+  TCLIST* keys = tclistnew();
+  if(pthread_mutex_lock(ndb->mmtx) != 0) return keys;
+  if(max < 0) max = INT_MAX;
+  TCTREE *tree = ndb->tree;
+  TCTREEREC *cur = tree->cur;
+  tctreeiterinit2(tree, pbuf, psiz);
+  const char *lbuf = NULL;
+  int lsiz = 0;
+  const char *kbuf;
+  int ksiz;
+  while(TCLISTNUM(keys) < max && (kbuf = tctreeiternext(tree, &ksiz)) != NULL){
+    if(ksiz < psiz || memcmp(kbuf, pbuf, psiz)) break;
+    if(!lbuf || lsiz != ksiz || memcmp(kbuf, lbuf, ksiz)){
+      TCLISTPUSH(keys, kbuf, ksiz);
+      if(TCLISTNUM(keys) >= max) break;
+      lbuf = kbuf;
+      lsiz = ksiz;
+    }
+  }
+  tree->cur = cur;
+  pthread_mutex_unlock(ndb->mmtx);
+  return keys;
+}
+
+
+/* Get forward matching string keys in an on-memory tree database object. */
+TCLIST *tcndbfwmkeys2(TCNDB *ndb, const char *pstr, int max){
+  assert(ndb && pstr);
+  return tcndbfwmkeys(ndb, pstr, strlen(pstr), max);
+}
+
+
+/* Get the number of records stored in an on-memory tree database object. */
+uint64_t tcndbrnum(TCNDB *ndb){
+  assert(ndb);
+  return tctreernum(ndb->tree);
+}
+
+
+/* Get the total size of memory used in an on-memory tree database object. */
+uint64_t tcndbmsiz(TCNDB *ndb){
+  assert(ndb);
+  return tctreemsiz(ndb->tree);
+}
+
+
+/* Add an integer to a record in an on-memory tree database object. */
+int tcndbaddint(TCNDB *ndb, const void *kbuf, int ksiz, int num){
+  assert(ndb && kbuf && ksiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return INT_MIN;
+  int rv = tctreeaddint(ndb->tree, kbuf, ksiz, num);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Add a real number to a record in an on-memory tree database object. */
+double tcndbadddouble(TCNDB *ndb, const void *kbuf, int ksiz, double num){
+  assert(ndb && kbuf && ksiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return nan("");
+  double rv = tctreeadddouble(ndb->tree, kbuf, ksiz, num);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Clear an on-memory tree database object. */
+void tcndbvanish(TCNDB *ndb){
+  assert(ndb);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0);
+  tctreeclear(ndb->tree);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Remove fringe records of an on-memory tree database object. */
+void tcndbcutfringe(TCNDB *ndb, int num){
+  assert(ndb && num >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0);
+  tctreecutfringe(ndb->tree, num);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+
+/*************************************************************************************************
+ * ordered tree (for experts)
+ *************************************************************************************************/
+
+
+/* Store a record into a on-memory tree database without balancing nodes. */
+void tcndbput3(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeput3(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Store a new record into a on-memory tree database object without balancing nodes. */
+bool tcndbputkeep3(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return false;
+  bool rv = tctreeputkeep3(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Concatenate a value in a on-memory tree database without balancing nodes. */
+void tcndbputcat3(TCNDB *ndb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(ndb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  tctreeputcat3(ndb->tree, kbuf, ksiz, vbuf, vsiz);
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+}
+
+
+/* Retrieve a record in an on-memory tree database object without balancing nodes. */
+void *tcndbget3(TCNDB *ndb, const void *kbuf, int ksiz, int *sp){
+  assert(ndb && kbuf && ksiz >= 0 && sp);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return NULL;
+  int vsiz;
+  const char *vbuf = tctreeget3(ndb->tree, kbuf, ksiz, &vsiz);
+  char *rv;
+  if(vbuf){
+    TCMEMDUP(rv, vbuf, vsiz);
+    *sp = vsiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
+  return rv;
+}
+
+
+/* Process each record atomically of an on-memory tree database object. */
+void tcndbforeach(TCNDB *ndb, TCITER iter, void *op){
+  assert(ndb && iter);
+  if(pthread_mutex_lock((pthread_mutex_t *)ndb->mmtx) != 0) return;
+  TCTREE *tree = ndb->tree;
+  TCTREEREC *cur = tree->cur;
+  tctreeiterinit(tree);
+  int ksiz;
+  const char *kbuf;
+  while((kbuf = tctreeiternext(tree, &ksiz)) != NULL){
+    int vsiz;
+    const char *vbuf = tctreeiterval(kbuf, &vsiz);
+    if(!iter(kbuf, ksiz, vbuf, vsiz, op)) break;
+  }
+  tree->cur = cur;
+  pthread_mutex_unlock((pthread_mutex_t *)ndb->mmtx);
 }
 
 
@@ -2189,6 +4096,13 @@ void tcmpoolputmap(TCMPOOL *mpool, TCMAP *map){
 }
 
 
+/* Relegate a tree object to a memory pool object. */
+void tcmpoolputtree(TCMPOOL *mpool, TCTREE *tree){
+  assert(mpool && tree);
+  tcmpoolput(mpool, tree, (void (*)(void *))tctreedel);
+}
+
+
 /* Allocate a region relegated to a memory pool object. */
 void *tcmpoolmalloc(TCMPOOL *mpool, size_t size){
   assert(mpool && size > 0);
@@ -2226,6 +4140,15 @@ TCMAP *tcmpoolmapnew(TCMPOOL *mpool){
 }
 
 
+/* Create a tree object relegated to a memory pool object. */
+TCTREE *tcmpooltreenew(TCMPOOL *mpool){
+  assert(mpool);
+  TCTREE *tree = tctreenew();
+  tcmpoolput(mpool, tree, (void (*)(void *))tctreedel);
+  return tree;
+}
+
+
 /* Get the global memory pool object. */
 TCMPOOL *tcmpoolglobal(void){
   if(tcglobalmemorypool) return tcglobalmemorypool;
@@ -2248,8 +4171,9 @@ static void tcmpooldelglobal(void){
 
 
 #define TCRANDDEV      "/dev/urandom"    // path of the random device file
+#define TCDISTMAXLEN   4096              // maximum size of a string for distance checking
 #define TCDISTBUFSIZ   16384             // size of an distance buffer
-#define TCCHORDVNNUM   128               // number of virtual node of Chord
+#define TCCHIDXVNNUM   128               // number of virtual node of consistent hashing
 
 
 /* File descriptor of random number generator. */
@@ -2259,7 +4183,7 @@ int tcrandomdevfd = -1;
 /* private function prototypes */
 static void tcrandomfdclose(void);
 static time_t tcmkgmtime(struct tm *tm);
-static int tcchordcmp(const void *a, const void *b);
+static int tcchidxcmp(const void *a, const void *b);
 
 
 /* Get the larger value of two integers. */
@@ -2276,24 +4200,26 @@ long tclmin(long a, long b){
 
 /* Get a random number as long integer based on uniform distribution. */
 unsigned long tclrand(void){
-  static unsigned int cnt = 0;
-  static unsigned int seed = 0;
-  static unsigned long mask = 0;
+  static uint32_t cnt = 0;
+  static uint64_t seed = 0;
+  static uint64_t mask = 0;
   static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
   if((cnt & 0xff) == 0 && pthread_mutex_lock(&mutex) == 0){
-    if(cnt++ == 0) seed = time(NULL);
+    if(cnt == 0) seed += time(NULL);
     if(tcrandomdevfd == -1 && (tcrandomdevfd = open(TCRANDDEV, O_RDONLY, 00644)) != -1)
       atexit(tcrandomfdclose);
     if(tcrandomdevfd != -1) read(tcrandomdevfd, &mask, sizeof(mask));
     pthread_mutex_unlock(&mutex);
   }
-  return (mask ^ cnt++) ^ (unsigned long)rand_r(&seed);
+  seed = seed * 123456789012301LL + 211;
+  return (mask ^ cnt++) ^ seed;
 }
 
 
 /* Get a random number as double decimal based on uniform distribution. */
 double tcdrand(void){
-  return tclrand() / (ULONG_MAX + 0.01);
+  double val = tclrand() / (double)ULONG_MAX;
+  return val < 1.0 ? val : 0.0;
 }
 
 
@@ -2380,8 +4306,8 @@ bool tcstribwm(const char *str, const char *key){
 /* Calculate the edit distance of two strings. */
 int tcstrdist(const char *astr, const char *bstr){
   assert(astr && bstr);
-  int alen = strlen(astr);
-  int blen = strlen(bstr);
+  int alen = tclmin(strlen(astr), TCDISTMAXLEN);
+  int blen = tclmin(strlen(bstr), TCDISTMAXLEN);
   int dsiz = blen + 1;
   int tbuf[TCDISTBUFSIZ];
   int *tbl;
@@ -2434,6 +4360,8 @@ int tcstrdistutf(const char *astr, const char *bstr){
     TCMALLOC(bary, blen * sizeof(*bary));
   }
   tcstrutftoucs(bstr, bary, &blen);
+  if(alen > TCDISTMAXLEN) alen = TCDISTMAXLEN;
+  if(blen > TCDISTMAXLEN) blen = TCDISTMAXLEN;
   int dsiz = blen + 1;
   int tbuf[TCDISTBUFSIZ];
   int *tbl;
@@ -2667,7 +4595,7 @@ char *tcstrjoin(TCLIST *list, char delim){
   int num = TCLISTNUM(list);
   int size = num + 1;
   for(int i = 0; i < num; i++){
-    size += TCLISTVALNUM(list, i);
+    size += TCLISTVALSIZ(list, i);
   }
   char *buf;
   TCMALLOC(buf, size);
@@ -2681,6 +4609,33 @@ char *tcstrjoin(TCLIST *list, char delim){
   }
   *wp = '\0';
   return buf;
+}
+
+
+/* Convert a string with a metric prefix to an integer. */
+int64_t tcatoi(const char *str){
+  assert(str);
+  char *end;
+  long double val = strtold(str, &end);
+  int inf = isinf(val);
+  if(inf != 0) return inf > 0 ? INT64_MAX : INT64_MIN;
+  if(!isnormal(val)) return 0;
+  if(*end == 'k' || *end == 'K'){
+    val *= 1LL << 10;
+  } else if(*end == 'm' || *end == 'M'){
+    val *= 1LL << 20;
+  } else if(*end == 'g' || *end == 'G'){
+    val *= 1LL << 30;
+  } else if(*end == 't' || *end == 'T'){
+    val *= 1LL << 40;
+  } else if(*end == 'p' || *end == 'P'){
+    val *= 1LL << 50;
+  } else if(*end == 'e' || *end == 'E'){
+    val *= 1LL << 60;
+  }
+  if(val > INT64_MAX) return INT64_MAX;
+  if(val < INT64_MIN) return INT64_MIN;
+  return val;
 }
 
 
@@ -2747,49 +4702,66 @@ char *tcregexreplace(const char *str, const char *regex, const char *alt){
 }
 
 
-/* Create a Chord hash object. */
-TCCHORD *tcchordnew(int range){
+/* Get the MD5 hashing value of a record. */
+void tcmd5hash(const void *ptr, int size, char *buf){
+  assert(ptr && size >= 0 && buf);
+  int i;
+  md5_state_t ms;
+  md5_init(&ms);
+  md5_append(&ms, (md5_byte_t *)ptr, size);
+  unsigned char digest[16];
+  md5_finish(&ms, (md5_byte_t *)digest);
+  char *wp = buf;
+  for(i = 0; i < 16; i++){
+    wp += sprintf(wp, "%02x", digest[i]);
+  }
+  *wp = '\0';
+}
+
+
+/* Create a consistent hashing object. */
+TCCHIDX *tcchidxnew(int range){
   assert(range > 0);
-  TCCHORD *chord;
-  TCMALLOC(chord, sizeof(*chord));
-  int nnum = range * TCCHORDVNNUM;
-  TCCHORDNODE *nodes;
+  TCCHIDX *chidx;
+  TCMALLOC(chidx, sizeof(*chidx));
+  int nnum = range * TCCHIDXVNNUM;
+  TCCHIDXNODE *nodes;
   TCMALLOC(nodes, nnum * sizeof(*nodes));
   unsigned int seed = 725;
   for(int i = 0; i < range; i++){
-    int end = (i + 1) * TCCHORDVNNUM;
-    for(int j = i * TCCHORDVNNUM; j < end; j++){
+    int end = (i + 1) * TCCHIDXVNNUM;
+    for(int j = i * TCCHIDXVNNUM; j < end; j++){
       nodes[j].seq = i;
       nodes[j].hash = (seed = seed * 123456761 + 211);
     }
   }
-  qsort(nodes, nnum, sizeof(*nodes), tcchordcmp);
-  chord->nodes = nodes;
-  chord->nnum = nnum;
-  return chord;
+  qsort(nodes, nnum, sizeof(*nodes), tcchidxcmp);
+  chidx->nodes = nodes;
+  chidx->nnum = nnum;
+  return chidx;
 }
 
 
-/* Delete a Chord hash object. */
-void tcchorddel(TCCHORD *chord){
-  assert(chord);
-  TCFREE(chord->nodes);
-  TCFREE(chord);
+/* Delete a consistent hashing object. */
+void tcchidxdel(TCCHIDX *chidx){
+  assert(chidx);
+  TCFREE(chidx->nodes);
+  TCFREE(chidx);
 }
 
 
-/* Get the Chord hash value of a record. */
-int tcchordhash(TCCHORD *chord, const void *ptr, int size){
-  assert(chord && ptr && size >= 0);
+/* Get the consistent hashing value of a record. */
+int tcchidxhash(TCCHIDX *chidx, const void *ptr, int size){
+  assert(chidx && ptr && size >= 0);
   uint32_t hash = 19771007;
   const char *rp = (char *)ptr + size;
   while(size--){
-    hash = ((hash << 5) - hash) ^ *(uint8_t *)--rp;
+    hash = (hash * 31) ^ *(uint8_t *)--rp;
     hash ^= hash << 7;
   }
-  TCCHORDNODE *nodes = chord->nodes;
+  TCCHIDXNODE *nodes = chidx->nodes;
   int low = 0;
-  int high = chord->nnum;
+  int high = chidx->nnum;
   while(low < high){
     int mid = (low + high) >> 1;
     uint32_t nhash = nodes[mid].hash;
@@ -2801,11 +4773,8 @@ int tcchordhash(TCCHORD *chord, const void *ptr, int size){
       low = mid;
       break;
     }
-
-
-
   }
-  if(low >= chord->nnum) low = 0;
+  if(low >= chidx->nnum) low = 0;
   return nodes[low].seq & INT_MAX;
 }
 
@@ -3101,8 +5070,18 @@ int64_t tcstrmktime(const char *str){
 
 /* Get the jet lag of the local time. */
 int tcjetlag(void){
+#if defined(_SYS_LINUX_)
   tzset();
   return -timezone;
+#else
+  time_t t = 86400;
+  struct tm gts;
+  if(!gmtime_r(&t, &gts)) return 0;
+  struct tm lts;
+  t = 86400;
+  if(!localtime_r(&t, &lts)) return 0;
+  return mktime(&lts) - mktime(&gts);
+#endif
 }
 
 
@@ -3122,14 +5101,14 @@ static void tcrandomfdclose(void){
 }
 
 
-/* Compare two Chord nodes.
+/* Compare two consistent hashing nodes.
    `a' specifies the pointer to one node object.
    `b' specifies the pointer to the other node object.
    The return value is positive if the former is big, negative if the latter is big, 0 if both
    are equivalent. */
-static int tcchordcmp(const void *a, const void *b){
-  if(((TCCHORDNODE *)a)->hash == ((TCCHORDNODE *)b)->hash) return 0;
-  return ((TCCHORDNODE *)a)->hash > ((TCCHORDNODE *)b)->hash;
+static int tcchidxcmp(const void *a, const void *b){
+  if(((TCCHIDXNODE *)a)->hash == ((TCCHIDXNODE *)b)->hash) return 0;
+  return ((TCCHIDXNODE *)a)->hash > ((TCCHIDXNODE *)b)->hash;
 }
 
 
@@ -3386,6 +5365,62 @@ bool tclock(int fd, bool ex, bool nb){
     if(errno != EINTR) return false;
   }
   return true;
+}
+
+
+/* Unlock a file. */
+bool tcunlock(int fd){
+  assert(fd >= 0);
+  struct flock lock;
+  memset(&lock, 0, sizeof(struct flock));
+  lock.l_type = F_UNLCK;
+  lock.l_whence = SEEK_SET;
+  lock.l_start = 0;
+  lock.l_len = 0;
+  lock.l_pid = 0;
+  while(fcntl(fd, F_SETLKW, &lock) == -1){
+    if(errno != EINTR) return false;
+  }
+  return true;
+}
+
+
+/* Execute a shell command. */
+int tcsystem(const char **args, int anum){
+  assert(args && anum >= 0);
+  if(anum < 1) return -1;
+  TCXSTR *phrase = tcxstrnew3(anum * TCNUMBUFSIZ + 1);
+  for(int i = 0; i < anum; i++){
+    const char *rp = args[i];
+    int len = strlen(rp);
+    char *token;
+    TCMALLOC(token, len * 2 + 1);
+    char *wp = token;
+    while(*rp != '\0'){
+      switch(*rp){
+      case '"': case '\\': case '$': case '`':
+        *(wp++) = '\\';
+        *(wp++) = *rp;
+        break;
+      default:
+        *(wp++) = *rp;
+        break;
+      }
+      rp++;
+    }
+    *wp = '\0';
+    if(tcxstrsize(phrase)) tcxstrcat(phrase, " ", 1);
+    tcxstrprintf(phrase, "\"%s\"", token);
+    TCFREE(token);
+  }
+  int rv = system(tcxstrptr(phrase));
+  if(WIFEXITED(rv)){
+    rv = WEXITSTATUS(rv);
+  } else {
+    rv = INT_MAX;
+  }
+  tcxstrdel(phrase);
+  return rv;
 }
 
 
@@ -4135,6 +6170,44 @@ TCLIST *tcmimeparts(const char *ptr, int size, const char *boundary){
 }
 
 
+/* Encode a serial object with hexadecimal encoding. */
+char *tchexencode(const char *ptr, int size){
+  assert(ptr && size >= 0);
+  const unsigned char *rp = (const unsigned char *)ptr;
+  char *buf;
+  TCMALLOC(buf, size * 2 + 1);
+  char *wp = buf;
+  for(int i = 0; i < size; i++){
+    wp += sprintf(wp, "%02x", rp[i]);
+  }
+  *wp = '\0';
+  return buf;
+}
+
+
+/* Decode a string encoded with hexadecimal encoding. */
+char *tchexdecode(const char *str, int *sp){
+  assert(str && sp);
+  int len = strlen(str);
+  char *buf;
+  TCMALLOC(buf, len + 1);
+  char *wp = buf;
+  for(int i = 0; i < len; i += 2){
+    while(strchr(" \n\r\t\f\v", str[i])){
+      i++;
+    }
+    char mbuf[3];
+    if((mbuf[0] = str[i]) == '\0') break;
+    if((mbuf[1] = str[i+1]) == '\0') break;
+    mbuf[2] = '\0';
+    *(wp++) = strtol(mbuf, NULL, 16);
+  }
+  *wp = '\0';
+  *sp = wp - buf;
+  return buf;
+}
+
+
 /* Compress a serial object with Packbits encoding. */
 char *tcpackencode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0 && sp);
@@ -4207,7 +6280,7 @@ char *tcpackdecode(const char *ptr, int size, int *sp){
 
 /* Compress a serial object with Deflate encoding. */
 char *tcdeflate(const char *ptr, int size, int *sp){
-  assert(ptr && sp);
+  assert(ptr && size >= 0 && sp);
   if(!_tc_deflate) return NULL;
   return _tc_deflate(ptr, size, sp, _TCZMZLIB);
 }
@@ -4215,7 +6288,7 @@ char *tcdeflate(const char *ptr, int size, int *sp){
 
 /* Decompress a serial object compressed with Deflate encoding. */
 char *tcinflate(const char *ptr, int size, int *sp){
-  assert(ptr && size >= 0);
+  assert(ptr && size >= 0 && sp);
   if(!_tc_inflate) return NULL;
   return _tc_inflate(ptr, size, sp, _TCZMZLIB);
 }
@@ -4223,7 +6296,7 @@ char *tcinflate(const char *ptr, int size, int *sp){
 
 /* Compress a serial object with GZIP encoding. */
 char *tcgzipencode(const char *ptr, int size, int *sp){
-  assert(ptr && sp);
+  assert(ptr && size >= 0 && sp);
   if(!_tc_deflate) return NULL;
   return _tc_deflate(ptr, size, sp, _TCZMGZIP);
 }
@@ -4231,7 +6304,7 @@ char *tcgzipencode(const char *ptr, int size, int *sp){
 
 /* Decompress a serial object compressed with GZIP encoding. */
 char *tcgzipdecode(const char *ptr, int size, int *sp){
-  assert(ptr && size >= 0);
+  assert(ptr && size >= 0 && sp);
   if(!_tc_inflate) return NULL;
   return _tc_inflate(ptr, size, sp, _TCZMGZIP);
 }
@@ -4242,6 +6315,22 @@ unsigned int tcgetcrc(const char *ptr, int size){
   assert(ptr && size >= 0);
   if(!_tc_getcrc) return 0;
   return _tc_getcrc(ptr, size);
+}
+
+
+/* Compress a serial object with BZIP2 encoding. */
+char *tcbzipencode(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  if(!_tc_bzcompress) return NULL;
+  return _tc_bzcompress(ptr, size, sp);
+}
+
+
+/* Decompress a serial object compressed with BZIP2 encoding. */
+char *tcbzipdecode(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  if(!_tc_bzdecompress) return NULL;
+  return _tc_bzdecompress(ptr, size, sp);
 }
 
 
@@ -4513,6 +6602,183 @@ TCMAP *tcxmlattrs(const char *str){
 
 
 /*************************************************************************************************
+ * pointer list
+ *************************************************************************************************/
+
+
+/* Create a pointer list object. */
+TCPTRLIST *tcptrlistnew(void){
+  TCPTRLIST *ptrlist;
+  TCMALLOC(ptrlist, sizeof(*ptrlist));
+  ptrlist->anum = TCLISTUNIT;
+  TCMALLOC(ptrlist->array, sizeof(ptrlist->array[0]) * ptrlist->anum);
+  ptrlist->start = 0;
+  ptrlist->num = 0;
+  return ptrlist;
+}
+
+
+/* Create a pointer list object with expecting the number of elements. */
+TCPTRLIST *tcptrlistnew2(int anum){
+  TCPTRLIST *ptrlist;
+  TCMALLOC(ptrlist, sizeof(*ptrlist));
+  if(anum < 1) anum = 1;
+  ptrlist->anum = anum;
+  TCMALLOC(ptrlist->array, sizeof(ptrlist->array[0]) * ptrlist->anum);
+  ptrlist->start = 0;
+  ptrlist->num = 0;
+  return ptrlist;
+}
+
+
+/* Copy a pointer list object. */
+TCPTRLIST *tcptrlistdup(const TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  int num = ptrlist->num;
+  if(num < 1) return tcptrlistnew();
+  void **array = ptrlist->array + ptrlist->start;
+  TCPTRLIST *nptrlist;
+  TCMALLOC(nptrlist, sizeof(*nptrlist));
+  void **narray;
+  TCMALLOC(narray, sizeof(*narray) * num);
+  memcpy(narray, array, sizeof(*narray) * num);
+  nptrlist->anum = num;
+  nptrlist->array = narray;
+  nptrlist->start = 0;
+  nptrlist->num = num;
+  return nptrlist;
+}
+
+
+/* Delete a pointer list object. */
+void tcptrlistdel(TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  TCFREE(ptrlist->array);
+  TCFREE(ptrlist);
+}
+
+
+/* Get the number of elements of a pointer list object. */
+int tcptrlistnum(const TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  return ptrlist->num;
+}
+
+
+/* Get the pointer to the region of an element of a pointer list object. */
+void *tcptrlistval(const TCPTRLIST *ptrlist, int index){
+  assert(ptrlist && index >= 0);
+  if(index >= ptrlist->num) return NULL;
+  return ptrlist->array[ptrlist->start+index];
+}
+
+
+/* Add an element at the end of a pointer list object. */
+void tcptrlistpush(TCPTRLIST *ptrlist, void *ptr){
+  assert(ptrlist && ptr);
+  int index = ptrlist->start + ptrlist->num;
+  if(index >= ptrlist->anum){
+    ptrlist->anum += ptrlist->num + 1;
+    TCREALLOC(ptrlist->array, ptrlist->array, ptrlist->anum * sizeof(ptrlist->array[0]));
+  }
+  ptrlist->array[index] = ptr;
+  ptrlist->num++;
+}
+
+
+/* Remove an element of the end of a pointer list object. */
+void *tcptrlistpop(TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  if(ptrlist->num < 1) return NULL;
+  int index = ptrlist->start + ptrlist->num - 1;
+  ptrlist->num--;
+  return ptrlist->array[index];
+}
+
+
+/* Add an element at the top of a pointer list object. */
+void tcptrlistunshift(TCPTRLIST *ptrlist, void *ptr){
+  assert(ptrlist && ptr);
+  if(ptrlist->start < 1){
+    if(ptrlist->start + ptrlist->num >= ptrlist->anum){
+      ptrlist->anum += ptrlist->num + 1;
+      TCREALLOC(ptrlist->array, ptrlist->array, ptrlist->anum * sizeof(ptrlist->array[0]));
+    }
+    ptrlist->start = ptrlist->anum - ptrlist->num;
+    memmove(ptrlist->array + ptrlist->start, ptrlist->array,
+            ptrlist->num * sizeof(ptrlist->array[0]));
+  }
+  ptrlist->start--;
+  ptrlist->array[ptrlist->start] = ptr;
+  ptrlist->num++;
+}
+
+
+/* Remove an element of the top of a pointer list object. */
+void *tcptrlistshift(TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  if(ptrlist->num < 1) return NULL;
+  int index = ptrlist->start;
+  ptrlist->start++;
+  ptrlist->num--;
+  void *rv = ptrlist->array[index];
+  if((ptrlist->start & 0xff) == 0 && ptrlist->start > (ptrlist->num >> 1)){
+    memmove(ptrlist->array, ptrlist->array + ptrlist->start,
+            ptrlist->num * sizeof(ptrlist->array[0]));
+    ptrlist->start = 0;
+  }
+  return rv;
+}
+
+
+/* Add an element at the specified location of a pointer list object. */
+void tcptrlistinsert(TCPTRLIST *ptrlist, int index, void *ptr){
+  assert(ptrlist && index >= 0 && ptr);
+  if(index > ptrlist->num) return;
+  index += ptrlist->start;
+  if(ptrlist->start + ptrlist->num >= ptrlist->anum){
+    ptrlist->anum += ptrlist->num + 1;
+    TCREALLOC(ptrlist->array, ptrlist->array, ptrlist->anum * sizeof(ptrlist->array[0]));
+  }
+  memmove(ptrlist->array + index + 1, ptrlist->array + index,
+          sizeof(ptrlist->array[0]) * (ptrlist->start + ptrlist->num - index));
+  ptrlist->array[index] = ptr;
+  ptrlist->num++;
+}
+
+
+/* Remove an element at the specified location of a pointer list object. */
+void *tcptrlistremove(TCPTRLIST *ptrlist, int index){
+  assert(ptrlist && index >= 0);
+  if(index >= ptrlist->num) return NULL;
+  index += ptrlist->start;
+  void *rv = ptrlist->array[index];
+  ptrlist->num--;
+  memmove(ptrlist->array + index, ptrlist->array + index + 1,
+          sizeof(ptrlist->array[0]) * (ptrlist->start + ptrlist->num - index));
+  return rv;
+}
+
+
+/* Overwrite an element at the specified location of a pointer list object. */
+void tcptrlistover(TCPTRLIST *ptrlist, int index, void *ptr){
+  assert(ptrlist && index >= 0 && ptr);
+  if(index >= ptrlist->num) return;
+  index += ptrlist->start;
+  ptrlist->array[index] = ptr;
+}
+
+
+/* Clear a pointer list object. */
+void tcptrlistclear(TCPTRLIST *ptrlist){
+  assert(ptrlist);
+  ptrlist->start = 0;
+  ptrlist->num = 0;
+}
+
+
+
+/*************************************************************************************************
  * features for experts
  *************************************************************************************************/
 
@@ -4590,6 +6856,37 @@ void *tcmyfatal(const char *message){
 }
 
 
+/* Allocate a large nullified region. */
+void *tczeromap(uint64_t size){
+#if defined(_SYS_LINUX_)
+  assert(size > 0);
+  void *ptr = mmap(0, sizeof(size) + size,
+                   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(ptr == MAP_FAILED) tcmyfatal("out of memory");
+  *(uint64_t *)ptr = size;
+  return (char *)ptr + sizeof(size);
+#else
+  assert(size > 0);
+  void *ptr;
+  TCCALLOC(ptr, 1, size);
+  return ptr;
+#endif
+}
+
+
+/* Free a large nullfied region. */
+void tczerounmap(void *ptr){
+#if defined(_SYS_LINUX_)
+  assert(ptr);
+  uint64_t size = *((uint64_t *)ptr - 1);
+  munmap((char *)ptr - sizeof(size), sizeof(size) + size);
+#else
+  assert(ptr);
+  TCFREE(ptr);
+#endif
+}
+
+
 /* Global mutex object. */
 static pthread_rwlock_t tcglobalmutex;
 static pthread_once_t tcglobalmutexonce = PTHREAD_ONCE_INIT;
@@ -4612,6 +6909,130 @@ bool tcglobalmutexlockshared(void){
 /* Unlock the global mutex object. */
 bool tcglobalmutexunlock(void){
   return pthread_rwlock_unlock(&tcglobalmutex) == 0;
+}
+
+
+/* Convert an integer to the string as binary numbers. */
+int tcnumtostrbin(uint64_t num, char *buf, int col, int fc){
+  assert(buf);
+  char *wp = buf;
+  int len = sizeof(num) * 8;
+  bool zero = true;
+  while(len-- > 0){
+    if(num & (1ULL << 63)){
+      *(wp++) = '1';
+      zero = false;
+    } else if(!zero){
+      *(wp++) = '0';
+    }
+    num <<= 1;
+  }
+  if(col > 0){
+    if(col > sizeof(num) * 8) col = sizeof(num) * 8;
+    len = col - (wp - buf);
+    if(len > 0){
+      memmove(buf + len, buf, wp - buf);
+      for(int i = 0; i < len; i++){
+        buf[i] = fc;
+      }
+      wp += len;
+    }
+  } else if(zero){
+    *(wp++) = '0';
+  }
+  *wp = '\0';
+  return wp - buf;
+}
+
+
+/* Compare keys of two records by lexical order. */
+int tccmplexical(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
+  assert(aptr && asiz >= 0 && bptr && bsiz >= 0);
+  int rv;
+  TCCMPLEXICAL(rv, aptr, asiz, bptr, bsiz);
+  return rv;
+}
+
+
+/* Compare two keys as decimal strings of real numbers. */
+int tccmpdecimal(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
+  assert(aptr && asiz >= 0 && bptr && bsiz >= 0);
+  int sign;
+  int64_t anum = 0;
+  sign = 1;
+  if(asiz > 0 && *aptr == '-'){
+    aptr++;
+    asiz--;
+    sign = -1;
+  }
+  for(int i = 0; i < asiz; i++){
+    int c = aptr[i];
+    if(c < '0' || c > '9') continue;
+    anum = anum * 10 + c - '0';
+  }
+  anum *= sign;
+  int64_t bnum = 0;
+  sign = 1;
+  if(bsiz > 0 && *bptr == '-'){
+    bptr++;
+    bsiz--;
+    sign = -1;
+  }
+  for(int i = 0; i < bsiz; i++){
+    int c = bptr[i];
+    if(c < '0' || c > '9') continue;
+    bnum = bnum * 10 + c - '0';
+  }
+  bnum *= sign;
+  return (anum < bnum) ? -1 : anum > bnum;
+}
+
+
+/* Compare two keys as 32-bit integers in the native byte order. */
+int tccmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
+  assert(aptr && bptr);
+  int32_t anum, bnum;
+  if(asiz == sizeof(int32_t)){
+    memcpy(&anum, aptr, sizeof(int32_t));
+  } else if(asiz < sizeof(int32_t)){
+    memset(&anum, 0, sizeof(int32_t));
+    memcpy(&anum, aptr, asiz);
+  } else {
+    memcpy(&anum, aptr, sizeof(int32_t));
+  }
+  if(bsiz == sizeof(int32_t)){
+    memcpy(&bnum, bptr, sizeof(int32_t));
+  } else if(bsiz < sizeof(int32_t)){
+    memset(&bnum, 0, sizeof(int32_t));
+    memcpy(&bnum, bptr, bsiz);
+  } else {
+    memcpy(&bnum, bptr, sizeof(int32_t));
+  }
+  return (anum < bnum) ? -1 : anum > bnum;
+}
+
+
+/* Compare two keys as 64-bit integers in the native byte order. */
+int tccmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
+  assert(aptr && bptr);
+  int64_t anum, bnum;
+  if(asiz == sizeof(int64_t)){
+    memcpy(&anum, aptr, sizeof(int64_t));
+  } else if(asiz < sizeof(int64_t)){
+    memset(&anum, 0, sizeof(int64_t));
+    memcpy(&anum, aptr, asiz);
+  } else {
+    memcpy(&anum, aptr, sizeof(int64_t));
+  }
+  if(bsiz == sizeof(int64_t)){
+    memcpy(&bnum, bptr, sizeof(int64_t));
+  } else if(bsiz < sizeof(int64_t)){
+    memset(&bnum, 0, sizeof(int64_t));
+    memcpy(&bnum, bptr, bsiz);
+  } else {
+    memcpy(&bnum, bptr, sizeof(int64_t));
+  }
+  return (anum < bnum) ? -1 : anum > bnum;
 }
 
 
@@ -4818,6 +7239,14 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
 }
 
 
+/* Get the aligned offset of a file offset. */
+uint64_t tcpagealign(uint64_t off){
+  int ps = sysconf(_SC_PAGESIZE);
+  int diff = off & (ps - 1);
+  return (diff > 0) ? off + ps - diff : off;
+}
+
+
 /* Initialize the global mutex object */
 static void tcglobalmutexinit(void){
   if(!TCUSEPTHREAD) memset(&tcglobalmutex, 0, sizeof(tcglobalmutex));
@@ -4938,7 +7367,7 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
   while(bottom > 0){
     bottom--;
     int mybot = bottom;
-    int i = mybot << 1;
+    int i = mybot * 2;
     while(i <= top){
       if(i < top){
         int cmp = 0;
@@ -4966,7 +7395,7 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
       arrays[mybot] = arrays[i];
       arrays[i] = swap;
       mybot = i;
-      i = mybot << 1;
+      i = mybot * 2;
     }
   }
   while(top > 0){
@@ -4975,7 +7404,7 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
     arrays[top] = swap;
     top--;
     int mybot = bottom;
-    int i = mybot << 1;
+    int i = mybot * 2;
     while(i <= top){
       if(i < top){
         int cmp = 0;
@@ -5003,7 +7432,7 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
       arrays[mybot] = arrays[i];
       arrays[i] = swap;
       mybot = i;
-      i = mybot << 1;
+      i = mybot * 2;
     }
   }
 }
