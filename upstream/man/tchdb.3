@@ -1,4 +1,4 @@
-.TH "TCHDB" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
+.TH "TCHDB" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tchdb \- the hash database API
@@ -592,6 +592,53 @@ If successful, the return value is true, else, it is false.  False is returned w
 .RE
 .RE
 .PP
+The function `tchdbfwmkeys' is used in order to get forward matching keys in a hash database object.
+.PP
+.RS
+.br
+\fBTCLIST *tchdbfwmkeys(TCHDB *\fIhdb\fB, const void *\fIpbuf\fB, int \fIpsiz\fB, int \fImax\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object.
+.RE
+.RS
+`\fIpbuf\fR' specifies the pointer to the region of the prefix.
+.RE
+.RS
+`\fIpsiz\fR' specifies the size of the region of the prefix.
+.RE
+.RS
+`\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
+.RE
+.RS
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
+.RE
+.RE
+.PP
+The function `tchdbfwmkeys2' is used in order to get forward matching string keys in a hash database object.
+.PP
+.RS
+.br
+\fBTCLIST *tchdbfwmkeys2(TCHDB *\fIhdb\fB, const char *\fIpstr\fB, int \fImax\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object.
+.RE
+.RS
+`\fIpstr\fR' specifies the string of the prefix.
+.RE
+.RS
+`\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
+.RE
+.RS
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
+.RE
+.RE
+.PP
 The function `tchdbsync' is used in order to synchronize updated contents of a hash database object with the file and the device.
 .PP
 .RS
@@ -604,7 +651,7 @@ The function `tchdbsync' is used in order to synchronize updated contents of a h
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-This function is useful when another process connects the same database file.
+This function is useful when another process connects to the same database file.
 .RE
 .RE
 .PP

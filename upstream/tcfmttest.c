@@ -1,5 +1,5 @@
 /*************************************************************************************************
- * The test cases of the hash database API
+ * The test cases of the fixed-length database API
  *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
@@ -15,21 +15,21 @@
 
 
 #include <tcutil.h>
-#include <tchdb.h>
+#include <tcfdb.h>
 #include "myconf.h"
 
 #define RECBUFSIZ      32                // buffer for records
+#define EXHEADSIZ      256               // expected header size
 
 typedef struct {                         // type of structure for write thread
-  TCHDB *hdb;
+  TCFDB *fdb;
   int rnum;
-  bool as;
   bool rnd;
   int id;
 } TARGWRITE;
 
 typedef struct {                         // type of structure for read thread
-  TCHDB *hdb;
+  TCFDB *fdb;
   int rnum;
   bool wb;
   bool rnd;
@@ -37,14 +37,14 @@ typedef struct {                         // type of structure for read thread
 } TARGREAD;
 
 typedef struct {                         // type of structure for remove thread
-  TCHDB *hdb;
+  TCFDB *fdb;
   int rnum;
   bool rnd;
   int id;
 } TARGREMOVE;
 
 typedef struct {                         // type of structure for wicked thread
-  TCHDB *hdb;
+  TCFDB *fdb;
   int rnum;
   bool nc;
   int id;
@@ -52,7 +52,7 @@ typedef struct {                         // type of structure for wicked thread
 } TARGWICKED;
 
 typedef struct {                         // type of structure for typical thread
-  TCHDB *hdb;
+  TCFDB *fdb;
   int rnum;
   bool nc;
   int rratio;
@@ -69,8 +69,8 @@ int g_dbgfd;                             // debugging output
 int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
-static void eprint(TCHDB *hdb, const char *func);
-static void mprint(TCHDB *hdb);
+static void eprint(TCFDB *fdb, const char *func);
+static void mprint(TCFDB *fdb);
 static int myrand(int range);
 static int myrandnd(int range);
 static int runwrite(int argc, char **argv);
@@ -78,13 +78,13 @@ static int runread(int argc, char **argv);
 static int runremove(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int runtypical(int argc, char **argv);
-static int procwrite(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
-                     int opts, int omode, bool as, bool rnd);
-static int procread(const char *path, int tnum, int rcnum, int omode, bool wb, bool rnd);
+static int procwrite(const char *path, int tnum, int rnum, int width, int64_t limsiz,
+                     int omode, bool rnd);
+static int procread(const char *path, int tnum, int omode, bool wb, bool rnd);
 static int procremove(const char *path, int tnum, int omode, bool rnd);
-static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc);
-static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
-                       int opts, int rcnum, int omode, bool nc, int rratio);
+static int procwicked(const char *path, int tnum, int rnum, int omode, bool nc);
+static int proctypical(const char *path, int tnum, int rnum, int width, int64_t limsiz,
+                       int omode, bool nc, int rratio);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
 static void *threadremove(void *targ);
@@ -120,17 +120,16 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: test cases of the hash database API of Tokyo Cabinet\n", g_progname);
+  fprintf(stderr, "%s: test cases of the fixed-length database API of Tokyo Cabinet\n",
+          g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s write [-tl] [-td|-tb] [-nl|-nb] [-as] [-rnd] path tnum rnum"
-          " [bnum [apow [fpow]]]\n", g_progname);
-  fprintf(stderr, "  %s read [-rc num] [-nl|-nb] [-wb] [-rnd] path tnum\n", g_progname);
+  fprintf(stderr, "  %s write [-nl|-nb] [-rnd] path tnum rnum [width [limsiz]]\n", g_progname);
+  fprintf(stderr, "  %s read [-nl|-nb] [-wb] [-rnd] path tnum\n", g_progname);
   fprintf(stderr, "  %s remove [-nl|-nb] [-rnd] path tnum\n", g_progname);
-  fprintf(stderr, "  %s wicked [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum\n",
+  fprintf(stderr, "  %s wicked [-nl|-nb] [-nc] path tnum rnum\n", g_progname);
+  fprintf(stderr, "  %s typical [-nl|-nb] [-nc] [-rr num] path tnum rnum [width [limsiz]]\n",
           g_progname);
-  fprintf(stderr, "  %s typical [-tl] [-td|-tb] [-rc num] [-nl|-nb] [-nc] [-rr num]"
-          " path tnum rnum [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -146,34 +145,26 @@ static void iprintf(const char *format, ...){
 }
 
 
-/* print error message of hash database */
-static void eprint(TCHDB *hdb, const char *func){
-  const char *path = tchdbpath(hdb);
-  int ecode = tchdbecode(hdb);
+/* print error message of fixed-length database */
+static void eprint(TCFDB *fdb, const char *func){
+  const char *path = tcfdbpath(fdb);
+  int ecode = tcfdbecode(fdb);
   fprintf(stderr, "%s: %s: %s: error: %d: %s\n",
-          g_progname, path ? path : "-", func, ecode, tchdberrmsg(ecode));
+          g_progname, path ? path : "-", func, ecode, tcfdberrmsg(ecode));
 }
 
 
-/* print members of hash database */
-static void mprint(TCHDB *hdb){
-  if(hdb->cnt_writerec < 0) return;
-  iprintf("bucket number: %lld\n", (long long)tchdbbnum(hdb));
-  iprintf("used bucket number: %lld\n", (long long)tchdbbnumused(hdb));
-  iprintf("cnt_writerec: %lld\n", (long long)hdb->cnt_writerec);
-  iprintf("cnt_reuserec: %lld\n", (long long)hdb->cnt_reuserec);
-  iprintf("cnt_moverec: %lld\n", (long long)hdb->cnt_moverec);
-  iprintf("cnt_readrec: %lld\n", (long long)hdb->cnt_readrec);
-  iprintf("cnt_searchfbp: %lld\n", (long long)hdb->cnt_searchfbp);
-  iprintf("cnt_insertfbp: %lld\n", (long long)hdb->cnt_insertfbp);
-  iprintf("cnt_splicefbp: %lld\n", (long long)hdb->cnt_splicefbp);
-  iprintf("cnt_dividefbp: %lld\n", (long long)hdb->cnt_dividefbp);
-  iprintf("cnt_mergefbp: %lld\n", (long long)hdb->cnt_mergefbp);
-  iprintf("cnt_reducefbp: %lld\n", (long long)hdb->cnt_reducefbp);
-  iprintf("cnt_appenddrp: %lld\n", (long long)hdb->cnt_appenddrp);
-  iprintf("cnt_deferdrp: %lld\n", (long long)hdb->cnt_deferdrp);
-  iprintf("cnt_flushdrp: %lld\n", (long long)hdb->cnt_flushdrp);
-  iprintf("cnt_adjrecc: %lld\n", (long long)hdb->cnt_adjrecc);
+/* print members of fixed-length database */
+static void mprint(TCFDB *fdb){
+  if(fdb->cnt_writerec < 0) return;
+  iprintf("minimum ID number: %llu\n", (unsigned long long)tcfdbmin(fdb));
+  iprintf("maximum ID number: %llu\n", (unsigned long long)tcfdbmax(fdb));
+  iprintf("width of the value: %u\n", (unsigned int)tcfdbwidth(fdb));
+  iprintf("limit file size: %llu\n", (unsigned long long)tcfdblimsiz(fdb));
+  iprintf("limit ID number: %llu\n", (unsigned long long)tcfdblimid(fdb));
+  iprintf("cnt_writerec: %lld\n", (long long)fdb->cnt_writerec);
+  iprintf("cnt_readrec: %lld\n", (long long)fdb->cnt_readrec);
+  iprintf("cnt_truncfile: %lld\n", (long long)fdb->cnt_truncfile);
 }
 
 
@@ -195,27 +186,16 @@ static int runwrite(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
   char *rstr = NULL;
-  char *bstr = NULL;
-  char *astr = NULL;
-  char *fstr = NULL;
-  int opts = 0;
+  char *wstr = NULL;
+  char *lstr = NULL;
   int omode = 0;
-  bool as = false;
   bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
-        opts |= HDBTLARGE;
-      } else if(!strcmp(argv[i], "-td")){
-        opts |= HDBTDEFLATE;
-      } else if(!strcmp(argv[i], "-tb")){
-        opts |= HDBTTCBS;
-      } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+      if(!strcmp(argv[i], "-nl")){
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
-      } else if(!strcmp(argv[i], "-as")){
-        as = true;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-rnd")){
         rnd = true;
       } else {
@@ -227,12 +207,10 @@ static int runwrite(int argc, char **argv){
       tstr = argv[i];
     } else if(!rstr){
       rstr = argv[i];
-    } else if(!bstr){
-      bstr = argv[i];
-    } else if(!astr){
-      astr = argv[i];
-    } else if(!fstr){
-      fstr = argv[i];
+    } else if(!wstr){
+      wstr = argv[i];
+    } else if(!lstr){
+      lstr = argv[i];
     } else {
       usage();
     }
@@ -241,10 +219,9 @@ static int runwrite(int argc, char **argv){
   int tnum = atoi(tstr);
   int rnum = atoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procwrite(path, tnum, rnum, bnum, apow, fpow, opts, omode, as, rnd);
+  int width = wstr ? atoi(wstr) : -1;
+  int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
+  int rv = procwrite(path, tnum, rnum, width, limsiz, omode, rnd);
   return rv;
 }
 
@@ -253,19 +230,15 @@ static int runwrite(int argc, char **argv){
 static int runread(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
-  int rcnum = 0;
   int omode = 0;
   bool wb = false;
   bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-rc")){
-        if(++i >= argc) usage();
-        rcnum = atoi(argv[i]);
-      } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+      if(!strcmp(argv[i], "-nl")){
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-wb")){
         wb = true;
       } else if(!strcmp(argv[i], "-rnd")){
@@ -284,7 +257,7 @@ static int runread(int argc, char **argv){
   if(!path || !tstr) usage();
   int tnum = atoi(tstr);
   if(tnum < 1) usage();
-  int rv = procread(path, tnum, rcnum, omode, wb, rnd);
+  int rv = procread(path, tnum, omode, wb, rnd);
   return rv;
 }
 
@@ -298,9 +271,9 @@ static int runremove(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-rnd")){
         rnd = true;
       } else {
@@ -327,21 +300,14 @@ static int runwicked(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
   char *rstr = NULL;
-  int opts = 0;
   int omode = 0;
   bool nc = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
-        opts |= HDBTLARGE;
-      } else if(!strcmp(argv[i], "-td")){
-        opts |= HDBTDEFLATE;
-      } else if(!strcmp(argv[i], "-tb")){
-        opts |= HDBTTCBS;
-      } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+      if(!strcmp(argv[i], "-nl")){
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-nc")){
         nc = true;
       } else {
@@ -361,7 +327,7 @@ static int runwicked(int argc, char **argv){
   int tnum = atoi(tstr);
   int rnum = atoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int rv = procwicked(path, tnum, rnum, opts, omode, nc);
+  int rv = procwicked(path, tnum, rnum, omode, nc);
   return rv;
 }
 
@@ -371,29 +337,17 @@ static int runtypical(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
   char *rstr = NULL;
-  char *bstr = NULL;
-  char *astr = NULL;
-  char *fstr = NULL;
-  int opts = 0;
-  int rcnum = 0;
+  char *wstr = NULL;
+  char *lstr = NULL;
   int omode = 0;
   int rratio = -1;
   bool nc = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
-        opts |= HDBTLARGE;
-      } else if(!strcmp(argv[i], "-td")){
-        opts |= HDBTDEFLATE;
-      } else if(!strcmp(argv[i], "-tb")){
-        opts |= HDBTTCBS;
-      } else if(!strcmp(argv[i], "-rc")){
-        if(++i >= argc) usage();
-        rcnum = atoi(argv[i]);
-      } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+      if(!strcmp(argv[i], "-nl")){
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-nc")){
         nc = true;
       } else if(!strcmp(argv[i], "-rr")){
@@ -408,12 +362,10 @@ static int runtypical(int argc, char **argv){
       tstr = argv[i];
     } else if(!rstr){
       rstr = argv[i];
-    } else if(!bstr){
-      bstr = argv[i];
-    } else if(!astr){
-      astr = argv[i];
-    } else if(!fstr){
-      fstr = argv[i];
+    } else if(!wstr){
+      wstr = argv[i];
+    } else if(!lstr){
+      lstr = argv[i];
     } else {
       usage();
     }
@@ -422,54 +374,50 @@ static int runtypical(int argc, char **argv){
   int tnum = atoi(tstr);
   int rnum = atoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
-  int rv = proctypical(path, tnum, rnum, bnum, apow, fpow, opts, rcnum, omode, nc, rratio);
+  int width = wstr ? atoi(wstr) : -1;
+  int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
+  int rv = proctypical(path, tnum, rnum, width, limsiz, omode, nc, rratio);
   return rv;
 }
 
 
 /* perform write command */
-static int procwrite(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
-                     int opts, int omode, bool as, bool rnd){
-  iprintf("<Writing Test>\n  path=%s  tnum=%d  rnum=%d  bnum=%d  apow=%d  fpow=%d"
-          "  opts=%d  omode=%d  as=%d  rnd=%d\n\n",
-          path, tnum, rnum, bnum, apow, fpow, opts, omode, as, rnd);
+static int procwrite(const char *path, int tnum, int rnum, int width, int64_t limsiz,
+                     int omode, bool rnd){
+  iprintf("<Writing Test>\n  path=%s  tnum=%d  rnum=%d  width=%d  limsiz=%lld"
+          "  omode=%d  rnd=%d\n\n", path, tnum, rnum, width, (long long)limsiz, omode, rnd);
   bool err = false;
   double stime = tctime();
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbsetmutex(hdb)){
-    eprint(hdb, "tchdbsetmutex");
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbsetmutex(fdb)){
+    eprint(fdb, "tcfdbsetmutex");
     err = true;
   }
-  if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
-    eprint(hdb, "tchdbtune");
+  if(!tcfdbtune(fdb, width, limsiz)){
+    eprint(fdb, "tcfdbtune");
     err = true;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
-    eprint(hdb, "tchdbopen");
+  if(!tcfdbopen(fdb, path, FDBOWRITER | FDBOCREAT | FDBOTRUNC | omode)){
+    eprint(fdb, "tcfdbopen");
     err = true;
   }
   TARGWRITE targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
-    targs[0].hdb = hdb;
+    targs[0].fdb = fdb;
     targs[0].rnum = rnum;
-    targs[0].as = as;
     targs[0].rnd = rnd;
     targs[0].id = 0;
     if(threadwrite(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
-      targs[i].hdb = hdb;
+      targs[i].fdb = fdb;
       targs[i].rnum = rnum;
-      targs[i].as = as;
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadwrite, targs + i) != 0){
-        eprint(hdb, "pthread_create");
+        eprint(fdb, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -478,21 +426,21 @@ static int procwrite(const char *path, int tnum, int rnum, int bnum, int apow, i
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint(hdb, "pthread_join");
+        eprint(fdb, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  mprint(hdb);
-  if(!tchdbclose(hdb)){
-    eprint(hdb, "tchdbclose");
+  iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  mprint(fdb);
+  if(!tcfdbclose(fdb)){
+    eprint(fdb, "tcfdbclose");
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
@@ -500,30 +448,26 @@ static int procwrite(const char *path, int tnum, int rnum, int bnum, int apow, i
 
 
 /* perform read command */
-static int procread(const char *path, int tnum, int rcnum, int omode, bool wb, bool rnd){
-  iprintf("<Reading Test>\n  path=%s  tnum=%d  rcnum=%d  omode=%d  wb=%d  rnd=%d\n\n",
-          path, tnum, rcnum, omode, wb, rnd);
+static int procread(const char *path, int tnum, int omode, bool wb, bool rnd){
+  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d  wb=%d  rnd=%d\n\n",
+          path, tnum, omode, wb, rnd);
   bool err = false;
   double stime = tctime();
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbsetmutex(hdb)){
-    eprint(hdb, "tchdbsetmutex");
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbsetmutex(fdb)){
+    eprint(fdb, "tcfdbsetmutex");
     err = true;
   }
-  if(!tchdbsetcache(hdb, rcnum)){
-    eprint(hdb, "tchdbsetcache");
+  if(!tcfdbopen(fdb, path, FDBOREADER | omode)){
+    eprint(fdb, "tcfdbopen");
     err = true;
   }
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    eprint(hdb, "tchdbopen");
-    err = true;
-  }
-  int rnum = tchdbrnum(hdb) / tnum;
+  int rnum = tcfdbrnum(fdb) / tnum;
   TARGREAD targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
-    targs[0].hdb = hdb;
+    targs[0].fdb = fdb;
     targs[0].rnum = rnum;
     targs[0].wb = wb;
     targs[0].rnd = rnd;
@@ -531,13 +475,13 @@ static int procread(const char *path, int tnum, int rcnum, int omode, bool wb, b
     if(threadread(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
-      targs[i].hdb = hdb;
+      targs[i].fdb = fdb;
       targs[i].rnum = rnum;
       targs[i].wb = wb;
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadread, targs + i) != 0){
-        eprint(hdb, "pthread_create");
+        eprint(fdb, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -546,21 +490,21 @@ static int procread(const char *path, int tnum, int rcnum, int omode, bool wb, b
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint(hdb, "pthread_join");
+        eprint(fdb, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  mprint(hdb);
-  if(!tchdbclose(hdb)){
-    eprint(hdb, "tchdbclose");
+  iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  mprint(fdb);
+  if(!tcfdbclose(fdb)){
+    eprint(fdb, "tcfdbclose");
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
@@ -572,33 +516,33 @@ static int procremove(const char *path, int tnum, int omode, bool rnd){
   iprintf("<Removing Test>\n  path=%s  tnum=%d  omode=%d  rnd=%d\n\n", path, tnum, omode, rnd);
   bool err = false;
   double stime = tctime();
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbsetmutex(hdb)){
-    eprint(hdb, "tchdbsetmutex");
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbsetmutex(fdb)){
+    eprint(fdb, "tcfdbsetmutex");
     err = true;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    eprint(hdb, "tchdbopen");
+  if(!tcfdbopen(fdb, path, FDBOWRITER | omode)){
+    eprint(fdb, "tcfdbopen");
     err = true;
   }
-  int rnum = tchdbrnum(hdb) / tnum;
+  int rnum = tcfdbrnum(fdb) / tnum;
   TARGREMOVE targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
-    targs[0].hdb = hdb;
+    targs[0].fdb = fdb;
     targs[0].rnum = rnum;
     targs[0].rnd = rnd;
     targs[0].id = 0;
     if(threadremove(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
-      targs[i].hdb = hdb;
+      targs[i].fdb = fdb;
       targs[i].rnum = rnum;
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadremove, targs + i) != 0){
-        eprint(hdb, "pthread_create");
+        eprint(fdb, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -607,21 +551,21 @@ static int procremove(const char *path, int tnum, int omode, bool rnd){
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint(hdb, "pthread_join");
+        eprint(fdb, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  mprint(hdb);
-  if(!tchdbclose(hdb)){
-    eprint(hdb, "tchdbclose");
+  iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  mprint(fdb);
+  if(!tcfdbclose(fdb)){
+    eprint(fdb, "tcfdbclose");
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
@@ -629,38 +573,34 @@ static int procremove(const char *path, int tnum, int omode, bool rnd){
 
 
 /* perform wicked command */
-static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc){
-  iprintf("<Writing Test>\n  path=%s  tnum=%d  rnum=%d  opts=%d  omode=%d  nc=%d\n\n",
-          path, tnum, rnum, opts, omode, nc);
+static int procwicked(const char *path, int tnum, int rnum, int omode, bool nc){
+  iprintf("<Writing Test>\n  path=%s  tnum=%d  rnum=%d  omode=%d  nc=%d\n\n",
+          path, tnum, rnum, omode, nc);
   bool err = false;
   double stime = tctime();
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbsetmutex(hdb)){
-    eprint(hdb, "tchdbsetmutex");
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbsetmutex(fdb)){
+    eprint(fdb, "tcfdbsetmutex");
     err = true;
   }
-  if(!tchdbtune(hdb, rnum / 50, 2, -1, opts)){
-    eprint(hdb, "tchdbtune");
+  if(!tcfdbtune(fdb, RECBUFSIZ * 2, EXHEADSIZ + (RECBUFSIZ * 2 + sizeof(int)) * rnum * tnum)){
+    eprint(fdb, "tcfdbtune");
     err = true;
   }
-  if(!tchdbsetcache(hdb, rnum / 2)){
-    eprint(hdb, "tchdbsetcache");
+  if(!tcfdbopen(fdb, path, FDBOWRITER | FDBOCREAT | FDBOTRUNC | omode)){
+    eprint(fdb, "tcfdbopen");
     err = true;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
-    eprint(hdb, "tchdbopen");
-    err = true;
-  }
-  if(!tchdbiterinit(hdb)){
-    eprint(hdb, "tchdbiterinit");
+  if(!tcfdbiterinit(fdb)){
+    eprint(fdb, "tcfdbiterinit");
     err = true;
   }
   TARGWICKED targs[tnum];
   pthread_t threads[tnum];
   TCMAP *map = tcmapnew();
   if(tnum == 1){
-    targs[0].hdb = hdb;
+    targs[0].fdb = fdb;
     targs[0].rnum = rnum;
     targs[0].nc = nc;
     targs[0].id = 0;
@@ -668,13 +608,13 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
     if(threadwicked(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
-      targs[i].hdb = hdb;
+      targs[i].fdb = fdb;
       targs[i].rnum = rnum;
       targs[i].nc = nc;
       targs[i].id = i;
       targs[i].map = map;
       if(pthread_create(threads + i, NULL, threadwicked, targs + i) != 0){
-        eprint(hdb, "pthread_create");
+        eprint(fdb, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -683,7 +623,7 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint(hdb, "pthread_join");
+        eprint(fdb, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
@@ -691,35 +631,36 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
     }
   }
   if(!nc){
-    if(!tchdbsync(hdb)){
-      eprint(hdb, "tchdbsync");
+    if(!tcfdbsync(fdb)){
+      eprint(fdb, "tcfdbsync");
       err = true;
     }
-    if(tchdbrnum(hdb) != tcmaprnum(map)){
-      eprint(hdb, "(validation)");
+    if(tcfdbrnum(fdb) != tcmaprnum(map)){
+      eprint(fdb, "(validation)");
       err = true;
     }
     int end = rnum * tnum;
     for(int i = 1; i <= end && !err; i++){
       char kbuf[RECBUFSIZ];
-      int ksiz = sprintf(kbuf, "%d", i - 1);
+      int ksiz = sprintf(kbuf, "%d", i);
       int vsiz;
       const char *vbuf = tcmapget(map, kbuf, ksiz, &vsiz);
       int rsiz;
-      char *rbuf = tchdbget(hdb, kbuf, ksiz, &rsiz);
+      char *rbuf = tcfdbget2(fdb, kbuf, ksiz, &rsiz);
       if(vbuf){
         putchar('.');
+        if(vsiz > RECBUFSIZ) vsiz = RECBUFSIZ;
         if(!rbuf){
-          eprint(hdb, "tchdbget");
+          eprint(fdb, "tcfdbget");
           err = true;
         } else if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
-          eprint(hdb, "(validation)");
+          eprint(fdb, "(validation)");
           err = true;
         }
       } else {
         putchar('*');
-        if(rbuf || tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "(validation)");
+        if(rbuf || tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "(validation)");
           err = true;
         }
       }
@@ -729,14 +670,14 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
     if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
   }
   tcmapdel(map);
-  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  mprint(hdb);
-  if(!tchdbclose(hdb)){
-    eprint(hdb, "tchdbclose");
+  iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  mprint(fdb);
+  if(!tcfdbclose(fdb)){
+    eprint(fdb, "tcfdbclose");
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
@@ -744,35 +685,31 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
 
 
 /* perform typical command */
-static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
-                       int opts, int rcnum, int omode, bool nc, int rratio){
-  iprintf("<Typical Access Test>\n  path=%s  tnum=%d  rnum=%d  bnum=%d  apow=%d  fpow=%d"
-          "  opts=%d  rcnum=%d  omode=%d  nc=%d  rratio=%d\n\n",
-          path, tnum, rnum, bnum, apow, fpow, opts, rcnum, omode, nc, rratio);
+static int proctypical(const char *path, int tnum, int rnum, int width, int64_t limsiz,
+                       int omode, bool nc, int rratio){
+  iprintf("<Typical Access Test>\n  path=%s  tnum=%d  rnum=%d  width=%d  limsiz=%lld"
+          "  omode=%d  nc=%d  rratio=%d\n\n",
+          path, tnum, rnum, width, (long long)limsiz, omode, nc, rratio);
   bool err = false;
   double stime = tctime();
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbsetmutex(hdb)){
-    eprint(hdb, "tchdbsetmutex");
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbsetmutex(fdb)){
+    eprint(fdb, "tcfdbsetmutex");
     err = true;
   }
-  if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
-    eprint(hdb, "tchdbtune");
+  if(!tcfdbtune(fdb, width, limsiz)){
+    eprint(fdb, "tcfdbtune");
     err = true;
   }
-  if(!tchdbsetcache(hdb, rcnum)){
-    eprint(hdb, "tchdbsetcache");
-    err = true;
-  }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
-    eprint(hdb, "tchdbopen");
+  if(!tcfdbopen(fdb, path, FDBOWRITER | FDBOCREAT | FDBOTRUNC | omode)){
+    eprint(fdb, "tcfdbopen");
     err = true;
   }
   TARGTYPICAL targs[tnum];
   pthread_t threads[tnum];
   if(tnum == 1){
-    targs[0].hdb = hdb;
+    targs[0].fdb = fdb;
     targs[0].rnum = rnum;
     targs[0].nc = nc;
     targs[0].rratio = rratio;
@@ -780,13 +717,13 @@ static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow,
     if(threadtypical(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
-      targs[i].hdb = hdb;
+      targs[i].fdb = fdb;
       targs[i].rnum = rnum;
       targs[i].nc = nc;
       targs[i].rratio= rratio;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadtypical, targs + i) != 0){
-        eprint(hdb, "pthread_create");
+        eprint(fdb, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -795,21 +732,21 @@ static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow,
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint(hdb, "pthread_join");
+        eprint(fdb, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
       }
     }
   }
-  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  mprint(hdb);
-  if(!tchdbclose(hdb)){
-    eprint(hdb, "tchdbclose");
+  iprintf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  iprintf("size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  mprint(fdb);
+  if(!tcfdbclose(fdb)){
+    eprint(fdb, "tcfdbclose");
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
@@ -818,28 +755,19 @@ static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow,
 
 /* thread the write function */
 static void *threadwrite(void *targ){
-  TCHDB *hdb = ((TARGWRITE *)targ)->hdb;
+  TCFDB *fdb = ((TARGWRITE *)targ)->fdb;
   int rnum = ((TARGWRITE *)targ)->rnum;
-  bool as = ((TARGWRITE *)targ)->as;
   bool rnd = ((TARGWRITE *)targ)->rnd;
   int id = ((TARGWRITE *)targ)->id;
   bool err = false;
   int base = id * rnum;
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
-    int len = sprintf(buf, "%08d", base + (rnd ? myrand(i) : i));
-    if(as){
-      if(!tchdbputasync(hdb, buf, len, buf, len)){
-        eprint(hdb, "tchdbputasync");
-        err = true;
-        break;
-      }
-    } else {
-      if(!tchdbput(hdb, buf, len, buf, len)){
-        eprint(hdb, "tchdbput");
-        err = true;
-        break;
-      }
+    int len = sprintf(buf, "%08d", base + (rnd ? myrand(i) + 1 : i));
+    if(!tcfdbput2(fdb, buf, len, buf, len)){
+      eprint(fdb, "tcfdbput2");
+      err = true;
+      break;
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -853,7 +781,7 @@ static void *threadwrite(void *targ){
 
 /* thread the read function */
 static void *threadread(void *targ){
-  TCHDB *hdb = ((TARGREAD *)targ)->hdb;
+  TCFDB *fdb = ((TARGREAD *)targ)->fdb;
   int rnum = ((TARGREAD *)targ)->rnum;
   bool wb = ((TARGREAD *)targ)->wb;
   bool rnd = ((TARGREAD *)targ)->rnd;
@@ -861,20 +789,19 @@ static void *threadread(void *targ){
   bool err = false;
   int base = id * rnum;
   for(int i = 1; i <= rnum && !err; i++){
-    char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrandnd(i) : i));
+    uint64_t kid = base + (rnd ? myrandnd(i) + 1 : i);
     int vsiz;
     if(wb){
       char vbuf[RECBUFSIZ];
-      int vsiz = tchdbget3(hdb, kbuf, ksiz, vbuf, RECBUFSIZ);
-      if(vsiz < 0 && (!rnd || tchdbecode(hdb) != TCENOREC)){
-        eprint(hdb, "tchdbget3");
+      int vsiz = tcfdbget4(fdb, kid, vbuf, RECBUFSIZ);
+      if(vsiz < 0 && (!rnd || tcfdbecode(fdb) != TCENOREC)){
+        eprint(fdb, "tcfdbget4");
         err = true;
       }
     } else {
-      char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
-      if(!vbuf && (!rnd || tchdbecode(hdb) != TCENOREC)){
-        eprint(hdb, "tchdbget");
+      char *vbuf = tcfdbget(fdb, kid, &vsiz);
+      if(!vbuf && (!rnd || tcfdbecode(fdb) != TCENOREC)){
+        eprint(fdb, "tcfdbget");
         err = true;
       }
       tcfree(vbuf);
@@ -891,7 +818,7 @@ static void *threadread(void *targ){
 
 /* thread the remove function */
 static void *threadremove(void *targ){
-  TCHDB *hdb = ((TARGREMOVE *)targ)->hdb;
+  TCFDB *fdb = ((TARGREMOVE *)targ)->fdb;
   int rnum = ((TARGREMOVE *)targ)->rnum;
   bool rnd = ((TARGREMOVE *)targ)->rnd;
   int id = ((TARGREMOVE *)targ)->id;
@@ -899,9 +826,9 @@ static void *threadremove(void *targ){
   int base = id * rnum;
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrand(i + 1) : i));
-    if(!tchdbout(hdb, kbuf, ksiz) && (!rnd || tchdbecode(hdb) != TCENOREC)){
-      eprint(hdb, "tchdbout");
+    int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrand(i + 1) + 1 : i));
+    if(!tcfdbout2(fdb, kbuf, ksiz) && (!rnd || tcfdbecode(fdb) != TCENOREC)){
+      eprint(fdb, "tcfdbout2");
       err = true;
       break;
     }
@@ -917,15 +844,16 @@ static void *threadremove(void *targ){
 
 /* thread the wicked function */
 static void *threadwicked(void *targ){
-  TCHDB *hdb = ((TARGWICKED *)targ)->hdb;
+  TCFDB *fdb = ((TARGWICKED *)targ)->fdb;
   int rnum = ((TARGWICKED *)targ)->rnum;
   bool nc = ((TARGWICKED *)targ)->nc;
   int id = ((TARGWICKED *)targ)->id;
   TCMAP *map = ((TARGWICKED *)targ)->map;
   bool err = false;
   for(int i = 1; i <= rnum && !err; i++){
+    uint64_t kid = myrand(rnum * (id + 1)) + 1;
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%d", myrand(rnum * (id + 1)));
+    int ksiz = sprintf(kbuf, "%llu", (unsigned long long)kid);
     char vbuf[RECBUFSIZ];
     int vsiz = myrand(RECBUFSIZ);
     memset(vbuf, '*', vsiz);
@@ -935,107 +863,77 @@ static void *threadwicked(void *targ){
     switch(myrand(16)){
     case 0:
       if(id == 0) putchar('0');
-      if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
-        eprint(hdb, "tchdbput");
+      if(!tcfdbput2(fdb, kbuf, ksiz, vbuf, vsiz)){
+        eprint(fdb, "tcfdbput2");
         err = true;
       }
       if(!nc) tcmapput(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 1:
       if(id == 0) putchar('1');
-      if(!tchdbput2(hdb, kbuf, vbuf)){
-        eprint(hdb, "tchdbput2");
+      if(!tcfdbput3(fdb, kbuf, vbuf)){
+        eprint(fdb, "tcfdbput3");
         err = true;
       }
       if(!nc) tcmapput2(map, kbuf, vbuf);
       break;
     case 2:
       if(id == 0) putchar('2');
-      if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz) && tchdbecode(hdb) != TCEKEEP){
-        eprint(hdb, "tchdbputkeep");
+      if(!tcfdbputkeep2(fdb, kbuf, ksiz, vbuf, vsiz) && tcfdbecode(fdb) != TCEKEEP){
+        eprint(fdb, "tcfdbputkeep2");
         err = true;
       }
       if(!nc) tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 3:
       if(id == 0) putchar('3');
-      if(!tchdbputkeep2(hdb, kbuf, vbuf) && tchdbecode(hdb) != TCEKEEP){
-        eprint(hdb, "tchdbputkeep2");
+      if(!tcfdbputkeep3(fdb, kbuf, vbuf) && tcfdbecode(fdb) != TCEKEEP){
+        eprint(fdb, "tcfdbputkeep3");
         err = true;
       }
       if(!nc) tcmapputkeep2(map, kbuf, vbuf);
       break;
     case 4:
       if(id == 0) putchar('4');
-      if(!tchdbputcat(hdb, kbuf, ksiz, vbuf, vsiz)){
-        eprint(hdb, "tchdbputcat");
+      if(!tcfdbputcat2(fdb, kbuf, ksiz, vbuf, vsiz)){
+        eprint(fdb, "tcfdbputcat2");
         err = true;
       }
       if(!nc) tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 5:
       if(id == 0) putchar('5');
-      if(!tchdbputcat2(hdb, kbuf, vbuf)){
-        eprint(hdb, "tchdbputcat2");
+      if(!tcfdbputcat3(fdb, kbuf, vbuf)){
+        eprint(fdb, "tcfdbputcat3");
         err = true;
       }
       if(!nc) tcmapputcat2(map, kbuf, vbuf);
       break;
     case 6:
       if(id == 0) putchar('6');
-      if(i > rnum / 4 * 3){
-        if(!tchdbputasync(hdb, kbuf, ksiz, vbuf, vsiz)){
-          eprint(hdb, "tchdbputasync");
-          err = true;
-        }
-      } else {
-        if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
-          eprint(hdb, "tchdbput");
-          err = true;
-        }
-      }
-      if(!nc) tcmapput(map, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 7:
-      if(id == 0) putchar('7');
-      if(i > rnum / 4 * 3){
-        if(!tchdbputasync2(hdb, kbuf, vbuf)){
-          eprint(hdb, "tchdbputasync2");
-          err = true;
-        }
-      } else {
-        if(!tchdbput2(hdb, kbuf, vbuf)){
-          eprint(hdb, "tchdbput2");
-          err = true;
-        }
-      }
-      if(!nc) tcmapput2(map, kbuf, vbuf);
-      break;
-    case 8:
-      if(id == 0) putchar('8');
       if(myrand(10) == 0){
-        if(!tchdbout(hdb, kbuf, ksiz) && tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "tchdbout");
+        if(!tcfdbout2(fdb, kbuf, ksiz) && tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "tcfdbout2");
           err = true;
         }
         if(!nc) tcmapout(map, kbuf, ksiz);
       }
       break;
-    case 9:
-      if(id == 0) putchar('9');
+    case 7:
+      if(id == 0) putchar('7');
       if(myrand(10) == 0){
-        if(!tchdbout2(hdb, kbuf) && tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "tchdbout2");
+        if(!tcfdbout3(fdb, kbuf) && tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "tcfdbout3");
           err = true;
         }
         if(!nc) tcmapout2(map, kbuf);
       }
       break;
-    case 10:
-      if(id == 0) putchar('A');
-      if(!(rbuf = tchdbget(hdb, kbuf, ksiz, &vsiz))){
-        if(tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "tchdbget");
+    case 8:
+      if(id == 0) putchar('8');
+      if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz))){
+        if(tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "tcfdbget2");
           err = true;
         }
         rbuf = tcsprintf("[%d]", myrand(i + 1));
@@ -1047,72 +945,54 @@ static void *threadwicked(void *targ){
       for(int j = 0; j < vsiz; j++){
         rbuf[j] = myrand(0x100);
       }
-      if(!tchdbput(hdb, kbuf, ksiz, rbuf, vsiz)){
-        eprint(hdb, "tchdbput");
+      if(!tcfdbput2(fdb, kbuf, ksiz, rbuf, vsiz)){
+        eprint(fdb, "tcfdbput2");
         err = true;
       }
       if(!nc) tcmapput(map, kbuf, ksiz, rbuf, vsiz);
       tcfree(rbuf);
       break;
+    case 9:
+      if(id == 0) putchar('9');
+      if(!(rbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz)) && tcfdbecode(fdb) != TCENOREC){
+        eprint(fdb, "tcfdbget2");
+        err = true;
+      }
+      tcfree(rbuf);
+      break;
+    case 10:
+      if(id == 0) putchar('A');
+      if(!(rbuf = tcfdbget3(fdb, kbuf)) && tcfdbecode(fdb) != TCENOREC){
+        eprint(fdb, "tcfdbge3");
+        err = true;
+      }
+      tcfree(rbuf);
+      break;
     case 11:
       if(id == 0) putchar('B');
-      if(!(rbuf = tchdbget(hdb, kbuf, ksiz, &vsiz)) && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbget");
-        err = true;
-      }
-      tcfree(rbuf);
-      break;
-    case 12:
-      if(id == 0) putchar('C');
-      if(!(rbuf = tchdbget2(hdb, kbuf)) && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbget2");
-        err = true;
-      }
-      tcfree(rbuf);
-      break;
-    case 13:
-      if(id == 0) putchar('D');
       if(myrand(1) == 0) vsiz = 1;
-      if((vsiz = tchdbget3(hdb, kbuf, ksiz, vbuf, vsiz)) < 0 && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbget3");
+      if((vsiz = tcfdbget4(fdb, kid, vbuf, vsiz)) < 0 && tcfdbecode(fdb) != TCENOREC){
+        eprint(fdb, "tcfdbget4");
         err = true;
       }
       break;
     case 14:
       if(id == 0) putchar('E');
       if(myrand(rnum / 50) == 0){
-        if(!tchdbiterinit(hdb)){
-          eprint(hdb, "tchdbiterinit");
+        if(!tcfdbiterinit(fdb)){
+          eprint(fdb, "tcfdbiterinit");
           err = true;
         }
       }
-      TCXSTR *ikey = tcxstrnew();
-      TCXSTR *ival = tcxstrnew();
       for(int j = myrand(rnum) / 1000 + 1; j >= 0; j--){
-        if(j % 3 == 0){
-          if(!tchdbiternext3(hdb, ikey, ival)){
-            int ecode = tchdbecode(hdb);
-            if(ecode != TCEINVALID && ecode != TCENOREC){
-              eprint(hdb, "tchdbiternext3");
-              err = true;
-            }
-          }
-        } else {
-          int iksiz;
-          char *ikbuf = tchdbiternext(hdb, &iksiz);
-          if(ikbuf){
-            tcfree(ikbuf);
-          } else {
-            int ecode = tchdbecode(hdb);
-            if(ecode != TCEINVALID && ecode != TCENOREC){
-              eprint(hdb, "tchdbiternext");
-              err = true;
-            }
+        if(tcfdbiternext(fdb) < 1){
+          int ecode = tcfdbecode(fdb);
+          if(ecode != TCEINVALID && ecode != TCENOREC){
+            eprint(fdb, "tcfdbiternext");
+            err = true;
           }
         }
       }
-      tcxstrdel(ival);
-      tcxstrdel(ikey);
       break;
     default:
       if(id == 0) putchar('@');
@@ -1123,12 +1003,12 @@ static void *threadwicked(void *targ){
     if(id == 0){
       if(i % 50 == 0) iprintf(" (%08d)\n", i);
       if(id == 0 && i == rnum / 4){
-        if(!tchdboptimize(hdb, rnum / 50, -1, -1, -1)){
-          eprint(hdb, "tchdboptimize");
+        if(!tcfdboptimize(fdb, RECBUFSIZ, -1)){
+          eprint(fdb, "tcfdboptimize");
           err = true;
         }
-        if(!tchdbiterinit(hdb)){
-          eprint(hdb, "tchdbiterinit");
+        if(!tcfdbiterinit(fdb)){
+          eprint(fdb, "tcfdbiterinit");
           err = true;
         }
       }
@@ -1140,7 +1020,7 @@ static void *threadwicked(void *targ){
 
 /* thread the typical function */
 static void *threadtypical(void *targ){
-  TCHDB *hdb = ((TARGTYPICAL *)targ)->hdb;
+  TCFDB *fdb = ((TARGTYPICAL *)targ)->fdb;
   int rnum = ((TARGTYPICAL *)targ)->rnum;
   bool nc = ((TARGTYPICAL *)targ)->nc;
   int rratio = ((TARGTYPICAL *)targ)->rratio;
@@ -1149,82 +1029,68 @@ static void *threadtypical(void *targ){
   TCMAP *map = (!nc && id == 0) ? tcmapnew2(rnum + 1) : NULL;
   int base = id * rnum;
   int mrange = tclmax(50 + rratio, 100);
+  int width = tcfdbwidth(fdb);
   for(int i = 1; !err && i <= rnum; i++){
     char buf[RECBUFSIZ];
-    int len = sprintf(buf, "%08d", base + myrandnd(i));
+    int len = sprintf(buf, "%08d", base + myrandnd(i) + 1);
     int rnd = myrand(mrange);
     if(rnd < 10){
-      if(!tchdbput(hdb, buf, len, buf, len)){
-        eprint(hdb, "tchdbput");
+      if(!tcfdbput2(fdb, buf, len, buf, len)){
+        eprint(fdb, "tcfdbput2");
         err = true;
       }
       if(map) tcmapput(map, buf, len, buf, len);
     } else if(rnd < 15){
-      if(!tchdbputkeep(hdb, buf, len, buf, len) && tchdbecode(hdb) != TCEKEEP){
-        eprint(hdb, "tchdbputkeep");
+      if(!tcfdbputkeep2(fdb, buf, len, buf, len) && tcfdbecode(fdb) != TCEKEEP){
+        eprint(fdb, "tcfdbputkeep2");
         err = true;
       }
       if(map) tcmapputkeep(map, buf, len, buf, len);
     } else if(rnd < 20){
-      if(!tchdbputcat(hdb, buf, len, buf, len)){
-        eprint(hdb, "tchdbputcat");
+      if(!tcfdbputcat2(fdb, buf, len, buf, len)){
+        eprint(fdb, "tcfdbputcat2");
         err = true;
       }
       if(map) tcmapputcat(map, buf, len, buf, len);
     } else if(rnd < 25){
-      if(i > rnum / 10 * 9){
-        if(!tchdbputasync(hdb, buf, len, buf, len)){
-          eprint(hdb, "tchdbputasync");
-          err = true;
-        }
-      } else {
-        if(!tchdbput(hdb, buf, len, buf, len)){
-          eprint(hdb, "tchdbput");
-          err = true;
-        }
-      }
-      if(map) tcmapput(map, buf, len, buf, len);
-    } else if(rnd < 30){
-      if(!tchdbout(hdb, buf, len) && tchdbecode(hdb) && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbout");
+      if(!tcfdbout2(fdb, buf, len) && tcfdbecode(fdb) && tcfdbecode(fdb) != TCENOREC){
+        eprint(fdb, "tcfdbout");
         err = true;
       }
       if(map) tcmapout(map, buf, len);
-    } else if(rnd < 31){
-      if(myrand(10) == 0 && !tchdbiterinit(hdb) && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbiterinit");
+    } else if(rnd < 26){
+      if(myrand(10) == 0 && !tcfdbiterinit(fdb) && tcfdbecode(fdb) != TCENOREC){
+        eprint(fdb, "tcfdbiterinit");
         err = true;
       }
       for(int j = 0; !err && j < 10; j++){
-        int ksiz;
-        char *kbuf = tchdbiternext(hdb, &ksiz);
-        if(kbuf){
-          tcfree(kbuf);
-        } else if(tchdbecode(hdb) != TCEINVALID && tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "tchdbiternext");
+        if(tcfdbiternext(fdb) < 1 &&
+           tcfdbecode(fdb) != TCEINVALID && tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "tcfdbiternext");
           err = true;
         }
       }
     } else {
       int vsiz;
-      char *vbuf = tchdbget(hdb, buf, len, &vsiz);
+      char *vbuf = tcfdbget2(fdb, buf, len, &vsiz);
       if(vbuf){
         if(map){
-          int msiz;
+          int msiz = 0;
           const char *mbuf = tcmapget(map, buf, len, &msiz);
+          if(msiz > width) msiz = width;
           if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
-            eprint(hdb, "(validation)");
+            eprint(fdb, "(validation)");
             err = true;
           }
         }
         tcfree(vbuf);
       } else {
-        if(tchdbecode(hdb) != TCENOREC){
-          eprint(hdb, "tchdbget");
+        if(tcfdbecode(fdb) != TCENOREC){
+          eprint(fdb, "tcfdbget");
           err = true;
         }
         if(map && tcmapget(map, buf, len, &vsiz)){
-          eprint(hdb, "(validation)");
+          eprint(fdb, "(validation)");
           err = true;
         }
       }
@@ -1241,17 +1107,18 @@ static void *threadtypical(void *targ){
     const char *kbuf;
     while(!err && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
       int vsiz;
-      char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
+      char *vbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz);
       if(vbuf){
-        int msiz;
+        int msiz = 0;
         const char *mbuf = tcmapget(map, kbuf, ksiz, &msiz);
+        if(msiz > width) msiz = width;
         if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
-          eprint(hdb, "(validation)");
+          eprint(fdb, "(validation)");
           err = true;
         }
         tcfree(vbuf);
       } else {
-        eprint(hdb, "(validation)");
+        eprint(fdb, "(validation)");
         err = true;
       }
     }

@@ -1,4 +1,4 @@
-.TH "TCUTIL" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
+.TH "TCUTIL" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcutil \- the utility API
@@ -742,6 +742,19 @@ The function `tclistsortci' is used in order to sort elements of a list object i
 \fBvoid tclistsortci(TCLIST *\fIlist\fB);\fR
 .RS
 `\fIlist\fR' specifies the list object.
+.RE
+.RE
+.PP
+The function `tclistsortex' is used in order to sort elements of a list object by an arbitrary comparison function.
+.PP
+.RS
+.br
+\fBvoid tclistsortex(TCLIST *\fIlist\fB, int (*\fIcmp\fB)(const TCLISTDATUM *, const TCLISTDATUM *));\fR
+.RS
+`\fIlist\fR' specifies the list object.
+.RE
+.RS
+`\fIcmp\fR' specifies the pointer to the comparison function.  The structure `TCLISTDATUM' has the member "ptr" which is the pointer to the region of the element, and the member "size" which is the size of the region.
 .RE
 .RE
 .PP
@@ -1857,6 +1870,53 @@ Because the region of the return value is allocated with the `malloc' call, it s
 .RE
 .RE
 .PP
+The function `tcmdbfwmkeys' is used in order to get forward matching keys in an on\-memory database object.
+.PP
+.RS
+.br
+\fBTCLIST *tcmdbfwmkeys(TCMDB *\fImdb\fB, const void *\fIpbuf\fB, int \fIpsiz\fB, int \fImax\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIpbuf\fR' specifies the pointer to the region of the prefix.
+.RE
+.RS
+`\fIpsiz\fR' specifies the size of the region of the prefix.
+.RE
+.RS
+`\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
+.RE
+.RS
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
+.RE
+.RE
+.PP
+The function `tcmdbfwmkeys2' is used in order to get forward matching string keys in an on\-memory database object.
+.PP
+.RS
+.br
+\fBTCLIST *tcmdbfwmkeys2(TCMDB *\fImdb\fB, const char *\fIpstr\fB, int \fImax\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIpstr\fR' specifies the string of the prefix.
+.RE
+.RS
+`\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
+.RE
+.RS
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
+.RE
+.RE
+.PP
 The function `tcmdbrnum' is used in order to get the number of records stored in an on\-memory database object.
 .PP
 .RS
@@ -2434,6 +2494,86 @@ Because the region of the return value is allocated with the `malloc' call, it s
 .RE
 .RE
 .PP
+The function `tcregexmatch' is used in order to check whether a string matches a regular expression.
+.PP
+.RS
+.br
+\fBbool tcregexmatch(const char *\fIstr\fB, const char *\fIregex\fB);\fR
+.RS
+`\fIstr\fR' specifies the target string.
+.RE
+.RS
+`\fIregex\fR' specifies the regular expression string.  If it begins with `*', the trailing substring is used as a case\-insensitive regular expression.
+.RE
+.RS
+The return value is true if matching is success, else, it is false.
+.RE
+.RE
+.PP
+The function `tcregexreplace' is used in order to replace each substring matching a regular expression string.
+.PP
+.RS
+.br
+\fBchar *tcregexreplace(const char *\fIstr\fB, const char *\fIregex\fB, const char *\fIalt\fB);\fR
+.RS
+`\fIstr\fR' specifies the target string.
+.RE
+.RS
+`\fIregex\fR' specifies the regular expression string for substrings.  If it begins with `*', the trailing substring is used as a case\-insensitive regular expression.
+.RE
+.RS
+`\fIalt\fR' specifies the alternative string with which each substrings is replaced.  Each `&' in the string is replaced with the matched substring.  Each `\\' in the string escapes the following character.  Special escapes "\\1" through "\\9" referring to the corresponding matching sub\-expressions in the regular expression string are supported.
+.RE
+.RS
+The return value is a new converted string.  Even if the regular expression is invalid, a copy of the original string is returned.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcchordnew' is used in order to create a Chord hash object.
+.PP
+.RS
+.br
+\fBTCCHORD *tcchordnew(int \fIrange\fB);\fR
+.RS
+`\fIrange\fR' specifies the number of nodes.  It should be more than 0.  The range of hash values is from 0 to less than the specified number.
+.RE
+.RS
+The return value is the new Chord hash object.
+.RE
+.RS
+Chord is a kind of consistent hashing methods, which are useful to determine a storage node of distributed hash table.
+.RE
+.RE
+.PP
+The function `tcchorddel' is used in order to delete a Chord hash object.
+.PP
+.RS
+.br
+\fBvoid tcchorddel(TCCHORD *\fIchord\fB);\fR
+.RS
+`\fIchord\fR' specifies the Chord hash object.
+.RE
+.RE
+.PP
+The function `tcchordhash' is used in order to get the Chord hash value of a record.
+.PP
+.RS
+.br
+\fBint tcchordhash(TCCHORD *\fIchord\fB, const void *\fIptr\fB, int \fIsize\fB);\fR
+.RS
+`\fIptr\fR' specifies the pointer to the region of the record.
+.RE
+.RS
+`\fIsize\fR' specifies the size of the region.
+.RE
+.RS
+The return value is the Chord hash value of the record.
+.RE
+.RE
+.PP
 The function `tctime' is used in order to get the time of day in seconds.
 .PP
 .RS
@@ -2523,6 +2663,16 @@ The function `tcstrmktime' is used in order to get the time value of a date stri
 .RE
 .RS
 The return value is the time value of the date or `INT64_MAX' if the format is invalid.
+.RE
+.RE
+.PP
+The function `tcjetlag' is used in order to get the jet lag of the local time.
+.PP
+.RS
+.br
+\fBint tcjetlag(void);\fR
+.RS
+The return value is the jet lag of the local time in seconds.
 .RE
 .RE
 .PP
@@ -2652,6 +2802,22 @@ The return value is a list object of names if successful, else it is `NULL'.
 .RE
 .RS
 Links to the directory itself and to the parent directory are ignored.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcglobpat' is used in order to expand a pattern into a list of matched paths.
+.PP
+.RS
+.br
+\fBTCLIST *tcglobpat(const char *\fIpattern\fB);\fR
+.RS
+`\fIpattern\fR' specifies the matching pattern.
+.RE
+.RS
+The return value is a list object of matched paths.  If no path is matched, an empty list is returned.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -2917,6 +3083,53 @@ The return value is the result string.
 .RE
 .RS
 Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcmimebreak' is used in order to split a string of MIME into headers and the body.
+.PP
+.RS
+.br
+\fBchar *tcmimebreak(const char *\fIptr\fB, int \fIsize\fB, TCMAP *\fIheaders\fB, int *\fIsp\fB);\fR
+.RS
+`\fIptr\fR' specifies the pointer to the region of MIME data.
+.RE
+.RS
+`\fIsize\fR' specifies the size of the region.
+.RE
+.RS
+`\fIheaders\fR' specifies a map handle to store headers.  If it is `NULL', it is not used.  Each key of the map is an uncapitalized header name.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to the variable into which the size of the region of the return value is assigned.
+.RE
+.RS
+The return value is the pointer to the region of the body data.
+.RE
+.RS
+If the content type is defined, the header map has the key "TYPE" specifying the type.  If the character encoding is defined, the key "CHARSET" specifies the encoding name.  If the boundary string of multipart is defined, the key "BOUNDARY" specifies the string.  If the content disposition is defined, the key "DISPOSITION" specifies the direction.  If the file name is defined, the key "FILENAME" specifies the name.  If the attribute name is defined, the key "NAME" specifies the name.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcmimeparts' is used in order to split multipart data of MIME into its parts.
+.PP
+.RS
+.br
+\fBTCLIST *tcmimeparts(const char *\fIptr\fB, int \fIsize\fB, const char *\fIboundary\fB);\fR
+.RS
+`\fIptr\fR' specifies the pointer to the region of multipart data of MIME.
+.RE
+.RS
+`\fIsize\fR' specifies the size of the region.
+.RE
+.RS
+`\fIboundary\fR' specifies the boundary string.
+.RE
+.RS
+The return value is a list object.  Each element of the list is the data of a part.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
 .RE
 .RE
 .PP

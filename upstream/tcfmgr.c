@@ -1,5 +1,5 @@
 /*************************************************************************************************
- * The command line utility of the hash database API
+ * The command line utility of the fixed-length database API
  *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
@@ -15,7 +15,7 @@
 
 
 #include <tcutil.h>
-#include <tchdb.h>
+#include <tcfdb.h>
 #include "myconf.h"
 
 
@@ -27,7 +27,7 @@ int g_dbgfd;                             // debugging output
 /* function prototypes */
 int main(int argc, char **argv);
 static void usage(void);
-static void printerr(TCHDB *hdb);
+static void printerr(TCFDB *fdb);
 static int printdata(const char *ptr, int size, bool px);
 static char *hextoobj(const char *str, int *sp);
 static char *mygetline(FILE *ifp);
@@ -40,14 +40,15 @@ static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
 static int runimporttsv(int argc, char **argv);
 static int runversion(int argc, char **argv);
-static int proccreate(const char *path, int bnum, int apow, int fpow, int opts);
+static int proccreate(const char *path, int width, int64_t limsiz);
 static int procinform(const char *path, int omode);
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
                    int omode, int dmode);
 static int procout(const char *path, const char *kbuf, int ksiz, int omode);
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz);
-static int proclist(const char *path, int omode, int max, bool pv, bool px, const char *fmstr);
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode);
+static int proclist(const char *path, int omode, int max, bool pv, bool px,
+                    const char *rlstr, const char *rustr, const char *ristr);
+static int procoptimize(const char *path, int width, int64_t limsiz, int omode);
 static int procimporttsv(const char *path, const char *file, int omode, bool sc);
 static int procversion(void);
 
@@ -87,17 +88,17 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: the command line utility of the hash database API\n", g_progname);
+  fprintf(stderr, "%s: the command line utility of the fixed-length database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum [apow [fpow]]]\n", g_progname);
+  fprintf(stderr, "  %s create path [width [limsiz]]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
   fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
-  fprintf(stderr, "  %s list [-nl|-nb] [-m num] [-pv] [-px] [-fm str] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum [apow [fpow]]]\n",
+  fprintf(stderr, "  %s list [-nl|-nb] [-m num] [-pv] [-px] [-rb lkey ukey] [-ri str] path\n",
           g_progname);
+  fprintf(stderr, "  %s optimize [-nl|-nb] path [width [limsiz]]\n", g_progname);
   fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
@@ -106,10 +107,10 @@ static void usage(void){
 
 
 /* print error information */
-static void printerr(TCHDB *hdb){
-  const char *path = tchdbpath(hdb);
-  int ecode = tchdbecode(hdb);
-  fprintf(stderr, "%s: %s: %d: %s\n", g_progname, path ? path : "-", ecode, tchdberrmsg(ecode));
+static void printerr(TCFDB *fdb){
+  const char *path = tcfdbpath(fdb);
+  int ecode = tcfdbecode(fdb);
+  fprintf(stderr, "%s: %s: %d: %s\n", g_progname, path ? path : "-", ecode, tcfdberrmsg(ecode));
 }
 
 
@@ -174,38 +175,25 @@ static char *mygetline(FILE *ifp){
 /* parse arguments of create command */
 static int runcreate(int argc, char **argv){
   char *path = NULL;
-  char *bstr = NULL;
-  char *astr = NULL;
-  char *fstr = NULL;
-  int opts = 0;
+  char *wstr = NULL;
+  char *lstr = NULL;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
-        opts |= HDBTLARGE;
-      } else if(!strcmp(argv[i], "-td")){
-        opts |= HDBTDEFLATE;
-      } else if(!strcmp(argv[i], "-tb")){
-        opts |= HDBTTCBS;
-      } else {
-        usage();
-      }
+      usage();
     } else if(!path){
       path = argv[i];
-    } else if(!bstr){
-      bstr = argv[i];
-    } else if(!astr){
-      astr = argv[i];
-    } else if(!fstr){
-      fstr = argv[i];
+    } else if(!wstr){
+      wstr = argv[i];
+    } else if(!lstr){
+      lstr = argv[i];
     } else {
       usage();
     }
   }
   if(!path) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
-  int rv = proccreate(path, bnum, apow, fpow, opts);
+  int width = wstr ? atoi(wstr) : -1;
+  int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
+  int rv = proccreate(path, width, limsiz);
   return rv;
 }
 
@@ -217,9 +205,9 @@ static int runinform(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else {
         usage();
       }
@@ -246,9 +234,9 @@ static int runput(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-dk")){
         dmode = -1;
       } else if(!strcmp(argv[i], "-dc")){
@@ -296,9 +284,9 @@ static int runout(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else {
@@ -338,9 +326,9 @@ static int runget(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -380,13 +368,15 @@ static int runlist(int argc, char **argv){
   int max = -1;
   bool pv = false;
   bool px = false;
-  char *fmstr = NULL;
+  char *rlstr = NULL;
+  char *rustr = NULL;
+  char *ristr = NULL;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-m")){
         if(++i >= argc) usage();
         max = atoi(argv[i]);
@@ -394,9 +384,14 @@ static int runlist(int argc, char **argv){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
         px = true;
-      } else if(!strcmp(argv[i], "-fm")){
+      } else if(!strcmp(argv[i], "-rb")){
         if(++i >= argc) usage();
-        fmstr = argv[i];
+        rlstr = argv[i];
+        if(++i >= argc) usage();
+        rustr = argv[i];
+      } else if(!strcmp(argv[i], "-ri")){
+        if(++i >= argc) usage();
+        ristr = argv[i];
       } else {
         usage();
       }
@@ -407,7 +402,7 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = proclist(path, omode, max, pv, px, fmstr);
+  int rv = proclist(path, omode, max, pv, px, rlstr, rustr, ristr);
   return rv;
 }
 
@@ -415,48 +410,32 @@ static int runlist(int argc, char **argv){
 /* parse arguments of optimize command */
 static int runoptimize(int argc, char **argv){
   char *path = NULL;
-  char *bstr = NULL;
-  char *astr = NULL;
-  char *fstr = NULL;
-  int opts = UINT8_MAX;
+  char *wstr = NULL;
+  char *lstr = NULL;
   int omode = 0;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
-        if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTLARGE;
-      } else if(!strcmp(argv[i], "-td")){
-        if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTDEFLATE;
-      } else if(!strcmp(argv[i], "-tb")){
-        if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTTCBS;
-      } else if(!strcmp(argv[i], "-tz")){
-        if(opts == UINT8_MAX) opts = 0;
-      } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+      if(!strcmp(argv[i], "-nl")){
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else {
         usage();
       }
     } else if(!path){
       path = argv[i];
-    } else if(!bstr){
-      bstr = argv[i];
-    } else if(!astr){
-      astr = argv[i];
-    } else if(!fstr){
-      fstr = argv[i];
+    } else if(!wstr){
+      wstr = argv[i];
+    } else if(!lstr){
+      lstr = argv[i];
     } else {
       usage();
     }
   }
   if(!path) usage();
-  int bnum = bstr ? atoi(bstr) : -1;
-  int apow = astr ? atoi(astr) : -1;
-  int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procoptimize(path, bnum, apow, fpow, opts, omode);
+  int width = wstr ? atoi(wstr) : -1;
+  int64_t limsiz = lstr ? strtoll(lstr, NULL, 10) : -1;
+  int rv = procoptimize(path, width, limsiz, omode);
   return rv;
 }
 
@@ -470,9 +449,9 @@ static int runimporttsv(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= FDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= FDBOLCKNB;
       } else if(!strcmp(argv[i], "-sc")){
         sc = true;
       } else {
@@ -500,76 +479,70 @@ static int runversion(int argc, char **argv){
 
 
 /* perform create command */
-static int proccreate(const char *path, int bnum, int apow, int fpow, int opts){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int proccreate(const char *path, int width, int64_t limsiz){
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbtune(fdb, width, limsiz)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  if(!tcfdbopen(fdb, path, FDBOWRITER | FDBOCREAT | FDBOTRUNC)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
-  if(!tchdbclose(hdb)){
-    printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform inform command */
 static int procinform(const char *path, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOREADER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
-  const char *npath = tchdbpath(hdb);
+  const char *npath = tcfdbpath(fdb);
   if(!npath) npath = "(unknown)";
   printf("path: %s\n", npath);
   const char *type = "(unknown)";
-  switch(tchdbtype(hdb)){
+  switch(tcfdbtype(fdb)){
   case TCDBTHASH: type = "hash"; break;
   case TCDBTBTREE: type = "btree"; break;
   case TCDBTFIXED: type = "fixed"; break;
   }
   printf("database type: %s\n", type);
-  uint8_t flags = tchdbflags(hdb);
+  uint8_t flags = tcfdbflags(fdb);
   printf("additional flags:");
-  if(flags & HDBFOPEN) printf(" open");
-  if(flags & HDBFFATAL) printf(" fatal");
+  if(flags & FDBFOPEN) printf(" open");
+  if(flags & FDBFFATAL) printf(" fatal");
   printf("\n");
-  printf("bucket number: %llu\n", (unsigned long long)tchdbbnum(hdb));
-  if(hdb->cnt_writerec >= 0)
-    printf("used bucket number: %lld\n", (long long)tchdbbnumused(hdb));
-  printf("alignment: %u\n", tchdbalign(hdb));
-  printf("free block pool: %u\n", tchdbfbpmax(hdb));
-  printf("inode number: %lld\n", (long long)tchdbinode(hdb));
+  printf("minimum ID number: %llu\n", (unsigned long long)tcfdbmin(fdb));
+  printf("maximum ID number: %llu\n", (unsigned long long)tcfdbmax(fdb));
+  printf("width of the value: %u\n", (unsigned int)tcfdbwidth(fdb));
+  printf("limit file size: %llu\n", (unsigned long long)tcfdblimsiz(fdb));
+  printf("limit ID number: %llu\n", (unsigned long long)tcfdblimid(fdb));
+  printf("inode number: %lld\n", (long long)tcfdbinode(fdb));
   char date[48];
-  tcdatestrwww(tchdbmtime(hdb), INT_MAX, date);
+  tcdatestrwww(tcfdbmtime(fdb), INT_MAX, date);
   printf("modified time: %s\n", date);
-  uint8_t opts = tchdbopts(hdb);
-  printf("options:");
-  if(opts & HDBTLARGE) printf(" large");
-  if(opts & HDBTDEFLATE) printf(" deflate");
-  if(opts & HDBTTCBS) printf(" tcbs");
-  printf("\n");
-  printf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  printf("file size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  printf("record number: %llu\n", (unsigned long long)tcfdbrnum(fdb));
+  printf("file size: %llu\n", (unsigned long long)tcfdbfsiz(fdb));
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
@@ -577,114 +550,115 @@ static int procinform(const char *path, int omode){
 /* perform put command */
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
                    int omode, int dmode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOWRITER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
   switch(dmode){
   case -1:
-    if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcfdbputkeep2(fdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(fdb);
       err = true;
     }
     break;
   case 1:
-    if(!tchdbputcat(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcfdbputcat2(fdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(fdb);
       err = true;
     }
     break;
   default:
-    if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcfdbput2(fdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(fdb);
       err = true;
     }
     break;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform out command */
 static int procout(const char *path, const char *kbuf, int ksiz, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOWRITER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
-  if(!tchdbout(hdb, kbuf, ksiz)){
-    printerr(hdb);
+  if(!tcfdbout2(fdb, kbuf, ksiz)){
+    printerr(fdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform get command */
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOREADER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
   int vsiz;
-  char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
+  char *vbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz);
   if(vbuf){
     printdata(vbuf, vsiz, px);
     if(!pz) putchar('\n');
     tcfree(vbuf);
   } else {
-    printerr(hdb);
+    printerr(fdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform list command */
-static int proclist(const char *path, int omode, int max, bool pv, bool px, const char *fmstr){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int proclist(const char *path, int omode, int max, bool pv, bool px,
+                    const char *rlstr, const char *rustr, const char *ristr){
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOREADER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
-  if(fmstr){
-    TCLIST *keys = tchdbfwmkeys2(hdb, fmstr, max);
+  if(rlstr || ristr){
+    TCLIST *keys = ristr ? tcfdbrange5(fdb, ristr, max) : tcfdbrange3(fdb, rlstr, rustr, max);
     for(int i = 0; i < tclistnum(keys); i++){
       int ksiz;
       const char *kbuf = tclistval(keys, i, &ksiz);
-      printdata(kbuf, ksiz, px);
+      printf("%s", kbuf);
       if(pv){
         int vsiz;
-        char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
+        char *vbuf = tcfdbget2(fdb, kbuf, ksiz, &vsiz);
         if(vbuf){
           putchar('\t');
           printdata(vbuf, vsiz, px);
@@ -695,70 +669,72 @@ static int proclist(const char *path, int omode, int max, bool pv, bool px, cons
     }
     tclistdel(keys);
   } else {
-    if(!tchdbiterinit(hdb)){
-      printerr(hdb);
+    if(!tcfdbiterinit(fdb)){
+      printerr(fdb);
       err = true;
     }
-    TCXSTR *key = tcxstrnew();
-    TCXSTR *val = tcxstrnew();
     int cnt = 0;
-    while(tchdbiternext3(hdb, key, val)){
-      printdata(tcxstrptr(key), tcxstrsize(key), px);
+    uint64_t id;
+    while((id = tcfdbiternext(fdb)) > 0){
+      printf("%llu", (unsigned long long)id);
       if(pv){
-        putchar('\t');
-        printdata(tcxstrptr(val), tcxstrsize(val), px);
+        int vsiz;
+        char *vbuf = tcfdbget(fdb, id, &vsiz);
+        if(vbuf){
+          putchar('\t');
+          printdata(vbuf, vsiz, px);
+          tcfree(vbuf);
+        }
       }
       putchar('\n');
       if(max >= 0 && ++cnt >= max) break;
     }
-    tcxstrdel(val);
-    tcxstrdel(key);
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform optimize command */
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int procoptimize(const char *path, int width, int64_t limsiz, int omode){
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
+  if(!tcfdbopen(fdb, path, FDBOWRITER | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
-  if(!tchdboptimize(hdb, bnum, apow, fpow, opts)){
-    printerr(hdb);
+  if(!tcfdboptimize(fdb, width, limsiz)){
+    printerr(fdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   return err ? 1 : 0;
 }
 
 
 /* perform importtsv command */
 static int procimporttsv(const char *path, const char *file, int omode, bool sc){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  TCFDB *fdb = tcfdbnew();
+  if(g_dbgfd >= 0) tcfdbsetdbgfd(fdb, g_dbgfd);
   FILE *ifp = file ? fopen(file, "rb") : stdin;
   if(!ifp){
     fprintf(stderr, "%s: could not open\n", file ? file : "(stdin)");
-    tchdbdel(hdb);
+    tcfdbdel(fdb);
     return 1;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  if(!tcfdbopen(fdb, path, FDBOWRITER | FDBOCREAT | omode)){
+    printerr(fdb);
+    tcfdbdel(fdb);
     return 1;
   }
   bool err = false;
@@ -769,8 +745,8 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
     if(!pv) continue;
     *pv = '\0';
     if(sc) tcstrtolower(line);
-    if(!tchdbput2(hdb, line, pv + 1) && tchdbecode(hdb) != TCEKEEP){
-      printerr(hdb);
+    if(!tcfdbput3(fdb, line, pv + 1) && tcfdbecode(fdb) != TCEKEEP){
+      printerr(fdb);
       err = true;
     }
     tcfree(line);
@@ -782,11 +758,11 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
     cnt++;
   }
   printf(" (%08d)\n", cnt);
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcfdbclose(fdb)){
+    if(!err) printerr(fdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcfdbdel(fdb);
   if(ifp != stdin) fclose(ifp);
   return err ? 1 : 0;
 }

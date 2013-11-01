@@ -75,6 +75,8 @@ typedef struct {                         /* type of structure for a B+ tree data
   uint32_t lcnum;                        /* max number of cached leaves */
   uint32_t ncnum;                        /* max number of cached nodes */
   uint32_t lsmax;                        /* max size of each leaf */
+  uint32_t lschk;                        /* counter for leaf size checking */
+  uint64_t capnum;                       /* capacity number of records */
   uint64_t *hist;                        /* history array of visited nodes */
   int hnum;                              /* number of element of the history array */
   uint64_t hleaf;                        /* ID number of the leaf referred by the history */
@@ -481,20 +483,33 @@ TCLIST *tcbdbrange2(TCBDB *bdb, const char *bkstr, bool binc,
 
 /* Get forward matching keys in a B+ tree database object.
    `bdb' specifies the B+ tree database object.
-   `prefix' specifies the prefix of the corresponding keys.
+   `pbuf' specifies the pointer to the region of the prefix.
+   `psiz' specifies the size of the region of the prefix.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the keys of the corresponding records.  This function
-   does never fail and return an empty list even if no record corresponds.
-   Because the object of the return value is created with the function `tclistnew', it should
-   be deleted with the function `tclistdel' when it is no longer in use. */
-TCLIST *tcbdbrange3(TCBDB *bdb, const char *prefix, int max);
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcbdbfwmkeys(TCBDB *bdb, const void *pbuf, int psiz, int max);
+
+
+/* Get forward matching string keys in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `pstr' specifies the string of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcbdbfwmkeys2(TCBDB *bdb, const char *pstr, int max);
 
 
 /* Synchronize updated contents of a B+ tree database object with the file and the device.
    `bdb' specifies the B+ tree database object connected as a writer.
    If successful, the return value is true, else, it is false.
-   This function is useful when another process connects the same database file. */
+   This function is useful when another process connects to the same database file. */
 bool tcbdbsync(TCBDB *bdb);
 
 
@@ -544,8 +559,10 @@ bool tcbdbcopy(TCBDB *bdb, const char *path);
    If successful, the return value is true, else, it is false.
    The database is locked by the thread while the transaction so that only one transaction can be
    activated with a database object at the same time.  Thus, the serializable isolation level is
-   assumed if every database operation is performed in the transaction.  If the database is
-   closed during transaction, the transaction is aborted implicitly. */
+   assumed if every database operation is performed in the transaction.  Because all pages are
+   cached on memory while the transaction, the amount of referred records is limited by the
+   memory capacity.  If the database is closed during transaction, the transaction is aborted
+   implicitly. */
 bool tcbdbtranbegin(TCBDB *bdb);
 
 
@@ -768,6 +785,15 @@ bool tcbdbcurrec(BDBCUR *cur, TCXSTR *kxstr, TCXSTR *vxstr);
  *************************************************************************************************/
 
 
+/* Set the error code of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `ecode' specifies the error code.
+   `file' specifies the file name of the code.
+   `line' specifies the line number of the code.
+   `func' specifies the function name of the code. */
+void tcbdbsetecode(TCBDB *bdb, int ecode, const char *filename, int line, const char *func);
+
+
 /* Set the file descriptor for debugging output.
    `bdb' specifies the B+ tree database object.
    `fd' specifies the file descriptor for debugging output. */
@@ -785,6 +811,18 @@ int tcbdbdbgfd(TCBDB *bdb);
    `phys' specifies whether to synchronize physically.
    If successful, the return value is true, else, it is false. */
 bool tcbdbmemsync(TCBDB *bdb, bool phys);
+
+
+/* Get the comparison function of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   The return value is the pointer to the comparison function. */
+BDBCMP tcbdbcmpfunc(TCBDB *bdb);
+
+
+/* Get the opaque object for the comparison function of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   The return value is the opaque object for the comparison function. */
+void *tcbdbcmpop(TCBDB *bdb);
 
 
 /* Get the maximum number of cached leaf nodes of a B+ tree database object.
@@ -882,6 +920,16 @@ uint64_t tcbdbbnumused(TCBDB *bdb);
 bool tcbdbsetlsmax(TCBDB *bdb, uint32_t lsmax);
 
 
+/* Set the capacity number of records.
+   `bdb' specifies the B+ tree database object which is not opened.
+   `capnum' specifies the capacity number of records.  If it is not more than 0, the capacity is
+   unlimited.
+   If successful, the return value is true, else, it is false.
+   When the number of records exceeds the capacity, forehand records are removed implicitly.
+   Note that the tuning parameters of the database should be set before the database is opened. */
+bool tcbdbsetcapnum(TCBDB *bdb, uint64_t capnum);
+
+
 /* Store a new record into a B+ tree database object with backward duplication.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kbuf' specifies the pointer to the region of the key.
@@ -967,6 +1015,10 @@ int tcbdbcmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *
    The return value is positive if the former is big, negative if the latter is big, 0 if both
    are equivalent. */
 int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
+
+
+/* tricks for backward compatibility */
+#define tcbdbrange3 tcbdbfwmkeys2
 
 
 

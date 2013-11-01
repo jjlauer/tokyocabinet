@@ -1,4 +1,4 @@
-.TH "TCBDB" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
+.TH "TCBDB" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcbdb \- the B+ tree database API
@@ -734,22 +734,47 @@ Because the object of the return value is created with the function `tclistnew',
 .RE
 .RE
 .PP
-The function `tcbdbrange3' is used in order to get forward matching keys in a B+ tree database object.
+The function `tcbdbfwmkeys' is used in order to get forward matching keys in a B+ tree database object.
 .PP
 .RS
 .br
-\fBTCLIST *tcbdbrange3(TCBDB *\fIbdb\fB, const char *\fIprefix\fB, int \fImax\fB);\fR
+\fBTCLIST *tcbdbfwmkeys(TCBDB *\fIbdb\fB, const void *\fIpbuf\fB, int \fIpsiz\fB, int \fImax\fB);\fR
 .RS
 `\fIbdb\fR' specifies the B+ tree database object.
 .RE
 .RS
-`\fIprefix\fR' specifies the prefix of the corresponding keys.
+`\fIpbuf\fR' specifies the pointer to the region of the prefix.
+.RE
+.RS
+`\fIpsiz\fR' specifies the size of the region of the prefix.
 .RE
 .RS
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the keys of the corresponding records.  This function does never fail and return an empty list even if no record corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+.RE
+.RS
+Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcbdbfwmkeys2' is used in order to get forward matching string keys in a B+ tree database object.
+.PP
+.RS
+.br
+\fBTCLIST *tcbdbfwmkeys2(TCBDB *\fIbdb\fB, const char *\fIpstr\fB, int \fImax\fB);\fR
+.RS
+`\fIbdb\fR' specifies the B+ tree database object.
+.RE
+.RS
+`\fIpstr\fR' specifies the string of the prefix.
+.RE
+.RS
+`\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
+.RE
+.RS
+The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -768,7 +793,7 @@ The function `tcbdbsync' is used in order to synchronize updated contents of a B
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-This function is useful when another process connects the same database file.
+This function is useful when another process connects to the same database file.
 .RE
 .RE
 .PP
@@ -850,7 +875,7 @@ The function `tcbdbtranbegin' is used in order to begin the transaction of a B+ 
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-The database is locked by the thread while the transaction so that only one transaction can be activated with a database object at the same time.  Thus, the serializable isolation level is assumed if every database operation is performed in the transaction.  If the database is closed during transaction, the transaction is aborted implicitly.
+The database is locked by the thread while the transaction so that only one transaction can be activated with a database object at the same time.  Thus, the serializable isolation level is assumed if every database operation is performed in the transaction.  Because all pages are cached on memory while the transaction, the amount of referred records is limited by the memory capacity.  If the database is closed during transaction, the transaction is aborted implicitly.
 .RE
 .RE
 .PP

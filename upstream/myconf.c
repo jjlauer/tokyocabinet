@@ -82,7 +82,7 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
   }
   asiz = size + 16;
   if(asiz < ZLIBBUFSIZ) asiz = ZLIBBUFSIZ;
-  if(!(buf = malloc(asiz))){
+  if(!(buf = MYMALLOC(asiz))){
     deflateEnd(&zs);
     return NULL;
   }
@@ -95,8 +95,8 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
     osiz = ZLIBBUFSIZ - zs.avail_out;
     if(bsiz + osiz > asiz){
       asiz = asiz * 2 + osiz;
-      if(!(swap = realloc(buf, asiz))){
-        free(buf);
+      if(!(swap = MYREALLOC(buf, asiz))){
+        MYFREE(buf);
         deflateEnd(&zs);
         return NULL;
       }
@@ -108,15 +108,15 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
     zs.avail_out = ZLIBBUFSIZ;
   }
   if(rv != Z_STREAM_END){
-    free(buf);
+    MYFREE(buf);
     deflateEnd(&zs);
     return NULL;
   }
   osiz = ZLIBBUFSIZ - zs.avail_out;
   if(bsiz + osiz + 1 > asiz){
     asiz = asiz * 2 + osiz;
-    if(!(swap = realloc(buf, asiz))){
-      free(buf);
+    if(!(swap = MYREALLOC(buf, asiz))){
+      MYFREE(buf);
       deflateEnd(&zs);
       return NULL;
     }
@@ -154,7 +154,7 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
   }
   asiz = size * 2 + 16;
   if(asiz < ZLIBBUFSIZ) asiz = ZLIBBUFSIZ;
-  if(!(buf = malloc(asiz))){
+  if(!(buf = MYMALLOC(asiz))){
     inflateEnd(&zs);
     return NULL;
   }
@@ -167,8 +167,8 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
     osiz = ZLIBBUFSIZ - zs.avail_out;
     if(bsiz + osiz >= asiz){
       asiz = asiz * 2 + osiz;
-      if(!(swap = realloc(buf, asiz))){
-        free(buf);
+      if(!(swap = MYREALLOC(buf, asiz))){
+        MYFREE(buf);
         inflateEnd(&zs);
         return NULL;
       }
@@ -180,15 +180,15 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
     zs.avail_out = ZLIBBUFSIZ;
   }
   if(rv != Z_STREAM_END){
-    free(buf);
+    MYFREE(buf);
     inflateEnd(&zs);
     return NULL;
   }
   osiz = ZLIBBUFSIZ - zs.avail_out;
   if(bsiz + osiz >= asiz){
     asiz = asiz * 2 + osiz;
-    if(!(swap = realloc(buf, asiz))){
-      free(buf);
+    if(!(swap = MYREALLOC(buf, asiz))){
+      MYFREE(buf);
       inflateEnd(&zs);
       return NULL;
     }

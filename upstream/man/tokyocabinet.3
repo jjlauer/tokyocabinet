@@ -1,17 +1,19 @@
-.TH "TOKYOCABINET" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
+.TH "TOKYOCABINET" 3 "2008-06-18" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tokyocabinet \- a modern implementation of DBM
 
 .SH INTRODUCTION
 .PP
-Tokyo Cabinet is a library of routines for managing a database.  The database is a simple data file containing records, each is a pair of a key and a value.  Every key and value is serial bytes with variable length.  Both binary data and character string can be used as a key and a value.  There is neither concept of data tables nor data types.  Records are organized in hash table or B+ tree.
+Tokyo Cabinet is a library of routines for managing a database.  The database is a simple data file containing records, each is a pair of a key and a value.  Every key and value is serial bytes with variable length.  Both binary data and character string can be used as a key and a value.  There is neither concept of data tables nor data types.  Records are organized in hash table, B+ tree, or fixed\-length array.
 .PP
 As for database of hash table, each key must be unique within a database, so it is impossible to store two or more records with a key overlaps.  The following access methods are provided to the database: storing a record with a key and a value, deleting a record by a key, retrieving a record by a key.  Moreover, traversal access to every key are provided, although the order is arbitrary.  These access methods are similar to ones of DBM (or its followers: NDBM and GDBM) library defined in the UNIX standard.  Tokyo Cabinet is an alternative for DBM because of its higher performance.
 .PP
 As for database of B+ tree, records whose keys are duplicated can be stored.  Access methods of storing, deleting, and retrieving are provided as with the database of hash table.  Records are stored in order by a comparison function assigned by a user.  It is possible to access each record with the cursor in ascending or descending order.  According to this mechanism, forward matching search for strings and range search for integers are realized.  Moreover, transaction is available in database of B+ tree.
 .PP
-Tokyo Cabinet is written in the C language, and provided as API of C.  Tokyo Cabinet is available on platforms which have API conforming to C99 and POSIX.  Tokyo Cabinet is a free software licensed under the GNU Lesser General Public License.
+As for database of fixed\-length array, records are stored with unique natural numbers.  It is impossible to store two or more records with a key overlaps.  Moreover, the length of each record is limited by the specified length.  Provided operations are the same as ones of hash database.
+.PP
+Tokyo Cabinet is written in the C language, and provided as API of C, Perl, Ruby, and Java.  Tokyo Cabinet is available on platforms which have API conforming to C99 and POSIX.  Tokyo Cabinet is a free software licensed under the GNU Lesser General Public License.
 
 .SH THE DINOSAUR WING OF THE DBM FORK
 .PP
@@ -44,7 +46,7 @@ Tokyo Cabinet attains improvement in retrieval by loading RAM with the whole of 
 .PP
 If the number of elements of a bucket array is about half of records stored within a database, although it depends on characteristic of the input, the probability of collision of hash values is about 56.7% (36.8% if the same, 21.3% if twice, 11.5% if four times, 6.0% if eight times).  In such case, it is possible to retrieve a record by two or less paths of file operations.  If it is made into a performance index, in order to handle a database containing one million of records, a bucket array with half a million of elements is needed.  The size of each element is 4 bytes.  That is, if 2M bytes of RAM is available, a database containing one million records can be handled.
 .PP
-Traditional DBM provides two modes of the storing operations: `insert' and `replace'.  In the case a key overlaps an existing record, the insert mode keeps the existing value, while the replace mode transposes it to the specified value.  In addition to the two modes, Tokyo Cabinet provides `concatenate' mode.  In the mode, the specified value is concatenated at the end of the existing value and stored.  This feature is useful when adding a element to a value as an array.  Moreover, although DBM has a method to fetch out a value from a database only by reading the whole of a region of a record, Tokyo Cabinet has a method to fetch out a part of a region of a value.  When a value is treated as an array, this feature is also useful.
+Traditional DBM provides two modes of the storing operations: `insert' and `replace'.  In the case a key overlaps an existing record, the insert mode keeps the existing value, while the replace mode transposes it to the specified value.  In addition to the two modes, Tokyo Cabinet provides `concatenate' mode.  In the mode, the specified value is concatenated at the end of the existing value and stored.  This feature is useful when adding a element to a value as an array.
 .PP
 Generally speaking, while succession of updating, fragmentation of available regions occurs, and the size of a database grows rapidly.  Tokyo Cabinet deal with this problem by coalescence of dispensable regions and reuse of them, and featuring of optimization of a database.  When overwriting a record with a value whose size is greater than the existing one, it is necessary to remove the region to another position of the file.  Because the time complexity of the operation depends on the size of the region of a record, extending values successively is inefficient.  However, Tokyo Cabinet deal with this problem by alignment.  If increment can be put in padding, it is not necessary to remove the region.
 
@@ -58,9 +60,17 @@ B+ tree database features transaction mechanism.  It is possible to commit a ser
 .PP
 Each pages of B+ tree can be stored with compressed.  Two compression method; Deflate of ZLIB and Block Sorting, are supported.  Because each record in a page has similar patterns, high efficiency of compression is expected due to the Lempel\-Ziv or the BWT algorithms.  In case handling text data, the size of a database is reduced to about 25%.  If the scale of a database is large and disk I/O is the bottleneck, featuring compression makes the processing speed improved to a large extent.
 
+.SH NAIVE IMPLEMENTATION OF FIXED\-LENGTH DATABASE
+.PP
+Fixed\-length database has restrictions that each key should be a natural number and that the length of each value is limited.  However, time efficiency and space efficiency are higher than the other data structures as long as the use case is within the restriction.
+.PP
+Because the whole region of the database is mapped on memory by the `mmap' call and referred as a multidimensional array, the overhead related to the file I/O is minimized.  Due to this simple structure, fixed\-length database works faster than hash database, and its concurrency in multi\-thread environment is prominent.
+.PP
+The size of the database is proportional to the range of keys and the limit size of each value.  That is, the smaller the range of keys is or the smaller the length of each value is, the higher the space efficiency is.  For example, if the maximum key is 1000000 and the limit size of the value is 100 bytes, the size of the database will be about 100MB.  Because regions around referred records are only loaded on the RAM, you can increase the size of the database to the size of the virtual memory.
+
 .SH SIMPLE BUT VARIOUS INTERFACES
 .PP
-Tokyo Cabinet provides simple API based on the object oriented design.  Every operation for database is encapsulated and published as lucid methods as `open' (connect), `close' (disconnect), `put' (insert), `out' (remove), `get' (retrieve), and so on.  Because the two of the hash and the B+ tree database APIs are very similar with each other, porting an application from one to the other is easy.
+Tokyo Cabinet provides simple API based on the object oriented design.  Every operation for database is encapsulated and published as lucid methods as `open' (connect), `close' (disconnect), `put' (insert), `out' (remove), `get' (retrieve), and so on.  Because the three of hash, B+ tree, and fixed\-length array database APIs are very similar with each other, porting an application from one to the other is easy.
 .PP
 Tokyo Cabinet provides two modes to connect to a database: `reader' and `writer'.  A reader can perform retrieving but neither storing nor deleting.  A writer can perform all access methods.  Exclusion control between processes is performed when connecting to a database by file locking.  While a writer is connected to a database, neither readers nor writers can be connected.  While a reader is connected to a database, other readers can be connect, but writers can not.  According to this mechanism, data consistency is guaranteed with simultaneous connections in multitasking environment.
 .PP
@@ -68,7 +78,7 @@ Functions of API of Tokyo cabinet are reentrant and available in multi\-thread e
 .PP
 The utility API is also provided.  Such fundamental data structure as list and map are included.  And, some useful features; memory pool, string processing, encoding, are also included.
 .PP
-Four kinds of API; the utility API, the hash database API, the B+ tree database API, and the abstract database API, are provided for the C language.  Command line interfaces are also provided corresponding to each API.  They are usuful for prototyping, test, and debugging.  Except for C, Tokyo Cabinet provides APIs for Perl, Ruby, and Java.  The Perl API has methods calling the hash database API and the B+ tree database API with XS language.  The Java API has native methods calling the hash database API and the B+ tree API with Java Native Interface.  The Ruby API has methods calling the hash database API and the B+ tree database API as modules of Ruby.  APIs for other languages will hopefully be provided by third party.
+Five kinds of API; the utility API, the hash database API, the B+ tree database API, the fixed\-length database API, and the abstract database API, are provided for the C language.  Command line interfaces are also provided corresponding to each API.  They are useful for prototyping, test, and debugging.  Except for C, Tokyo Cabinet provides APIs for Perl, Ruby, and Java.  The Perl API has methods calling the hash database API, the B+ tree database API, and the fixed\-length database API with XS language.  The Java API has native methods calling the hash database API, the B+ tree database API, and the fixed\-length database API with Java Native Interface.  The Ruby API has methods calling the hash database API, the B+ tree database API, and the fixed length database API as modules of Ruby.  APIs for other languages will hopefully be provided by third party.
 .PP
 In cases that multiple processes access a database at the same time or some processes access a database on a remote host, the remote service is useful.  The remote service is composed of a database server and its access library.  Applications can access the database server by using the remote database API.  The server implements HTTP and the memcached protocol partly so that client programs on almost all platforms can access the server easily.
 

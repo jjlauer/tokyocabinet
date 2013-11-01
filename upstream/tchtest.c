@@ -40,9 +40,9 @@ static int runrcat(int argc, char **argv);
 static int runmisc(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
-                     bool mt, int opts, int rcnum, int omode, bool as);
-static int procread(const char *path, bool mt, int rcnum, int omode, bool wb);
-static int procremove(const char *path, bool mt, int rcnum, int omode);
+                     bool mt, int opts, int rcnum, int omode, bool as, bool rnd);
+static int procread(const char *path, bool mt, int rcnum, int omode, bool wb, bool rnd);
+static int procremove(const char *path, bool mt, int rcnum, int omode, bool rnd);
 static int procrcat(const char *path, int rnum, int bnum, int apow, int fpow,
                     bool mt, int opts, int rcnum, int omode, int pnum, bool rl);
 static int procmisc(const char *path, int rnum, bool mt, int opts, int omode);
@@ -82,10 +82,10 @@ static void usage(void){
   fprintf(stderr, "%s: test cases of the hash database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s write [-mt] [-tl] [-td|-tb] [-rc num] [-nl|-nb] [-as] path rnum"
+  fprintf(stderr, "  %s write [-mt] [-tl] [-td|-tb] [-rc num] [-nl|-nb] [-as] [-rnd] path rnum"
           " [bnum [apow [fpow]]]\n", g_progname);
-  fprintf(stderr, "  %s read [-mt] [-rc num] [-nl|-nb] [-wb] path\n", g_progname);
-  fprintf(stderr, "  %s remove [-mt] [-rc num] [-nl|-nb] path\n", g_progname);
+  fprintf(stderr, "  %s read [-mt] [-rc num] [-nl|-nb] [-wb] [-rnd] path\n", g_progname);
+  fprintf(stderr, "  %s remove [-mt] [-rc num] [-nl|-nb] [-rnd] path\n", g_progname);
   fprintf(stderr, "  %s rcat [-mt] [-rc num] [-tl] [-td|-tb] [-nl|-nb] [-pn num] [-rl]"
           " path rnum [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s misc [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
@@ -154,6 +154,7 @@ static int runwrite(int argc, char **argv){
   int rcnum = 0;
   int omode = 0;
   bool as = false;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -173,6 +174,8 @@ static int runwrite(int argc, char **argv){
         omode |= HDBOLCKNB;
       } else if(!strcmp(argv[i], "-as")){
         as = true;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -196,7 +199,7 @@ static int runwrite(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procwrite(path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as);
+  int rv = procwrite(path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as, rnd);
   return rv;
 }
 
@@ -208,6 +211,7 @@ static int runread(int argc, char **argv){
   int rcnum = 0;
   int omode = 0;
   bool wb = false;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -221,6 +225,8 @@ static int runread(int argc, char **argv){
         omode |= HDBOLCKNB;
       } else if(!strcmp(argv[i], "-wb")){
         wb = true;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -231,7 +237,7 @@ static int runread(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procread(path, mt, rcnum, omode, wb);
+  int rv = procread(path, mt, rcnum, omode, wb, rnd);
   return rv;
 }
 
@@ -242,6 +248,7 @@ static int runremove(int argc, char **argv){
   bool mt = false;
   int rcnum = 0;
   int omode = 0;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -253,6 +260,8 @@ static int runremove(int argc, char **argv){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= HDBOLCKNB;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -263,7 +272,7 @@ static int runremove(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procremove(path, mt, rcnum, omode);
+  int rv = procremove(path, mt, rcnum, omode, rnd);
   return rv;
 }
 
@@ -413,10 +422,10 @@ static int runwicked(int argc, char **argv){
 
 /* perform write command */
 static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
-                     bool mt, int opts, int rcnum, int omode, bool as){
+                     bool mt, int opts, int rcnum, int omode, bool as, bool rnd){
   iprintf("<Writing Test>\n  path=%s  rnum=%d  bnum=%d  apow=%d  fpow=%d  mt=%d"
-          "  opts=%d  rcnum=%d  omode=%d  as=%d\n\n",
-          path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as);
+          "  opts=%d  rcnum=%d  omode=%d  as=%d  rnd=%d\n\n",
+          path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as, rnd);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
@@ -433,13 +442,14 @@ static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
     eprint(hdb, "tchdbsetcache");
     err = true;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
+  if(!rnd) omode |= HDBOTRUNC;
+  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | omode)){
     eprint(hdb, "tchdbopen");
     err = true;
   }
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
-    int len = sprintf(buf, "%08d", i);
+    int len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     if(as){
       if(!tchdbputasync(hdb, buf, len, buf, len)){
         eprint(hdb, "tchdbput");
@@ -474,9 +484,9 @@ static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
 
 
 /* perform read command */
-static int procread(const char *path, bool mt, int rcnum, int omode, bool wb){
-  iprintf("<Reading Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d  wb=%d\n",
-          path, mt, rcnum, omode, wb);
+static int procread(const char *path, bool mt, int rcnum, int omode, bool wb, bool rnd){
+  iprintf("<Reading Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d  wb=%d  rnd=%d\n\n",
+          path, mt, rcnum, omode, wb, rnd);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
@@ -496,24 +506,24 @@ static int procread(const char *path, bool mt, int rcnum, int omode, bool wb){
   int rnum = tchdbrnum(hdb);
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", i);
+    int ksiz = sprintf(kbuf, "%08d", rnd ? myrand(rnum) + 1 : i);
     int vsiz;
     if(wb){
       char vbuf[RECBUFSIZ];
       int vsiz = tchdbget3(hdb, kbuf, ksiz, vbuf, RECBUFSIZ);
-      if(vsiz < 0){
+      if(vsiz < 0 && !(rnd && tchdbecode(hdb) == TCENOREC)){
         eprint(hdb, "tchdbget3");
         err = true;
         break;
       }
     } else {
       char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
-      if(!vbuf){
+      if(!vbuf && !(rnd && tchdbecode(hdb) == TCENOREC)){
         eprint(hdb, "tchdbget");
         err = true;
         break;
       }
-      free(vbuf);
+      tcfree(vbuf);
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -536,8 +546,9 @@ static int procread(const char *path, bool mt, int rcnum, int omode, bool wb){
 
 
 /* perform remove command */
-static int procremove(const char *path, bool mt, int rcnum, int omode){
-  iprintf("<Removing Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d\n", path, mt, rcnum, omode);
+static int procremove(const char *path, bool mt, int rcnum, int omode, bool rnd){
+  iprintf("<Removing Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d  rnd=%d\n\n",
+          path, mt, rcnum, omode, rnd);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
@@ -557,8 +568,8 @@ static int procremove(const char *path, bool mt, int rcnum, int omode){
   int rnum = tchdbrnum(hdb);
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", i);
-    if(!tchdbout(hdb, kbuf, ksiz)){
+    int ksiz = sprintf(kbuf, "%08d", rnd ? myrand(rnum) + 1 : i);
+    if(!tchdbout(hdb, kbuf, ksiz) && !(rnd && tchdbecode(hdb) == TCENOREC)){
       eprint(hdb, "tchdbout");
       err = true;
       break;
@@ -712,10 +723,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(vsiz != ksiz || memcmp(vbuf, kbuf, vsiz)){
       eprint(hdb, "(validation)");
       err = true;
-      free(vbuf);
+      tcfree(vbuf);
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -748,7 +759,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
       eprint(hdb, "(validation)");
       err = true;
-      free(rbuf);
+      tcfree(rbuf);
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
@@ -756,7 +767,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       fflush(stdout);
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
-    free(rbuf);
+    tcfree(rbuf);
   }
   iprintf("word writing:\n");
   const char *words[] = {
@@ -884,8 +895,8 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
         }
         break;
       }
-      free(vbuf);
-      free(kbuf);
+      tcfree(vbuf);
+      tcfree(kbuf);
     } else {
       char kbuf[RECBUFSIZ];
       int ksiz = myrand(RECBUFSIZ);
@@ -928,18 +939,18 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       if(vsiz != i % RECBUFSIZ && vsiz != PATH_MAX){
         eprint(hdb, "(validation)");
         err = true;
-        free(vbuf);
+        tcfree(vbuf);
         break;
       }
     } else {
       if(vbuf || tchdbecode(hdb) != TCENOREC){
         eprint(hdb, "(validation)");
         err = true;
-        free(vbuf);
+        tcfree(vbuf);
         break;
       }
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -974,10 +985,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(vsiz != ksiz || memcmp(vbuf, kbuf, vsiz)){
       eprint(hdb, "(validation)");
       err = true;
-      free(vbuf);
+      tcfree(vbuf);
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -999,10 +1010,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
       eprint(hdb, "(validation)");
       err = true;
-      free(rbuf);
+      tcfree(rbuf);
       break;
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(rnum > 250) putchar('.');
   }
   if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
@@ -1020,11 +1031,11 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     if(!vbuf){
       eprint(hdb, "tchdbget");
       err = true;
-      free(kbuf);
+      tcfree(kbuf);
       break;
     }
-    free(vbuf);
-    free(kbuf);
+    tcfree(vbuf);
+    tcfree(kbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -1047,18 +1058,18 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       if(!tchdbputcat(hdb, kbuf, ksiz, "0123456789", 10)){
         eprint(hdb, "tchdbputcat");
         err = true;
-        free(kbuf);
+        tcfree(kbuf);
         break;
       }
     } else {
       if(!tchdbout(hdb, kbuf, ksiz)){
         eprint(hdb, "tchdbout");
         err = true;
-        free(kbuf);
+        tcfree(kbuf);
         break;
       }
     }
-    free(kbuf);
+    tcfree(kbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -1235,7 +1246,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         err = true;
       }
       tcmapput(map, kbuf, ksiz, rbuf, vsiz);
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 11:
       putchar('B');
@@ -1243,21 +1254,21 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         eprint(hdb, "tchdbget");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 12:
       putchar('C');
       if(!(rbuf = tchdbget2(hdb, kbuf)) && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbget");
+        eprint(hdb, "tchdbget2");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 13:
       putchar('D');
       if(myrand(1) == 0) vsiz = 1;
       if((vsiz = tchdbget3(hdb, kbuf, ksiz, vbuf, vsiz)) < 0 && tchdbecode(hdb) != TCENOREC){
-        eprint(hdb, "tchdbget");
+        eprint(hdb, "tchdbget3");
         err = true;
       }
       break;
@@ -1289,7 +1300,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
           int iksiz;
           char *ikbuf = tchdbiternext(hdb, &iksiz);
           if(ikbuf){
-            free(ikbuf);
+            tcfree(ikbuf);
           } else {
             int ecode = tchdbecode(hdb);
             if(ecode != TCEINVALID && ecode != TCENOREC){
@@ -1344,7 +1355,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
       }
       tchdbdel(nhdb);
       unlink(npath);
-      free(npath);
+      tcfree(npath);
       if(!tchdboptimize(hdb, rnum / 50, -1, -1, -1)){
         eprint(hdb, "tchdboptimize");
         err = true;
@@ -1387,10 +1398,29 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         err = true;
       }
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
   }
   if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
+  int inum = 0;
+  int csiz;
+  char *cbuf = tchdbgetnext(hdb, NULL, -1, &csiz);
+  while(cbuf){
+    inum++;
+    putchar(':');
+    int nsiz;
+    char *nbuf = tchdbgetnext(hdb, cbuf, csiz, &nsiz);
+    free(cbuf);
+    cbuf = nbuf;
+    csiz = nsiz;
+    if(inum % 50 == 0) iprintf(" (%08d)\n", inum);
+  }
+  free(cbuf);
+  if(inum % 50 > 0) iprintf(" (%08d)\n", inum);
+  if(inum != tchdbrnum(hdb)){
+    eprint(hdb, "(validation)");
+    err = true;
+  }
   tcmapiterinit(map);
   int ksiz;
   const char *kbuf;
@@ -1407,7 +1437,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
       eprint(hdb, "(validation)");
       err = true;
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(!tchdbout(hdb, kbuf, ksiz)){
       eprint(hdb, "tchdbout");
       err = true;

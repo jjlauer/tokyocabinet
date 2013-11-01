@@ -31,7 +31,6 @@ static void usage(void);
 static void iprintf(const char *format, ...);
 static void eprint(TCADB *adb, const char *func);
 static int myrand(int range);
-static void deldb(const char *name);
 static int runwrite(int argc, char **argv);
 static int runread(int argc, char **argv);
 static int runremove(int argc, char **argv);
@@ -106,16 +105,6 @@ static void eprint(TCADB *adb, const char *func){
 /* get a random number */
 static int myrand(int range){
   return (int)((double)range * rand() / (RAND_MAX + 1.0));
-}
-
-
-/* delete the existing file of a database name */
-static void deldb(const char *name){
-  char path[PATH_MAX];
-  sprintf(path, "%s", name);
-  char *pv = strchr(path, '#');
-  if(pv) *pv = '\0';
-  unlink(path);
 }
 
 
@@ -250,7 +239,6 @@ static int runwicked(int argc, char **argv){
 /* perform write command */
 static int procwrite(const char *name, int rnum){
   iprintf("<Writing Test>\n  name=%s  rnum=%d\n\n", name, rnum);
-  deldb(name);
   bool err = false;
   double stime = tctime();
   TCADB *adb = tcadbnew();
@@ -306,7 +294,7 @@ static int procread(const char *name){
       err = true;
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -367,7 +355,6 @@ static int procremove(const char *name){
 /* perform rcat command */
 static int procrcat(const char *name, int rnum){
   iprintf("<Random Concatenating Test>\n  name=%s  rnum=%d\n\n", name, rnum);
-  deldb(name);
   int pnum = rnum / 5 + 1;
   bool err = false;
   double stime = tctime();
@@ -378,7 +365,7 @@ static int procrcat(const char *name, int rnum){
   }
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%d", myrand(pnum));
+    int ksiz = sprintf(kbuf, "%d", myrand(pnum) + 1);
     if(!tcadbputcat(adb, kbuf, ksiz, kbuf, ksiz)){
       eprint(adb, "tcadbputcat");
       err = true;
@@ -406,7 +393,6 @@ static int procrcat(const char *name, int rnum){
 /* perform misc command */
 static int procmisc(const char *name, int rnum){
   iprintf("<Random Concatenating Test>\n  name=%s  rnum=%d\n\n", name, rnum);
-  deldb(name);
   bool err = false;
   double stime = tctime();
   TCADB *adb = tcadbnew();
@@ -442,10 +428,10 @@ static int procmisc(const char *name, int rnum){
     } else if(vsiz != ksiz || memcmp(vbuf, kbuf, vsiz)){
       eprint(adb, "(validation)");
       err = true;
-      free(vbuf);
+      tcfree(vbuf);
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -478,7 +464,7 @@ static int procmisc(const char *name, int rnum){
     if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
       eprint(adb, "(validation)");
       err = true;
-      free(rbuf);
+      tcfree(rbuf);
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
@@ -486,7 +472,7 @@ static int procmisc(const char *name, int rnum){
       fflush(stdout);
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
-    free(rbuf);
+    tcfree(rbuf);
   }
   iprintf("word writing:\n");
   const char *words[] = {
@@ -581,11 +567,11 @@ static int procmisc(const char *name, int rnum){
     if(!vbuf){
       eprint(adb, "tcadbget");
       err = true;
-      free(kbuf);
+      tcfree(kbuf);
       break;
     }
-    free(vbuf);
-    free(kbuf);
+    tcfree(vbuf);
+    tcfree(kbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -621,7 +607,6 @@ static int procmisc(const char *name, int rnum){
 /* perform wicked command */
 static int procwicked(const char *name, int rnum){
   iprintf("<Wicked Writing Test>\n  name=%s  rnum=%d\n\n", name, rnum);
-  deldb(name);
   bool err = false;
   double stime = tctime();
   TCADB *adb = tcadbnew();
@@ -632,7 +617,7 @@ static int procwicked(const char *name, int rnum){
   TCMAP *map = tcmapnew2(rnum / 5);
   for(int i = 1; i <= rnum && !err; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%d", myrand(rnum));
+    int ksiz = sprintf(kbuf, "%d", myrand(rnum) + 1);
     char vbuf[RECBUFSIZ];
     int vsiz = myrand(RECBUFSIZ);
     memset(vbuf, '*', vsiz);
@@ -697,11 +682,11 @@ static int procwicked(const char *name, int rnum){
       break;
     case 8:
       putchar('8');
-      if((rbuf = tcadbget(adb, kbuf, ksiz, &vsiz)) != NULL) free(rbuf);
+      if((rbuf = tcadbget(adb, kbuf, ksiz, &vsiz)) != NULL) tcfree(rbuf);
       break;
     case 9:
       putchar('9');
-      if((rbuf = tcadbget2(adb, kbuf)) != NULL) free(rbuf);
+      if((rbuf = tcadbget2(adb, kbuf)) != NULL) tcfree(rbuf);
       break;
     case 10:
       putchar('A');
@@ -722,7 +707,7 @@ static int procwicked(const char *name, int rnum){
       for(int j = myrand(rnum) / 1000 + 1; j >= 0; j--){
         int iksiz;
         char *ikbuf = tcadbiternext(adb, &iksiz);
-        if(ikbuf) free(ikbuf);
+        if(ikbuf) tcfree(ikbuf);
       }
       break;
     default:
@@ -761,7 +746,7 @@ static int procwicked(const char *name, int rnum){
         err = true;
       }
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
   }
   if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
@@ -781,7 +766,7 @@ static int procwicked(const char *name, int rnum){
       eprint(adb, "(validation)");
       err = true;
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(!tcadbout(adb, kbuf, ksiz)){
       eprint(adb, "tcadbout");
       err = true;

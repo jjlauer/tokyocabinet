@@ -6,6 +6,7 @@
 #include <tcutil.h>
 #include <tchdb.h>
 #include <tcbdb.h>
+#include <tcfdb.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,11 +32,15 @@ int runwrite(int argc, char **argv);
 int runread(int argc, char **argv);
 int runbtwrite(int argc, char **argv);
 int runbtread(int argc, char **argv);
+int runflwrite(int argc, char **argv);
+int runflread(int argc, char **argv);
 int myrand(void);
 int dowrite(char *name, int rnum);
 int doread(char *name, int rnum);
 int dobtwrite(char *name, int rnum, int rnd);
 int dobtread(char *name, int rnum, int rnd);
+int doflwrite(char *name, int rnum);
+int doflread(char *name, int rnum);
 
 
 /* main routine */
@@ -55,6 +60,10 @@ int main(int argc, char **argv){
     rv = runbtwrite(argc, argv);
   } else if(!strcmp(argv[1], "btread")){
     rv = runbtread(argc, argv);
+  } else if(!strcmp(argv[1], "flwrite")){
+    rv = runflwrite(argc, argv);
+  } else if(!strcmp(argv[1], "flread")){
+    rv = runflread(argc, argv);
   } else {
     usage();
   }
@@ -71,6 +80,8 @@ void usage(void){
   fprintf(stderr, "  %s read name rnum\n", progname);
   fprintf(stderr, "  %s btwrite [-rnd] name rnum\n", progname);
   fprintf(stderr, "  %s btread [-rnd] name rnum\n", progname);
+  fprintf(stderr, "  %s flwrite name rnum\n", progname);
+  fprintf(stderr, "  %s flread name rnum\n", progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -186,6 +197,58 @@ int runbtread(int argc, char **argv){
   rnum = atoi(rstr);
   if(rnum < 1) usage();
   rv = dobtread(name, rnum, rnd);
+  return rv;
+}
+
+
+/* parse arguments of flwrite command */
+int runflwrite(int argc, char **argv){
+  char *name, *rstr;
+  int i, rnum, rv;
+  name = NULL;
+  rstr = NULL;
+  rnum = 0;
+  for(i = 2; i < argc; i++){
+    if(!name && argv[i][0] == '-'){
+      usage();
+    } else if(!name){
+      name = argv[i];
+    } else if(!rstr){
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!name || !rstr) usage();
+  rnum = atoi(rstr);
+  if(rnum < 1) usage();
+  rv = doflwrite(name, rnum);
+  return rv;
+}
+
+
+/* parse arguments of read command */
+int runflread(int argc, char **argv){
+  char *name, *rstr;
+  int i, rnum, rv;
+  name = NULL;
+  rstr = NULL;
+  rnum = 0;
+  for(i = 2; i < argc; i++){
+    if(!name && argv[i][0] == '-'){
+      usage();
+    } else if(!name){
+      name = argv[i];
+    } else if(!rstr){
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!name || !rstr) usage();
+  rnum = atoi(rstr);
+  if(rnum < 1) usage();
+  rv = doflread(name, rnum);
   return rv;
 }
 
@@ -386,6 +449,96 @@ int dobtread(char *name, int rnum, int rnd){
     return 1;
   }
   tcbdbdel(bdb);
+  if(showprgr && !err) printf("ok\n\n");
+  return err ? 1 : 0;
+}
+
+
+/* perform flwrite command */
+int doflwrite(char *name, int rnum){
+  TCFDB *fdb;
+  int i, err, len;
+  char buf[RECBUFSIZ];
+  if(showprgr) printf("<Writing Test of Hash>\n  name=%s  rnum=%d\n\n", name, rnum);
+  /* open a database */
+  fdb = tcfdbnew();
+  tcfdbtune(fdb, 8, 1024 + rnum * 9);
+  if(!tcfdbopen(fdb, name, FDBOWRITER | FDBOCREAT | FDBOTRUNC)){
+    fprintf(stderr, "tcfdbopen failed\n");
+    tcfdbdel(fdb);
+    return 1;
+  }
+  err = FALSE;
+  /* loop for each record */
+  for(i = 1; i <= rnum; i++){
+    /* store a record */
+    len = sprintf(buf, "%08d", i);
+    if(!tcfdbput(fdb, i, buf, len)){
+      fprintf(stderr, "tcfdbput failed\n");
+      err = TRUE;
+      break;
+    }
+    /* print progression */
+    if(showprgr && rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0){
+        printf(" (%08d)\n", i);
+        fflush(stdout);
+      }
+    }
+  }
+  /* close the database */
+  if(!tcfdbclose(fdb)){
+    fprintf(stderr, "tcfdbclose failed\n");
+    tcfdbdel(fdb);
+    return 1;
+  }
+  tcfdbdel(fdb);
+  if(showprgr && !err) printf("ok\n\n");
+  return err ? 1 : 0;
+}
+
+
+/* perform flread command */
+int doflread(char *name, int rnum){
+  TCFDB *fdb;
+  int i, err;
+  char vbuf[RECBUFSIZ];
+  if(showprgr) printf("<Reading Test of Hash>\n  name=%s  rnum=%d\n\n", name, rnum);
+  /* open a database */
+  fdb = tcfdbnew();
+  if(!tcfdbopen(fdb, name, FDBOREADER)){
+    fprintf(stderr, "tcfdbopen failed\n");
+    tcfdbdel(fdb);
+    return 1;
+  }
+  err = FALSE;
+  /* loop for each record */
+  for(i = 1; i <= rnum; i++){
+    /* store a record */
+    if(tcfdbget4(fdb, i, vbuf, RECBUFSIZ) == -1){
+      fprintf(stderr, "tcfdbget3 failed\n");
+      err = TRUE;
+      break;
+    }
+    /* print progression */
+    if(showprgr && rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0){
+        printf(" (%08d)\n", i);
+        fflush(stdout);
+      }
+    }
+  }
+  /* close the database */
+  if(!tcfdbclose(fdb)){
+    fprintf(stderr, "tcfdbclose failed\n");
+    tcfdbdel(fdb);
+    return 1;
+  }
+  tcfdbdel(fdb);
   if(showprgr && !err) printf("ok\n\n");
   return err ? 1 : 0;
 }

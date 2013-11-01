@@ -34,6 +34,7 @@ __TCADB_CLINKAGEBEGIN
 #include <tcutil.h>
 #include <tchdb.h>
 #include <tcbdb.h>
+#include <tcfdb.h>
 
 
 
@@ -47,6 +48,7 @@ typedef struct {                         /* type of structure for an abstract da
   TCMDB *mdb;                            /* on-memory database object */
   TCHDB *hdb;                            /* hash database object */
   TCBDB *bdb;                            /* B+ tree database object */
+  TCFDB *fdb;                            /* fixed-length databae object */
   int64_t capnum;                        /* capacity number of records */
   int64_t capsiz;                        /* capacity size of using memory */
   uint32_t capcnt;                       /* count for capacity check */
@@ -68,17 +70,21 @@ void tcadbdel(TCADB *adb);
    `adb' specifies the abstract database object.
    `name' specifies the name of the database.  If it is "*", the database will be an on-memory
    database.  If its suffix is ".tch", the database will be a hash database.  If its suffix is
-   ".tcb", the database will be a B+ tree database.  Otherwise, this function fails.  Tuning
-   parameters can trail the name, separated by "#".  Each parameter is composed of the name and
-   the number, separated by "=".  On-memory database supports "bnum", "capnum", and "capsiz".
-   Hash database supports "mode", "bnum", "apow", "fpow", "opts", and "rcnum".  B+ tree database
-   supports "mode", "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum", and "ncnum".
-   "capnum" specifies the capacity number of records.  "capsiz" specifies the capacity size of
-   using memory.  Records spilled the capacity are removed by the storing order.  "mode" should
-   be "w" of writer or "r" of reader.  The default is writer.  "opts" can contains "l" of large
-   option, "d" of Deflate option, and "b" of TCBS option.  For example,
-   "casket.tch#bnum=1000000#opts=ld" means that the name of the database file is "casket.tch",
-   and the bucket number is 1000000, and the options are large and Deflate.
+   ".tcb", the database will be a B+ tree database.  If its suffix is ".tcf", the database will be
+   a fixed-length database.  Otherwise, this function fails.  Tuning parameters can trail the
+   name, separated by "#".  Each parameter is composed of the name and the number, separated by
+   "=".  On-memory database supports "bnum", "capnum", and "capsiz".  Hash database supports
+   "mode", "bnum", "apow", "fpow", "opts", and "rcnum".  B+ tree database supports "mode",
+   "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum", and "ncnum".  Fixed-length database
+   supports "mode", "width", and "limsiz".  "capnum" specifies the capacity number of records.
+   "capsiz" specifies the capacity size of using memory.  Records spilled the capacity are removed
+   by the storing order.  "mode" can contain "w" of writer, "r" of reader, "c" of creating, "t" of
+   truncating, "e" of no locking, and "f" of non-blocking lock.  The default mode is relevant to
+   "wc".  "opts" can contains "l" of large option, "d" of Deflate option, and "b" of TCBS option.
+   "width" specifies the width of the value of each record.  "limsiz" specifies the limit size of
+   the database file.  For example, "casket.tch#bnum=1000000#opts=ld" means that the name of the
+   database file is "casket.tch", and the bucket number is 1000000, and the options are large and
+   Deflate.
    If successful, the return value is true, else, it is false. */
 bool tcadbopen(TCADB *adb, const char *name);
 
@@ -243,6 +249,33 @@ void *tcadbiternext(TCADB *adb, int *sp);
    is arbitrary, so it is not assured that the order of storing matches the one of the traversal
    access. */
 char *tcadbiternext2(TCADB *adb);
+
+
+/* Get forward matching keys in an abstract database object.
+   `adb' specifies the abstract database object.
+   `pbuf' specifies the pointer to the region of the prefix.
+   `psiz' specifies the size of the region of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tcadbfwmkeys(TCADB *adb, const void *pbuf, int psiz, int max);
+
+
+/* Get forward matching string keys in an abstract database object.
+   `adb' specifies the abstract database object.
+   `pstr' specifies the string of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tcadbfwmkeys2(TCADB *adb, const char *pstr, int max);
 
 
 /* Synchronize updated contents of an abstract database object with the file and the device.

@@ -674,7 +674,6 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
       targs[i].nc = nc;
       targs[i].id = i;
       targs[i].map = map;
-      targs[i].map = map;
       if(pthread_create(threads + i, NULL, threadwicked, targs + i) != 0){
         eprint(bdb, "pthread_create");
         targs[i].id = -1;
@@ -725,7 +724,7 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
           err = true;
         }
       }
-      free(rbuf);
+      tcfree(rbuf);
       if(i % 50 == 0) iprintf(" (%08d)\n", i);
     }
     if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
@@ -866,7 +865,7 @@ static void *threadread(void *targ){
         eprint(bdb, "tcbdbget");
         err = true;
       }
-      free(vbuf);
+      tcfree(vbuf);
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -1030,7 +1029,7 @@ static void *threadwicked(void *targ){
         err = true;
       }
       if(!nc) tcmapput(map, kbuf, ksiz, rbuf, vsiz);
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 11:
       if(id == 0) putchar('B');
@@ -1038,20 +1037,20 @@ static void *threadwicked(void *targ){
         eprint(bdb, "tcbdbget");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 12:
       if(id == 0) putchar('C');
       if(!(rbuf = tcbdbget2(bdb, kbuf)) && tcbdbecode(bdb) != TCENOREC){
-        eprint(bdb, "tcbdbget");
+        eprint(bdb, "tcbdbget2");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 13:
       if(id == 0) putchar('D');
       if(!tcbdbget3(bdb, kbuf, ksiz, &vsiz) && tcbdbecode(bdb) != TCENOREC){
-        eprint(bdb, "tcbdbget");
+        eprint(bdb, "tcbdbget3");
         err = true;
       }
       break;
@@ -1200,12 +1199,12 @@ static void *threadtypical(void *targ){
             int vsiz;
             char *vbuf = tcbdbcurval(cur, &vsiz);
             if(vbuf){
-              free(vbuf);
+              tcfree(vbuf);
             } else if(tcbdbecode(bdb) != TCENOREC){
               eprint(bdb, "tcbdbcurval");
               err = true;
             }
-            free(kbuf);
+            tcfree(kbuf);
           } else if(tcbdbecode(bdb) != TCENOREC){
             eprint(bdb, "tcbdbcurkey");
             err = true;
@@ -1225,12 +1224,12 @@ static void *threadtypical(void *targ){
             int vsiz;
             char *vbuf = tcbdbcurval(cur, &vsiz);
             if(vbuf){
-              free(vbuf);
+              tcfree(vbuf);
             } else if(tcbdbecode(bdb) != TCENOREC){
               eprint(bdb, "tcbdbcurval");
               err = true;
             }
-            free(kbuf);
+            tcfree(kbuf);
           } else if(tcbdbecode(bdb) != TCENOREC){
             eprint(bdb, "tcbdbcurkey");
             err = true;
@@ -1250,12 +1249,12 @@ static void *threadtypical(void *targ){
             int vsiz;
             char *vbuf = tcbdbcurval(cur, &vsiz);
             if(vbuf){
-              free(vbuf);
+              tcfree(vbuf);
             } else if(tcbdbecode(bdb) != TCENOREC){
               eprint(bdb, "tcbdbcurval");
               err = true;
             }
-            free(kbuf);
+            tcfree(kbuf);
           } else if(tcbdbecode(bdb) != TCENOREC){
             eprint(bdb, "tcbdbcurkey");
             err = true;
@@ -1271,12 +1270,12 @@ static void *threadtypical(void *targ){
         if(map){
           int msiz;
           const char *mbuf = tcmapget(map, buf, len, &msiz);
-          if(msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
+          if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
             eprint(bdb, "(validation)");
             err = true;
           }
         }
-        free(vbuf);
+        tcfree(vbuf);
       } else {
         if(tcbdbecode(bdb) != TCENOREC){
           eprint(bdb, "tcbdbget");
@@ -1309,7 +1308,7 @@ static void *threadtypical(void *targ){
           eprint(bdb, "(validation)");
           err = true;
         }
-        free(vbuf);
+        tcfree(vbuf);
       } else {
         eprint(bdb, "(validation)");
         err = true;

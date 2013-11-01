@@ -40,7 +40,8 @@ static int runconf(int argc, char **argv);
 static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *base);
 static int procbase(const char *ibuf, int isiz, bool dec);
 static int procquote(const char *ibuf, int isiz, bool dec);
-static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on);
+static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on,
+                    bool hd, bool bd, int part);
 static int procpack(const char *ibuf, int isiz, bool dec, bool bwt);
 static int proctcbs(const char *ibuf, int isiz, bool dec);
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz);
@@ -92,7 +93,8 @@ static void usage(void){
   fprintf(stderr, "  %s url [-d] [-br] [-rs base] [file]\n", g_progname);
   fprintf(stderr, "  %s base [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s quote [-d] [file]\n", g_progname);
-  fprintf(stderr, "  %s mime [-d] [-en name] [-q] [file]\n", g_progname);
+  fprintf(stderr, "  %s mime [-d] [-en name] [-q] [-on] [-hd] [-bd] [-part num] [file]\n",
+          g_progname);
   fprintf(stderr, "  %s pack [-d] [-bwt] [file]\n", g_progname);
   fprintf(stderr, "  %s tcbs [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s zlib [-d] [-gz] [file]\n", g_progname);
@@ -154,7 +156,7 @@ static int runurl(int argc, char **argv){
   }
   int rv = procurl(ibuf, isiz, dec, br, base);
   if(path && path[0] == '@' && !br) printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -190,7 +192,7 @@ static int runbase(int argc, char **argv){
   }
   int rv = procbase(ibuf, isiz, dec);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -226,7 +228,7 @@ static int runquote(int argc, char **argv){
   }
   int rv = procquote(ibuf, isiz, dec);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -238,6 +240,9 @@ static int runmime(int argc, char **argv){
   char *ename = NULL;
   bool qb = false;
   bool on = false;
+  bool hd = false;
+  bool bd = false;
+  int part = -1;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
@@ -249,6 +254,13 @@ static int runmime(int argc, char **argv){
         qb = true;
       } else if(!strcmp(argv[i], "-on")){
         on = true;
+      } else if(!strcmp(argv[i], "-hd")){
+        hd = true;
+      } else if(!strcmp(argv[i], "-bd")){
+        bd = true;
+      } else if(!strcmp(argv[i], "-part")){
+        if(++i >= argc) usage();
+        part = atoi(argv[i]);
       } else {
         usage();
       }
@@ -271,9 +283,9 @@ static int runmime(int argc, char **argv){
     return 1;
   }
   if(!ename) ename = "UTF-8";
-  int rv = procmime(ibuf, isiz, dec, ename, qb, on);
+  int rv = procmime(ibuf, isiz, dec, ename, qb, on, hd, bd, part);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -312,7 +324,7 @@ static int runpack(int argc, char **argv){
   }
   int rv = procpack(ibuf, isiz, dec, bwt);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -348,7 +360,7 @@ static int runtcbs(int argc, char **argv){
   }
   int rv = proctcbs(ibuf, isiz, dec);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -387,7 +399,7 @@ static int runzlib(int argc, char **argv){
   }
   int rv = proczlib(ibuf, isiz, dec, gz);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -426,7 +438,7 @@ static int runxml(int argc, char **argv){
   }
   int rv = procxml(ibuf, isiz, dec, br);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -462,7 +474,7 @@ static int runucs(int argc, char **argv){
   }
   int rv = procucs(ibuf, isiz, dec);
   if(path && path[0] == '@') printf("\n");
-  free(ibuf);
+  tcfree(ibuf);
   return rv;
 }
 
@@ -527,7 +539,7 @@ static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *ba
   if(base){
     char *obuf = tcurlresolve(base, ibuf);
     printf("%s", obuf);
-    free(obuf);
+    tcfree(obuf);
   } else if(br){
     TCMAP *elems = tcurlbreak(ibuf);
     const char *elem;
@@ -544,12 +556,12 @@ static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *ba
   } else if(dec){
     int osiz;
     char *obuf = tcurldecode(ibuf, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
   } else {
     char *obuf = tcurlencode(ibuf, isiz);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   }
   return 0;
 }
@@ -560,12 +572,12 @@ static int procbase(const char *ibuf, int isiz, bool dec){
   if(dec){
     int osiz;
     char *obuf = tcbasedecode(ibuf, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
   } else {
     char *obuf = tcbaseencode(ibuf, isiz);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   }
   return 0;
 }
@@ -576,32 +588,69 @@ static int procquote(const char *ibuf, int isiz, bool dec){
   if(dec){
     int osiz;
     char *obuf = tcquotedecode(ibuf, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
   } else {
     char *obuf = tcquoteencode(ibuf, isiz);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   }
   return 0;
 }
 
 
 /* perform mime command */
-static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on){
-  if(dec){
+static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on,
+                    bool hd, bool bd, int part){
+  if(hd || bd || part > 0){
+    TCMAP *hmap = tcmapnew2(16);
+    int osiz;
+    char *obuf = tcmimebreak(ibuf, isiz, hmap, &osiz);
+    if(part > 0){
+      const char *value;
+      if(!(value = tcmapget2(hmap, "TYPE")) || !tcstrifwm(value, "multipart/") ||
+         !(value = tcmapget2(hmap, "BOUNDARY"))){
+        eprintf("not multipart");
+      } else {
+        TCLIST *parts = tcmimeparts(obuf, osiz, value);
+        if(part <= tclistnum(parts)){
+          int bsiz;
+          const char *body = tclistval(parts, part - 1, &bsiz);
+          fwrite(body, 1, bsiz, stdout);
+        } else {
+          eprintf("no such part");
+        }
+        tclistdel(parts);
+      }
+    } else {
+      if(hd){
+        TCLIST *names = tcmapkeys(hmap);
+        tclistsort(names);
+        int num = tclistnum(names);
+        for(int i = 0; i < num; i++){
+          const char *name = tclistval2(names, i);
+          printf("%s\t%s\n", name, tcmapget2(hmap, name));
+        }
+        tclistdel(names);
+        if(bd) putchar('\n');
+      }
+      if(bd) fwrite(obuf, 1, osiz, stdout);
+    }
+    tcfree(obuf);
+    tcmapdel(hmap);
+  } else if(dec){
     char ebuf[32];
     char *obuf = tcmimedecode(ibuf, ebuf);
     if(on){
-      fwrite(ebuf, strlen(ebuf), 1, stdout);
+      fwrite(ebuf, 1, strlen(ebuf), stdout);
     } else {
-      fwrite(obuf, strlen(obuf), 1, stdout);
+      fwrite(obuf, 1, strlen(obuf), stdout);
     }
-    free(obuf);
+    tcfree(obuf);
   } else {
     char *obuf = tcmimeencode(ibuf, ename, !qb);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   }
   return 0;
 }
@@ -616,12 +665,12 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
       int idx, step;
       TCREADVNUMBUF(obuf, idx, step);
       char *tbuf = tcbwtdecode(obuf + step, osiz - step, idx);
-      fwrite(tbuf, osiz - step, 1, stdout);
-      free(tbuf);
+      fwrite(tbuf, 1, osiz - step, stdout);
+      tcfree(tbuf);
     } else {
-      fwrite(obuf, osiz, 1, stdout);
+      fwrite(obuf, 1, osiz, stdout);
     }
-    free(obuf);
+    tcfree(obuf);
   } else {
     char *tbuf = NULL;
     if(bwt){
@@ -638,9 +687,9 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
     }
     int osiz;
     char *obuf = tcpackencode(ibuf, isiz, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
-    free(tbuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
+    tcfree(tbuf);
   }
   return 0;
 }
@@ -651,13 +700,13 @@ static int proctcbs(const char *ibuf, int isiz, bool dec){
   if(dec){
     int osiz;
     char *obuf = tcbsdecode(ibuf, isiz, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
   } else {
     int osiz;
     char *obuf = tcbsencode(ibuf, isiz, &osiz);
-    fwrite(obuf, osiz, 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, osiz, stdout);
+    tcfree(obuf);
   }
   return 0;
 }
@@ -669,8 +718,8 @@ static int proczlib(const char *ibuf, int isiz, bool dec, bool gz){
     int osiz;
     char *obuf = gz ? tcgzipdecode(ibuf, isiz, &osiz) : tcinflate(ibuf, isiz, &osiz);
     if(obuf){
-      fwrite(obuf, osiz, 1, stdout);
-      free(obuf);
+      fwrite(obuf, 1, osiz, stdout);
+      tcfree(obuf);
     } else {
       eprintf("inflate failure");
     }
@@ -678,8 +727,8 @@ static int proczlib(const char *ibuf, int isiz, bool dec, bool gz){
     int osiz;
     char *obuf = gz ? tcgzipencode(ibuf, isiz, &osiz) : tcdeflate(ibuf, isiz, &osiz);
     if(obuf){
-      fwrite(obuf, osiz, 1, stdout);
-      free(obuf);
+      fwrite(obuf, 1, osiz, stdout);
+      tcfree(obuf);
     } else {
       eprintf("deflate failure");
     }
@@ -732,20 +781,20 @@ static int procxml(const char *ibuf, int isiz, bool dec, bool br){
         } else {
           char *dstr = tcxmlunescape(estr);
           printf("TEXT\t%s\n", dstr);
-          free(dstr);
+          tcfree(dstr);
         }
       }
-      free(estr);
+      tcfree(estr);
     }
     tclistdel(elems);
   } else if(dec){
     char *obuf = tcxmlunescape(ibuf);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   } else {
     char *obuf = tcxmlescape(ibuf);
-    fwrite(obuf, strlen(obuf), 1, stdout);
-    free(obuf);
+    fwrite(obuf, 1, strlen(obuf), stdout);
+    tcfree(obuf);
   }
   return 0;
 }
@@ -762,8 +811,8 @@ static int procucs(const char *ibuf, int isiz, bool dec){
     char *str = tcmalloc(isiz * 3 + 1);
     tcstrucstoutf(ary, anum, str);
     printf("%s", str);
-    free(str);
-    free(ary);
+    tcfree(str);
+    tcfree(ary);
   } else {
     uint16_t *ary = tcmalloc(isiz * sizeof(uint16_t) + 1);
     int anum;
@@ -773,7 +822,7 @@ static int procucs(const char *ibuf, int isiz, bool dec){
       putchar(c >> 8);
       putchar(c & 0xff);
     }
-    free(ary);
+    tcfree(ary);
   }
   return 0;
 }

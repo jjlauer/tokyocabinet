@@ -22,7 +22,7 @@
 #define BDBFILEMODE    00644             // permission of created files
 #define BDBOPAQUESIZ   64                // size of using opaque field
 #define BDBPAGEBUFSIZ  32768             // size of a buffer to read each page
-#define BDBNODEIDBASE   ((1LL<<48)+1)    // base number of node ID
+#define BDBNODEIDBASE  ((1LL<<48)+1)     // base number of node ID
 #define BDBLEVELMAX    64                // max level of B+ tree
 #define BDBCACHEOUT    8                 // number of pages in a process of cacheout
 
@@ -126,7 +126,7 @@ static int tcbdbgetnum(TCBDB *bdb, const char *kbuf, int ksiz);
 static TCLIST *tcbdbgetlist(TCBDB *bdb, const char *kbuf, int ksiz);
 static bool tcbdbrangeimpl(TCBDB *bdb, const char *bkbuf, int bksiz, bool binc,
                            const char *ekbuf, int eksiz, bool einc, int max, TCLIST *keys);
-static bool tcbdbrangefwm(TCBDB *bdb, const char *prefix, int max, TCLIST *keys);
+static bool tcbdbrangefwm(TCBDB *bdb, const char *pbuf, int psiz, int max, TCLIST *keys);
 static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
                               int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
 static bool tcbdbvanishimpl(TCBDB *bdb);
@@ -161,7 +161,7 @@ void tcbdbprintnode(TCBDB *bdb, BDBNODE *node);
 
 /* Get the message string corresponding to an error code. */
 const char *tcbdberrmsg(int ecode){
-  return tchdberrmsg(ecode);
+  return tcerrmsg(ecode);
 }
 
 
@@ -180,17 +180,17 @@ TCBDB *tcbdbnew(void){
 void tcbdbdel(TCBDB *bdb){
   assert(bdb);
   if(bdb->open) tcbdbclose(bdb);
-  free(bdb->hist);
+  TCFREE(bdb->hist);
   tchdbdel(bdb->hdb);
   if(bdb->mmtx){
     pthread_mutex_destroy(bdb->tmtx);
     pthread_mutex_destroy(bdb->cmtx);
     pthread_rwlock_destroy(bdb->mmtx);
-    free(bdb->tmtx);
-    free(bdb->cmtx);
-    free(bdb->mmtx);
+    TCFREE(bdb->tmtx);
+    TCFREE(bdb->cmtx);
+    TCFREE(bdb->mmtx);
   }
-  free(bdb);
+  TCFREE(bdb);
 }
 
 
@@ -207,7 +207,7 @@ bool tcbdbsetmutex(TCBDB *bdb){
   if(!TCUSEPTHREAD) return true;
   if(!tcglobalmutexlock()) return false;
   if(bdb->mmtx || bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     tcglobalmutexunlock();
     return false;
   }
@@ -216,9 +216,9 @@ bool tcbdbsetmutex(TCBDB *bdb){
   TCMALLOC(bdb->tmtx, sizeof(pthread_mutex_t));
   if(pthread_rwlock_init(bdb->mmtx, NULL) != 0 || pthread_mutex_init(bdb->cmtx, NULL) != 0 ||
      pthread_mutex_init(bdb->tmtx, NULL) != 0){
-    free(bdb->tmtx);
-    free(bdb->cmtx);
-    free(bdb->mmtx);
+    TCFREE(bdb->tmtx);
+    TCFREE(bdb->cmtx);
+    TCFREE(bdb->mmtx);
     bdb->tmtx = NULL;
     bdb->cmtx = NULL;
     bdb->mmtx = NULL;
@@ -234,7 +234,7 @@ bool tcbdbsetmutex(TCBDB *bdb){
 bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop){
   assert(bdb && cmp);
   if(bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return false;
   }
   bdb->cmp = cmp;
@@ -248,7 +248,7 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
                int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts){
   assert(bdb);
   if(bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return false;
   }
   bdb->lmemb = (lmemb > 0) ? tclmax(lmemb, BDBMINLMEMB) : BDBDEFLMEMB;
@@ -269,7 +269,7 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
 bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum){
   assert(bdb);
   if(bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return false;
   }
   if(lcnum > 0) bdb->lcnum = tclmax(lcnum, BDBLEVELMAX);
@@ -283,7 +283,7 @@ bool tcbdbopen(TCBDB *bdb, const char *path, int omode){
   assert(bdb && path);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -295,9 +295,10 @@ bool tcbdbopen(TCBDB *bdb, const char *path, int omode){
 
 /* Close a B+ tree database object. */
 bool tcbdbclose(TCBDB *bdb){
+  assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -312,7 +313,7 @@ bool tcbdbput(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -334,7 +335,7 @@ bool tcbdbputkeep(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int 
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -356,7 +357,7 @@ bool tcbdbputcat(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int v
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -378,7 +379,7 @@ bool tcbdbputdup(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int v
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -400,7 +401,7 @@ bool tcbdbputdup3(TCBDB *bdb, const void *kbuf, int ksiz, const TCLIST *vals){
   assert(bdb && kbuf && ksiz >= 0 && vals);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -421,7 +422,7 @@ bool tcbdbout(TCBDB *bdb, const void *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -443,7 +444,7 @@ bool tcbdbout3(TCBDB *bdb, const void *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -458,7 +459,7 @@ void *tcbdbget(TCBDB *bdb, const void *kbuf, int ksiz, int *sp){
   assert(bdb && kbuf && ksiz >= 0 && sp);
   if(!BDBLOCKMETHOD(bdb, false)) return NULL;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return NULL;
   }
@@ -473,7 +474,7 @@ void *tcbdbget(TCBDB *bdb, const void *kbuf, int ksiz, int *sp){
   BDBUNLOCKMETHOD(bdb);
   if(adj && BDBLOCKMETHOD(bdb, true)){
     if(!bdb->tran && !tcbdbcacheadjust(bdb)){
-      free(rv);
+      TCFREE(rv);
       rv = NULL;
     }
     BDBUNLOCKMETHOD(bdb);
@@ -495,7 +496,7 @@ const void *tcbdbget3(TCBDB *bdb, const void *kbuf, int ksiz, int *sp){
   assert(bdb && kbuf && ksiz >= 0 && sp);
   if(!BDBLOCKMETHOD(bdb, false)) return NULL;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return NULL;
   }
@@ -515,7 +516,7 @@ TCLIST *tcbdbget4(TCBDB *bdb, const void *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   if(!BDBLOCKMETHOD(bdb, false)) return NULL;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return NULL;
   }
@@ -538,7 +539,7 @@ int tcbdbvnum(TCBDB *bdb, const void *kbuf, int ksiz){
   assert(bdb && kbuf && ksiz >= 0);
   if(!BDBLOCKMETHOD(bdb, false)) return 0;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return 0;
   }
@@ -583,7 +584,7 @@ TCLIST *tcbdbrange(TCBDB *bdb, const void *bkbuf, int bksiz, bool binc,
   TCLIST *keys = tclistnew();
   if(!BDBLOCKMETHOD(bdb, false)) return keys;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return keys;
   }
@@ -607,16 +608,16 @@ TCLIST *tcbdbrange2(TCBDB *bdb, const char *bkstr, bool binc,
 
 
 /* Get forward matching keys in a B+ tree database object. */
-TCLIST *tcbdbrange3(TCBDB *bdb, const char *prefix, int max){
-  assert(bdb && prefix);
+TCLIST *tcbdbfwmkeys(TCBDB *bdb, const void *pbuf, int psiz, int max){
+  assert(bdb && pbuf && psiz >= 0);
   TCLIST *keys = tclistnew();
   if(!BDBLOCKMETHOD(bdb, false)) return keys;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return keys;
   }
-  tcbdbrangefwm(bdb, prefix, max, keys);
+  tcbdbrangefwm(bdb, pbuf, psiz, max, keys);
   bool adj = TCMAPRNUM(bdb->leafc) > bdb->lcnum || TCMAPRNUM(bdb->nodec) > bdb->ncnum;
   BDBUNLOCKMETHOD(bdb);
   if(adj && BDBLOCKMETHOD(bdb, true)){
@@ -627,12 +628,20 @@ TCLIST *tcbdbrange3(TCBDB *bdb, const char *prefix, int max){
 }
 
 
+/* Get forward matching string keys in a B+ tree database object. */
+TCLIST *tcbdbfwmkeys2(TCBDB *bdb, const char *pstr, int max){
+  assert(bdb && pstr);
+  return tcbdbfwmkeys(bdb, pstr, strlen(pstr), max);
+}
+
+
+
 /* Synchronize updated contents of a B+ tree database object with the file and the device. */
 bool tcbdbsync(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -648,7 +657,7 @@ bool tcbdboptimize(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -663,7 +672,7 @@ bool tcbdbvanish(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -678,7 +687,7 @@ bool tcbdbcopy(TCBDB *bdb, const char *path){
   assert(bdb && path);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -689,12 +698,12 @@ bool tcbdbcopy(TCBDB *bdb, const char *path){
   TCMAP *leafc = bdb->leafc;
   tcmapiterinit(leafc);
   while((vbuf = tcmapiternext(leafc, &vsiz)) != NULL){
-    tclistpush(lids, vbuf, vsiz);
+    TCLISTPUSH(lids, vbuf, vsiz);
   }
   TCMAP *nodec = bdb->nodec;
   tcmapiterinit(nodec);
   while((vbuf = tcmapiternext(nodec, &vsiz)) != NULL){
-    tclistpush(nids, vbuf, vsiz);
+    TCLISTPUSH(nids, vbuf, vsiz);
   }
   BDBUNLOCKMETHOD(bdb);
   bool err = false;
@@ -749,7 +758,7 @@ bool tcbdbtranbegin(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -773,15 +782,16 @@ bool tcbdbtrancommit(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || !bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
-  free(bdb->rbopaque);
+  TCFREE(bdb->rbopaque);
   bdb->tran = false;
   bdb->rbopaque = NULL;
   bool err = false;
   if(!tcbdbmemsync(bdb, false)) err = true;
+  if(!tcbdbcacheadjust(bdb)) err = true;
   BDBUNLOCKTRAN(bdb);
   BDBUNLOCKMETHOD(bdb);
   return !err;
@@ -793,19 +803,21 @@ bool tcbdbtranabort(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode || !bdb->tran){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   tcbdbcachepurge(bdb);
   memcpy(bdb->opaque, bdb->rbopaque, BDBOPAQUESIZ);
   tcloadmeta(bdb);
-  free(bdb->rbopaque);
+  TCFREE(bdb->rbopaque);
   bdb->tran = false;
   bdb->rbopaque = NULL;
+  bool err = false;
+  if(!tcbdbcacheadjust(bdb)) err = true;
   BDBUNLOCKTRAN(bdb);
   BDBUNLOCKMETHOD(bdb);
-  return true;
+  return !err;
 }
 
 
@@ -814,7 +826,7 @@ const char *tcbdbpath(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, false)) return NULL;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return NULL;
   }
@@ -829,7 +841,7 @@ uint64_t tcbdbrnum(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, false)) return 0;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return 0;
   }
@@ -844,7 +856,7 @@ uint64_t tcbdbfsiz(TCBDB *bdb){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, false)) return 0;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return 0;
   }
@@ -870,7 +882,7 @@ BDBCUR *tcbdbcurnew(TCBDB *bdb){
 /* Delete a cursor object. */
 void tcbdbcurdel(BDBCUR *cur){
   assert(cur);
-  free(cur);
+  TCFREE(cur);
 }
 
 
@@ -880,7 +892,7 @@ bool tcbdbcurfirst(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -901,7 +913,7 @@ bool tcbdbcurlast(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -922,7 +934,7 @@ bool tcbdbcurjump(BDBCUR *cur, const void *kbuf, int ksiz){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -950,12 +962,12 @@ bool tcbdbcurprev(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -976,12 +988,12 @@ bool tcbdbcurnext(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1002,12 +1014,12 @@ bool tcbdbcurput(BDBCUR *cur, const void *vbuf, int vsiz, int cpmode){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1030,12 +1042,12 @@ bool tcbdbcurout(BDBCUR *cur){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1051,12 +1063,12 @@ char *tcbdbcurkey(BDBCUR *cur, int *sp){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1088,12 +1100,12 @@ const char *tcbdbcurkey3(BDBCUR *cur, int *sp){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1117,12 +1129,12 @@ char *tcbdbcurval(BDBCUR *cur, int *sp){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1154,12 +1166,12 @@ const char *tcbdbcurval3(BDBCUR *cur, int *sp){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1183,12 +1195,12 @@ bool tcbdbcurrec(BDBCUR *cur, TCXSTR *kxstr, TCXSTR *vxstr){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
   if(cur->id < 1){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1215,9 +1227,14 @@ bool tcbdbcurrec(BDBCUR *cur, TCXSTR *kxstr, TCXSTR *vxstr){
  *************************************************************************************************/
 
 
-/* Set the file descriptor for debugging output.
-   `bdb' specifies the B+ tree database object.
-   `fd' specifies the file descriptor for debugging output. */
+/* Set the error code of a B+ tree database object. */
+void tcbdbsetecode(TCBDB *bdb, int ecode, const char *filename, int line, const char *func){
+  assert(bdb && filename && line >= 1 && func);
+  tchdbsetecode(bdb->hdb, ecode, filename, line, func);
+}
+
+
+/* Set the file descriptor for debugging output. */
 void tcbdbsetdbgfd(TCBDB *bdb, int fd){
   assert(bdb && fd >= 0);
   tchdbsetdbgfd(bdb->hdb, fd);
@@ -1235,7 +1252,7 @@ int tcbdbdbgfd(TCBDB *bdb){
 bool tcbdbmemsync(TCBDB *bdb, bool phys){
   assert(bdb);
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return false;
   }
   bool err = false;
@@ -1263,6 +1280,20 @@ bool tcbdbmemsync(TCBDB *bdb, bool phys){
 }
 
 
+/* Get the comparison function of a B+ tree database object. */
+BDBCMP tcbdbcmpfunc(TCBDB *bdb){
+  assert(bdb);
+  return bdb->cmp;
+}
+
+
+/* Get the opaque object for the comparison function of a B+ tree database object. */
+void *tcbdbcmpop(TCBDB *bdb){
+  assert(bdb);
+  return bdb->cmpop;
+}
+
+
 /* Get the maximum number of cached leaf nodes of a B+ tree database object. */
 uint32_t tcbdblmemb(TCBDB *bdb){
   assert(bdb);
@@ -1281,7 +1312,7 @@ uint32_t tcbdbnmemb(TCBDB *bdb){
 uint64_t tcbdblnum(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return bdb->lnum;
@@ -1292,7 +1323,7 @@ uint64_t tcbdblnum(TCBDB *bdb){
 uint64_t tcbdbnnum(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return bdb->nnum;
@@ -1303,7 +1334,7 @@ uint64_t tcbdbnnum(TCBDB *bdb){
 uint64_t tcbdbbnum(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbbnum(bdb->hdb);
@@ -1314,7 +1345,7 @@ uint64_t tcbdbbnum(TCBDB *bdb){
 uint32_t tcbdbalign(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbalign(bdb->hdb);
@@ -1325,7 +1356,7 @@ uint32_t tcbdbalign(TCBDB *bdb){
 uint32_t tcbdbfbpmax(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbfbpmax(bdb->hdb);
@@ -1336,7 +1367,7 @@ uint32_t tcbdbfbpmax(TCBDB *bdb){
 uint64_t tcbdbinode(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbinode(bdb->hdb);
@@ -1347,7 +1378,7 @@ uint64_t tcbdbinode(TCBDB *bdb){
 time_t tcbdbmtime(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbmtime(bdb->hdb);
@@ -1358,7 +1389,7 @@ time_t tcbdbmtime(TCBDB *bdb){
 uint8_t tcbdbflags(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbflags(bdb->hdb);
@@ -1369,7 +1400,7 @@ uint8_t tcbdbflags(TCBDB *bdb){
 uint8_t tcbdbopts(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return bdb->opts;
@@ -1380,7 +1411,7 @@ uint8_t tcbdbopts(TCBDB *bdb){
 char *tcbdbopaque(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbopaque(bdb->hdb) + BDBOPAQUESIZ;
@@ -1391,7 +1422,7 @@ char *tcbdbopaque(TCBDB *bdb){
 uint64_t tcbdbbnumused(TCBDB *bdb){
   assert(bdb);
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return 0;
   }
   return tchdbbnumused(bdb->hdb);
@@ -1402,10 +1433,22 @@ uint64_t tcbdbbnumused(TCBDB *bdb){
 bool tcbdbsetlsmax(TCBDB *bdb, uint32_t lsmax){
   assert(bdb);
   if(bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     return false;
   }
   bdb->lsmax = lsmax;
+  return true;
+}
+
+
+/* Set the capacity number of records. */
+bool tcbdbsetcapnum(TCBDB *bdb, uint64_t capnum){
+  assert(bdb);
+  if(bdb->open){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  bdb->capnum = capnum;
   return true;
 }
 
@@ -1415,7 +1458,7 @@ bool tcbdbputdupback(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, i
   assert(bdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   if(!BDBLOCKMETHOD(bdb, true)) return false;
   if(!bdb->open || !bdb->wmode){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1438,7 +1481,7 @@ bool tcbdbcurjumpback(BDBCUR *cur, const void *kbuf, int ksiz){
   TCBDB *bdb = cur->bdb;
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open){
-    tchdbsetecode(bdb->hdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
     return false;
   }
@@ -1494,7 +1537,7 @@ int tcbdbcmpdecimal(const char *aptr, int asiz, const char *bptr, int bsiz, void
     bnum = bnum * 10 + c - '0';
   }
   bnum *= sign;
-  return anum - bnum;
+  return (anum < bnum) ? -1 : anum > bnum;
 }
 
 
@@ -1518,7 +1561,7 @@ int tcbdbcmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *
   } else {
     memcpy(&bnum, bptr, sizeof(int32_t));
   }
-  return anum - bnum;
+  return (anum < bnum) ? -1 : anum > bnum;
 }
 
 
@@ -1542,7 +1585,7 @@ int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *
   } else {
     memcpy(&bnum, bptr, sizeof(int64_t));
   }
-  return anum - bnum;
+  return (anum < bnum) ? -1 : anum > bnum;
 }
 
 
@@ -1574,11 +1617,13 @@ static void tcbdbclear(TCBDB *bdb){
   bdb->rnum = 0;
   bdb->leafc = NULL;
   bdb->nodec = NULL;
-  bdb->cmp = tcbdbcmplexical;
+  bdb->cmp = NULL;
   bdb->cmpop = NULL;
   bdb->lcnum = BDBDEFLCNUM;
   bdb->ncnum = BDBDEFNCNUM;
   bdb->lsmax = 0;
+  bdb->lschk = 0;
+  bdb->capnum = 0;
   bdb->hist = NULL;
   bdb->hnum = 0;
   bdb->hleaf = 0;
@@ -1733,8 +1778,8 @@ static bool tcbdbleafcacheout(TCBDB *bdb, BDBLEAF *leaf){
   int ln = TCLISTNUM(recs);
   for(int i = 0; i < ln; i++){
     BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-    free(recp->kbuf);
-    free(recp->vbuf);
+    TCFREE(recp->kbuf);
+    TCFREE(recp->vbuf);
     if(recp->rest) tclistdel(recp->rest);
   }
   tclistdel(recs);
@@ -1824,13 +1869,13 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
   const char *rp = NULL;
   rsiz = tchdbget3(bdb->hdb, hbuf, step, wbuf, BDBPAGEBUFSIZ);
   if(rsiz < 1){
-    tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
     return false;
   } else if(rsiz < BDBPAGEBUFSIZ){
     rp = wbuf;
   } else {
     if(!(rbuf = tchdbget(bdb->hdb, hbuf, step, &rsiz))){
-      tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return false;
     }
     rp = rbuf;
@@ -1892,13 +1937,22 @@ static BDBLEAF *tcbdbleafload(TCBDB *bdb, uint64_t id){
     }
     TCLISTPUSH(lent.recs, &rec, sizeof(rec));
   }
-  free(rbuf);
+  TCFREE(rbuf);
   if(err || rsiz != 0){
-    tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
     return NULL;
   }
   clk = BDBLOCKCACHE(bdb);
-  tcmapputkeep(bdb->leafc, &(lent.id), sizeof(lent.id), &lent, sizeof(lent));
+  if(!tcmapputkeep(bdb->leafc, &(lent.id), sizeof(lent.id), &lent, sizeof(lent))){
+    int ln = TCLISTNUM(lent.recs);
+    for(int i = 0; i < ln; i++){
+      BDBREC *recp = (BDBREC *)TCLISTVALPTR(lent.recs, i);
+      TCFREE(recp->kbuf);
+      TCFREE(recp->vbuf);
+      if(recp->rest) tclistdel(recp->rest);
+    }
+    tclistdel(lent.recs);
+  }
   leaf = (BDBLEAF *)tcmapget(bdb->leafc, &(lent.id), sizeof(lent.id), &rsiz);
   if(clk) BDBUNLOCKCACHE(bdb);
   return leaf;
@@ -2094,7 +2148,7 @@ static BDBLEAF *tcbdbleafdivide(TCBDB *bdb, BDBLEAF *leaf){
   ln = TCLISTNUM(newrecs);
   for(int i = 0; i < ln; i++){
     int rsiz;
-    free(tclistpop(recs, &rsiz));
+    TCFREE(tclistpop(recs, &rsiz));
   }
   return newleaf;
 }
@@ -2160,7 +2214,7 @@ static bool tcbdbnodecacheout(TCBDB *bdb, BDBNODE *node){
   int ln = TCLISTNUM(idxs);
   for(int i = 0; i < ln; i++){
     BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-    free(idxp->kbuf);
+    TCFREE(idxp->kbuf);
   }
   tclistdel(idxs);
   tcmapout(bdb->nodec, &(node->id), sizeof(node->id));
@@ -2228,13 +2282,13 @@ static BDBNODE *tcbdbnodeload(TCBDB *bdb, uint64_t id){
   const char *rp = NULL;
   rsiz = tchdbget3(bdb->hdb, hbuf, step, wbuf, BDBPAGEBUFSIZ);
   if(rsiz < 1){
-    tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
     return false;
   } else if(rsiz < BDBPAGEBUFSIZ){
     rp = wbuf;
   } else {
     if(!(rbuf = tchdbget(bdb->hdb, hbuf, step, &rsiz))){
-      tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return false;
     }
     rp = rbuf;
@@ -2266,13 +2320,20 @@ static BDBNODE *tcbdbnodeload(TCBDB *bdb, uint64_t id){
     rsiz -= idx.ksiz;
     TCLISTPUSH(nent.idxs, &idx, sizeof(idx));
   }
-  free(rbuf);
+  TCFREE(rbuf);
   if(err || rsiz != 0){
-    tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
     return NULL;
   }
   clk = BDBLOCKCACHE(bdb);
-  tcmapputkeep(bdb->nodec, &(nent.id), sizeof(nent.id), &nent, sizeof(nent));
+  if(!tcmapputkeep(bdb->nodec, &(nent.id), sizeof(nent.id), &nent, sizeof(nent))){
+    int ln = TCLISTNUM(nent.idxs);
+    for(int i = 0; i < ln; i++){
+      BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(nent.idxs, i);
+      TCFREE(idxp->kbuf);
+    }
+    tclistdel(nent.idxs);
+  }
   node = (BDBNODE *)tcmapget(bdb->nodec, &(nent.id), sizeof(nent.id), &rsiz);
   if(clk) BDBUNLOCKCACHE(bdb);
   return node;
@@ -2354,8 +2415,8 @@ static bool tcbdbnodesubidx(TCBDB *bdb, BDBNODE *node, uint64_t pid){
     int rsiz;
     BDBIDX *idxp = (BDBIDX *)tclistshift(idxs, &rsiz);
     node->heir = idxp->pid;
-    free(idxp->kbuf);
-    free(idxp);
+    TCFREE(idxp->kbuf);
+    TCFREE(idxp);
     node->dirty = true;
     return true;
   } else {
@@ -2364,8 +2425,8 @@ static bool tcbdbnodesubidx(TCBDB *bdb, BDBNODE *node, uint64_t pid){
       BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
       if(idxp->pid == pid){
         int rsiz;
-        free(idxp->kbuf);
-        free(tclistremove(idxs, i, &rsiz));
+        TCFREE(idxp->kbuf);
+        TCFREE(tclistremove(idxs, i, &rsiz));
         node->dirty = true;
         return true;
       }
@@ -2391,13 +2452,13 @@ static uint64_t tcbdbsearchleaf(TCBDB *bdb, const char *kbuf, int ksiz){
   while(pid > BDBNODEIDBASE){
     BDBNODE *node = tcbdbnodeload(bdb, pid);
     if(!node){
-      tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return 0;
     }
     TCLIST *idxs = node->idxs;
     int ln = TCLISTNUM(idxs);
     if(ln < 1){
-      tchdbsetecode(bdb->hdb, TCEMISC, __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, TCEMISC, __FILE__, __LINE__, __func__);
       return 0;
     }
     hist[hnum++] = node->id;
@@ -2502,7 +2563,8 @@ static bool tcbdbcacheadjust(TCBDB *bdb){
     bool clk = BDBLOCKCACHE(bdb);
     TCMAP *leafc = bdb->leafc;
     tcmapiterinit(leafc);
-    for(int i = 0; i < BDBCACHEOUT; i++){
+    int dnum = tclmax(TCMAPRNUM(bdb->leafc) - bdb->lcnum, BDBCACHEOUT);
+    for(int i = 0; i < dnum; i++){
       int rsiz;
       if(!tcbdbleafcacheout(bdb, (BDBLEAF *)tcmapiterval(tcmapiternext(leafc, &rsiz), &rsiz)))
         err = true;
@@ -2514,7 +2576,8 @@ static bool tcbdbcacheadjust(TCBDB *bdb){
     bool clk = BDBLOCKCACHE(bdb);
     TCMAP *nodec = bdb->nodec;
     tcmapiterinit(nodec);
-    for(int i = 0; i < BDBCACHEOUT; i++){
+    int dnum = tclmax(TCMAPRNUM(bdb->nodec) - bdb->ncnum, BDBCACHEOUT);
+    for(int i = 0; i < dnum; i++){
       int rsiz;
       if(!tcbdbnodecacheout(bdb, (BDBNODE *)tcmapiterval(tcmapiternext(nodec, &rsiz), &rsiz)))
         err = true;
@@ -2540,8 +2603,8 @@ static void tcbdbcachepurge(TCBDB *bdb){
     int ln = TCLISTNUM(recs);
     for(int i = 0; i < ln; i++){
       BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, i);
-      free(recp->kbuf);
-      free(recp->vbuf);
+      TCFREE(recp->kbuf);
+      TCFREE(recp->vbuf);
       if(recp->rest) tclistdel(recp->rest);
     }
     tclistdel(recs);
@@ -2556,7 +2619,7 @@ static void tcbdbcachepurge(TCBDB *bdb){
     int ln = TCLISTNUM(idxs);
     for(int i = 0; i < ln; i++){
       BDBIDX *idxp = (BDBIDX *)TCLISTVALPTR(idxs, i);
-      free(idxp->kbuf);
+      TCFREE(idxp->kbuf);
     }
     tclistdel(idxs);
     tcmapout(bdb->nodec, tmp, tsiz);
@@ -2583,8 +2646,8 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
   }
   if(omode & BDBONOLCK) homode |= HDBONOLCK;
   if(omode & BDBOLCKNB) homode |= HDBOLCKNB;
-  tchdbsettype(bdb->hdb, HDBTBTREE);
-  if(!tchdbopen(bdb->hdb, path, omode)) return false;
+  tchdbsettype(bdb->hdb, TCDBTBTREE);
+  if(!tchdbopen(bdb->hdb, path, homode)) return false;
   bdb->root = 0;
   bdb->first = 0;
   bdb->last = 0;
@@ -2602,6 +2665,10 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
     bdb->lnum = 1;
     bdb->nnum = 0;
     bdb->rnum = 0;
+    if(!bdb->cmp){
+      bdb->cmp = tcbdbcmplexical;
+      bdb->cmpop = NULL;
+    }
     tcdumpmeta(bdb);
     if(!tcbdbleafsave(bdb, leaf)){
       tcmapdel(bdb->nodec);
@@ -2611,10 +2678,17 @@ static bool tcbdbopenimpl(TCBDB *bdb, const char *path, int omode){
     }
   }
   tcloadmeta(bdb);
+  if(!bdb->cmp){
+    tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    tcmapdel(bdb->nodec);
+    tcmapdel(bdb->leafc);
+    tchdbclose(bdb->hdb);
+    return false;
+  }
   if(bdb->lmemb < BDBMINLMEMB || bdb->nmemb < BDBMINNMEMB ||
      bdb->root < 1 || bdb->first < 1 || bdb->last < 1 ||
      bdb->lnum < 0 || bdb->nnum < 0 || bdb->rnum < 0){
-    tchdbsetecode(bdb->hdb, TCEMETA, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEMETA, __FILE__, __LINE__, __func__);
     tcmapdel(bdb->nodec);
     tcmapdel(bdb->leafc);
     tchdbclose(bdb->hdb);
@@ -2644,7 +2718,7 @@ static bool tcbdbcloseimpl(TCBDB *bdb){
     tcbdbcachepurge(bdb);
     memcpy(bdb->opaque, bdb->rbopaque, BDBOPAQUESIZ);
     tcloadmeta(bdb);
-    free(bdb->rbopaque);
+    TCFREE(bdb->rbopaque);
     bdb->tran = false;
     bdb->rbopaque = NULL;
     BDBUNLOCKTRAN(bdb);
@@ -2689,13 +2763,14 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
     if(!(leaf = tcbdbleafload(bdb, pid))) return false;
   }
   if(!tcbdbleafaddrec(bdb, leaf, dmode, kbuf, ksiz, vbuf, vsiz)){
-    tchdbsetecode(bdb->hdb, TCEKEEP, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEKEEP, __FILE__, __LINE__, __func__);
     return false;
   }
   int rnum = TCLISTNUM(leaf->recs);
   if(rnum > bdb->lmemb ||
-     (bdb->lsmax > 0 && rnum > BDBMINLMEMB && (rnum & (0x20 - 1)) == 0 &&
+     (bdb->lsmax > 0 && rnum > BDBMINLMEMB && (bdb->lschk++ & (0x8 - 1)) == 0 &&
       tcbdbleafdatasize(leaf) > bdb->lsmax)){
+    bdb->lschk = 0;
     BDBLEAF *newleaf = tcbdbleafdivide(bdb, leaf);
     if(!newleaf) return false;
     if(leaf->id == bdb->last) bdb->last = newleaf->id;
@@ -2711,16 +2786,16 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
         node = tcbdbnodenew(bdb, heir);
         tcbdbnodeaddidx(bdb, node, true, pid, kbuf, ksiz);
         bdb->root = node->id;
-        free(kbuf);
+        TCFREE(kbuf);
         break;
       }
       uint64_t parent = bdb->hist[--bdb->hnum];
       if(!(node = tcbdbnodeload(bdb, parent))){
-        free(kbuf);
+        TCFREE(kbuf);
         return false;
       }
       tcbdbnodeaddidx(bdb, node, false, pid, kbuf, ksiz);
-      free(kbuf);
+      TCFREE(kbuf);
       TCLIST *idxs = node->idxs;
       int ln = TCLISTNUM(idxs);
       if(ln <= bdb->nmemb) break;
@@ -2739,10 +2814,22 @@ static bool tcbdbputimpl(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbu
       for(int i = 0; i < ln; i++){
         int rsiz;
         idxp = (BDBIDX *)tclistpop(idxs, &rsiz);
-        free(idxp->kbuf);
-        free(idxp);
+        TCFREE(idxp->kbuf);
+        TCFREE(idxp);
       }
       node->dirty = true;
+    }
+    if(bdb->capnum > 0 && bdb->rnum > bdb->capnum){
+      uint64_t xnum = bdb->rnum - bdb->capnum;
+      BDBCUR *cur = tcbdbcurnew(bdb);
+      tcbdbcurfirstimpl(cur);
+      while((xnum--) > 0){
+        if(!tcbdbcuroutimpl(cur)){
+          tcbdbcurdel(cur);
+          return false;
+        }
+      }
+      tcbdbcurdel(cur);
     }
   }
   if(!bdb->tran && !tcbdbcacheadjust(bdb)) return false;
@@ -2766,21 +2853,21 @@ static bool tcbdboutimpl(TCBDB *bdb, const char *kbuf, int ksiz){
   int ri;
   BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
   if(!recp){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   if(recp->rest){
-    free(recp->vbuf);
+    TCFREE(recp->vbuf);
     recp->vbuf = tclistshift(recp->rest, &(recp->vsiz));
     if(TCLISTNUM(recp->rest) < 1){
       tclistdel(recp->rest);
       recp->rest = NULL;
     }
   } else {
-    free(recp->vbuf);
-    free(recp->kbuf);
+    TCFREE(recp->vbuf);
+    TCFREE(recp->kbuf);
     int rsiz;
-    free(tclistremove(leaf->recs, ri, &rsiz));
+    TCFREE(tclistremove(leaf->recs, ri, &rsiz));
   }
   leaf->dirty = true;
   bdb->rnum--;
@@ -2806,7 +2893,7 @@ static bool tcbdboutlist(TCBDB *bdb, const char *kbuf, int ksiz){
   int ri;
   BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, &ri);
   if(!recp){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   int rnum = 1;
@@ -2814,10 +2901,10 @@ static bool tcbdboutlist(TCBDB *bdb, const char *kbuf, int ksiz){
     rnum += TCLISTNUM(recp->rest);
     tclistdel(recp->rest);
   }
-  free(recp->vbuf);
-  free(recp->kbuf);
+  TCFREE(recp->vbuf);
+  TCFREE(recp->kbuf);
   int rsiz;
-  free(tclistremove(leaf->recs, ri, &rsiz));
+  TCFREE(tclistremove(leaf->recs, ri, &rsiz));
   leaf->dirty = true;
   bdb->rnum -= rnum;
   if(TCLISTNUM(leaf->recs) < 1 && bdb->hnum > 0 && !tcbdbleafkill(bdb, leaf)) return false;
@@ -2844,7 +2931,7 @@ static const char *tcbdbgetimpl(TCBDB *bdb, const char *kbuf, int ksiz, int *sp)
   }
   BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
   if(!recp){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return NULL;
   }
   *sp = recp->vsiz;
@@ -2867,7 +2954,7 @@ static int tcbdbgetnum(TCBDB *bdb, const char *kbuf, int ksiz){
   }
   BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
   if(!recp){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return 0;
   }
   return recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
@@ -2889,7 +2976,7 @@ static TCLIST *tcbdbgetlist(TCBDB *bdb, const char *kbuf, int ksiz){
   }
   BDBREC *recp = tcbdbsearchrec(bdb, leaf, kbuf, ksiz, NULL);
   if(!recp){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return NULL;
   }
   TCLIST *vals;
@@ -2928,9 +3015,9 @@ static bool tcbdbrangeimpl(TCBDB *bdb, const char *bkbuf, int bksiz, bool binc,
   bool err = false;
   BDBCUR *cur = tcbdbcurnew(bdb);
   if(bkbuf){
-    tcbdbcurjump(cur, bkbuf, bksiz);
+    tcbdbcurjumpimpl(cur, bkbuf, bksiz, true);
   } else {
-    tcbdbcurfirst(cur);
+    tcbdbcurfirstimpl(cur);
   }
   BDBCMP cmp = bdb->cmp;
   void *cmpop = bdb->cmpop;
@@ -2963,7 +3050,7 @@ static bool tcbdbrangeimpl(TCBDB *bdb, const char *bkbuf, int bksiz, bool binc,
       lbuf = kbuf;
       lsiz = ksiz;
     }
-    tcbdbcurnext(cur);
+    tcbdbcurnextimpl(cur);
   }
   tcbdbcurdel(cur);
   return !err;
@@ -2972,16 +3059,17 @@ static bool tcbdbrangeimpl(TCBDB *bdb, const char *bkbuf, int bksiz, bool binc,
 
 /* Get forward matching keys in a B+ tree database object.
    `bdb' specifies the B+ tree database object.
-   `prefix' specifies the prefix of the corresponding keys.
+   `pbuf' specifies the pointer to the region of the prefix.
+   `psiz' specifies the size of the region of the prefix.
    `max' specifies the maximum number of keys to be fetched.
    `keys' specifies a list object to store the result.
    If successful, the return value is true, else, it is false. */
-static bool tcbdbrangefwm(TCBDB *bdb, const char *prefix, int max, TCLIST *keys){
-  assert(bdb && prefix && keys);
+static bool tcbdbrangefwm(TCBDB *bdb, const char *pbuf, int psiz, int max, TCLIST *keys){
+  assert(bdb && pbuf && psiz >= 0 && keys);
   bool err = false;
+  if(max < 0) max = INT_MAX;
   BDBCUR *cur = tcbdbcurnew(bdb);
-  int psiz = strlen(prefix);
-  tcbdbcurjump(cur, prefix, psiz);
+  tcbdbcurjumpimpl(cur, pbuf, psiz, true);
   const char *lbuf = NULL;
   int lsiz = 0;
   while(cur->id > 0){
@@ -2991,14 +3079,14 @@ static bool tcbdbrangefwm(TCBDB *bdb, const char *prefix, int max, TCLIST *keys)
       if(tchdbecode(bdb->hdb) != TCEINVALID && tchdbecode(bdb->hdb) != TCENOREC) err = true;
       break;
     }
-    if(!tcstrfwm(kbuf, prefix)) break;
+    if(ksiz < psiz || memcmp(kbuf, pbuf, psiz)) break;
     if(!lbuf || lsiz != ksiz || memcmp(kbuf, lbuf, ksiz)){
       TCLISTPUSH(keys, kbuf, ksiz);
-      if(max >= 0 && TCLISTNUM(keys) >= max) break;
+      if(TCLISTNUM(keys) >= max) break;
       lbuf = kbuf;
       lsiz = ksiz;
     }
-    tcbdbcurnext(cur);
+    tcbdbcurnextimpl(cur);
   }
   tcbdbcurdel(cur);
   return !err;
@@ -3026,10 +3114,11 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   TCBDB *tbdb = tcbdbnew();
   tcbdbsetcmpfunc(tbdb, bdb->cmp, bdb->cmpop);
   tcbdbtune(tbdb, lmemb, nmemb, bnum, apow, fpow, opts);
+  tcbdbsetlsmax(tbdb, bdb->lsmax);
   if(!tcbdbopen(tbdb, tpath, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
-    tchdbsetecode(bdb->hdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
     tcbdbdel(tbdb);
-    free(tpath);
+    TCFREE(tpath);
     return false;
   }
   bool err = false;
@@ -3039,35 +3128,35 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   int ksiz, vsiz;
   while(!err && cur->id > 0 && tcbdbcurrecimpl(cur, &kbuf, &ksiz, &vbuf, &vsiz)){
     if(!tcbdbputdup(tbdb, kbuf, ksiz, vbuf, vsiz)){
-      tchdbsetecode(bdb->hdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
       err = true;
     }
     tcbdbcurnextimpl(cur);
   }
   tcbdbcurdel(cur);
   if(!tcbdbclose(tbdb)){
-    tchdbsetecode(bdb->hdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
     err = true;
   }
   tcbdbdel(tbdb);
   if(unlink(path) == -1){
-    tchdbsetecode(bdb->hdb, TCEUNLINK, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCEUNLINK, __FILE__, __LINE__, __func__);
     err = true;
   }
   if(rename(tpath, path) == -1){
-    tchdbsetecode(bdb->hdb, TCERENAME, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCERENAME, __FILE__, __LINE__, __func__);
     err = true;
   }
-  free(tpath);
+  TCFREE(tpath);
   if(err) return false;
   tpath = tcstrdup(path);
   int omode = (tchdbomode(bdb->hdb) & ~BDBOCREAT) & ~BDBOTRUNC;
   if(!tcbdbcloseimpl(bdb)){
-    free(tpath);
+    TCFREE(tpath);
     return false;
   }
   bool rv = tcbdbopenimpl(bdb, tpath, omode);
-  free(tpath);
+  TCFREE(tpath);
   return rv;
 }
 
@@ -3082,19 +3171,19 @@ static bool tcbdbvanishimpl(TCBDB *bdb){
   bool err = false;
   if(!tcbdbcloseimpl(bdb)) err = true;
   if(!tcbdbopenimpl(bdb, path, BDBOTRUNC | omode)) err = true;
-  free(path);
+  TCFREE(path);
   return !err;
 }
 
 
 /* Lock a method of the B+ tree database object.
-   `hdb' specifies the B+ tree database object.
+   `bdb' specifies the B+ tree database object.
    `wr' specifies whether the lock is writer or not.
    If successful, the return value is true, else, it is false. */
 static bool tcbdblockmethod(TCBDB *bdb, bool wr){
   assert(bdb);
   if(wr ? pthread_rwlock_wrlock(bdb->mmtx) != 0 : pthread_rwlock_rdlock(bdb->mmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3108,7 +3197,7 @@ static bool tcbdblockmethod(TCBDB *bdb, bool wr){
 static bool tcbdbunlockmethod(TCBDB *bdb){
   assert(bdb);
   if(pthread_rwlock_unlock(bdb->mmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3122,7 +3211,7 @@ static bool tcbdbunlockmethod(TCBDB *bdb){
 static bool tcbdblockcache(TCBDB *bdb){
   assert(bdb);
   if(pthread_mutex_lock(bdb->cmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3136,7 +3225,7 @@ static bool tcbdblockcache(TCBDB *bdb){
 static bool tcbdbunlockcache(TCBDB *bdb){
   assert(bdb);
   if(pthread_mutex_unlock(bdb->cmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3150,7 +3239,7 @@ static bool tcbdbunlockcache(TCBDB *bdb){
 static bool tcbdblocktran(TCBDB *bdb){
   assert(bdb);
   if(pthread_mutex_lock(bdb->tmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3164,7 +3253,7 @@ static bool tcbdblocktran(TCBDB *bdb){
 static bool tcbdbunlocktran(TCBDB *bdb){
   assert(bdb);
   if(pthread_mutex_unlock(bdb->tmtx) != 0){
-    tchdbsetecode(bdb->hdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
   TCTESTYIELD();
@@ -3266,27 +3355,21 @@ static bool tcbdbcurjumpimpl(BDBCUR *cur, const char *kbuf, int ksiz, bool forwa
 
 /* Adjust a cursor object forward to the suitable record.
    `cur' specifies the cursor object.
+   `forward' specifies the direction is forward or not.
    If successful, the return value is true, else, it is false. */
 static bool tcbdbcuradjust(BDBCUR *cur, bool forward){
   assert(cur);
   TCBDB *bdb = cur->bdb;
   while(true){
     if(cur->id < 1){
-      tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+      tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
       cur->id = 0;
       cur->kidx = 0;
       cur->vidx = 0;
       return false;
     }
     BDBLEAF *leaf = tcbdbleafload(bdb, cur->id);
-    if(!leaf){
-
-      int ecode = tcbdbecode(bdb);
-      printf("%d:%s\n", ecode, tcbdberrmsg(ecode));
-      abort();
-
-      return false;
-    }
+    if(!leaf) return false;
     TCLIST *recs = leaf->recs;
     int knum = TCLISTNUM(recs);
     if(cur->kidx < 0){
@@ -3374,13 +3457,13 @@ static bool tcbdbcurputimpl(BDBCUR *cur, const char *vbuf, int vsiz, int cpmode)
   if(!leaf) return false;
   TCLIST *recs = leaf->recs;
   if(cur->kidx >= TCLISTNUM(recs)){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
   int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
   if(cur->vidx >= vnum){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   switch(cpmode){
@@ -3429,22 +3512,22 @@ static bool tcbdbcuroutimpl(BDBCUR *cur){
   if(!leaf) return false;
   TCLIST *recs = leaf->recs;
   if(cur->kidx >= TCLISTNUM(recs)){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
   int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
   if(cur->vidx >= vnum){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   if(recp->rest){
     if(cur->vidx < 1){
-      free(recp->vbuf);
+      TCFREE(recp->vbuf);
       recp->vbuf = tclistshift(recp->rest, &(recp->vsiz));
     } else {
       int vsiz;
-      free(tclistremove(recp->rest, cur->vidx - 1, &vsiz));
+      TCFREE(tclistremove(recp->rest, cur->vidx - 1, &vsiz));
     }
     if(TCLISTNUM(recp->rest) < 1){
       tclistdel(recp->rest);
@@ -3457,10 +3540,10 @@ static bool tcbdbcuroutimpl(BDBCUR *cur){
       if(!(leaf = tcbdbleafload(bdb, pid))) return false;
       if(!tcbdbleafkill(bdb, leaf)) return false;
     }
-    free(recp->vbuf);
-    free(recp->kbuf);
+    TCFREE(recp->vbuf);
+    TCFREE(recp->kbuf);
     int rsiz;
-    free(tclistremove(leaf->recs, cur->kidx, &rsiz));
+    TCFREE(tclistremove(leaf->recs, cur->kidx, &rsiz));
   }
   bdb->rnum--;
   leaf->dirty = true;
@@ -3484,13 +3567,13 @@ static bool tcbdbcurrecimpl(BDBCUR *cur, const char **kbp, int *ksp, const char 
   if(!leaf) return false;
   TCLIST *recs = leaf->recs;
   if(cur->kidx >= TCLISTNUM(recs)){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   BDBREC *recp = (BDBREC *)TCLISTVALPTR(recs, cur->kidx);
   int vnum = recp->rest ? TCLISTNUM(recp->rest) + 1 : 1;
   if(cur->vidx >= vnum){
-    tchdbsetecode(bdb->hdb, TCENOREC, __FILE__, __LINE__, __func__);
+    tcbdbsetecode(bdb, TCENOREC, __FILE__, __LINE__, __func__);
     return false;
   }
   *kbp = recp->kbuf;
@@ -3542,10 +3625,15 @@ void tcbdbprintmeta(TCBDB *bdb){
   wp += sprintf(wp, " cmpop=%p", (void *)bdb->cmpop);
   wp += sprintf(wp, " lcnum=%u", bdb->lcnum);
   wp += sprintf(wp, " ncnum=%u", bdb->ncnum);
+  wp += sprintf(wp, " lsmax=%u", bdb->lsmax);
+  wp += sprintf(wp, " lschk=%u", bdb->lschk);
+  wp += sprintf(wp, " capnum=%llu", (unsigned long long)bdb->capnum);
   wp += sprintf(wp, " hist=%p", (void *)bdb->hist);
   wp += sprintf(wp, " hnum=%d", bdb->hnum);
   wp += sprintf(wp, " hleaf=%llu", (unsigned long long)bdb->hleaf);
   wp += sprintf(wp, " lleaf=%llu", (unsigned long long)bdb->lleaf);
+  wp += sprintf(wp, " tran=%d", bdb->tran);
+  wp += sprintf(wp, " rbopaque=%p", (void *)bdb->rbopaque);
   wp += sprintf(wp, " cnt_saveleaf=%lld", (long long)bdb->cnt_saveleaf);
   wp += sprintf(wp, " cnt_loadleaf=%lld", (long long)bdb->cnt_loadleaf);
   wp += sprintf(wp, " cnt_killleaf=%lld", (long long)bdb->cnt_killleaf);

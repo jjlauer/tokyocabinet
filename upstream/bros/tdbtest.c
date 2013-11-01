@@ -131,9 +131,9 @@ int dowrite(char *name, int rnum){
   /* loop for each record */
   for(i = 1; i <= rnum; i++){
     len = sprintf(buf, "%08d", i);
-    key.dptr = buf;
+    key.dptr = (unsigned char *)buf;
     key.dsize = len;
-    record.dptr = buf;
+    record.dptr = (unsigned char *)buf;
     record.dsize = len;
     /* store a record */
     if(tdb_store(tdb, key, record, TDB_REPLACE) != 0){
@@ -174,7 +174,7 @@ int doread(char *name, int rnum){
   /* loop for each record */
   for(i = 1; i <= rnum; i++){
     len = sprintf(buf, "%08d", i);
-    key.dptr = buf;
+    key.dptr = (unsigned char *)buf;
     key.dsize = len;
     /* retrieve a record */
     record = tdb_fetch(tdb, key);

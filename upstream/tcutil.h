@@ -434,6 +434,14 @@ void tclistsort(TCLIST *list);
 void tclistsortci(TCLIST *list);
 
 
+/* Sort elements of a list object by an arbitrary comparison function.
+   `list' specifies the list object.
+   `cmp' specifies the pointer to the comparison function.  The structure TCLISTDATUM has the
+   member "ptr" which is the pointer to the region of the element, and the member "size" which is
+   the size of the region. */
+void tclistsortex(TCLIST *list, int (*cmp)(const TCLISTDATUM *, const TCLISTDATUM *));
+
+
 /* Search a list object for an element using liner search.
    `list' specifies the list object.
    `ptr' specifies the pointer to the region of the key.
@@ -1004,6 +1012,33 @@ void *tcmdbiternext(TCMDB *mdb, int *sp);
 char *tcmdbiternext2(TCMDB *mdb);
 
 
+/* Get forward matching keys in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `pbuf' specifies the pointer to the region of the prefix.
+   `psiz' specifies the size of the region of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tcmdbfwmkeys(TCMDB *mdb, const void *pbuf, int psiz, int max);
+
+
+/* Get forward matching string keys in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `pstr' specifies the string of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tcmdbfwmkeys2(TCMDB *mdb, const char *pstr, int max);
+
+
 /* Get the number of records stored in an on-memory database object.
    `mdb' specifies the on-memory database object.
    The return value is the number of the records stored in the database. */
@@ -1132,6 +1167,17 @@ TCMPOOL *tcmpoolglobal(void);
 /*************************************************************************************************
  * miscellaneous utilities
  *************************************************************************************************/
+
+
+typedef struct {                         /* type of structure for a Chord node object */
+  uint32_t seq;                          /* sequential number */
+  uint32_t hash;                         /* hash value */
+} TCCHORDNODE;
+
+typedef struct {                         /* type of structure for a Chord hash object */
+  TCCHORDNODE *nodes;                    /* node array */
+  int nnum;                              /* number of the node array */
+} TCCHORD;
 
 
 /* Get the larger value of two integers.
@@ -1305,6 +1351,50 @@ TCLIST *tcstrsplit(const char *str, const char *delims);
 char *tcstrjoin(TCLIST *list, char delim);
 
 
+/* Check whether a string matches a regular expression.
+   `str' specifies the target string.
+   `regex' specifies the regular expression string.  If it begins with `*', the trailing
+   substring is used as a case-insensitive regular expression.
+   The return value is true if matching is success, else, it is false. */
+bool tcregexmatch(const char *str, const char *regex);
+
+
+/* Replace each substring matching a regular expression string.
+   `str' specifies the target string.
+   `regex' specifies the regular expression string for substrings.  If it begins with `*', the
+   trailing substring is used as a case-insensitive regular expression.
+   `alt' specifies the alternative string with which each substrings is replaced.  Each `&' in
+   the string is replaced with the matched substring.  Each `\' in the string escapes the
+   following character.  Special escapes "\1" through "\9" referring to the corresponding
+   matching sub-expressions in the regular expression string are supported.
+   The return value is a new converted string.  Even if the regular expression is invalid, a copy
+   of the original string is returned.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcregexreplace(const char *str, const char *regex, const char *alt);
+
+
+/* Create a Chord hash object.
+   `range' specifies the number of nodes.  It should be more than 0.  The range of hash values is
+   from 0 to less than the specified number.
+   The return value is the new Chord hash object.
+   Chord is a kind of consistent hashing methods, which are useful to determine a storage node of
+   distributed hash table. */
+TCCHORD *tcchordnew(int range);
+
+
+/* Delete a Chord hash object.
+   `chord' specifies the Chord hash object. */
+void tcchorddel(TCCHORD *chord);
+
+
+/* Get the Chord hash value of a record.
+   `ptr' specifies the pointer to the region of the record.
+   `size' specifies the size of the region.
+   The return value is the Chord hash value of the record. */
+int tcchordhash(TCCHORD *chord, const void *ptr, int size);
+
+
 /* Get the time of day in seconds.
    The return value is the time of day in seconds.  The accuracy is in microseconds. */
 double tctime(void);
@@ -1359,6 +1449,11 @@ void tcdatestrhttp(int64_t t, int jl, char *buf);
    days.
    The return value is the time value of the date or `INT64_MAX' if the format is invalid. */
 int64_t tcstrmktime(const char *str);
+
+
+/* Get the jet lag of the local time.
+   The return value is the jet lag of the local time in seconds. */
+int tcjetlag(void);
 
 
 /* Get the day of week of a date.
@@ -1431,6 +1526,15 @@ bool tccopyfile(const char *src, const char *dest);
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
 TCLIST *tcreaddir(const char *path);
+
+
+/* Expand a pattern into a list of matched paths.
+   `pattern' specifies the matching pattern.
+   The return value is a list object of matched paths.  If no path is matched, an empty list is
+   returned.
+   Because the object of the return value is created with the function `tclistnew', it should
+   be deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcglobpat(const char *pattern);
 
 
 /* Remove a file or a directory and its sub ones recursively.
@@ -1575,6 +1679,34 @@ char *tcmimeencode(const char *str, const char *encname, bool base);
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
 char *tcmimedecode(const char *str, char *enp);
+
+
+/* Split a string of MIME into headers and the body.
+   `ptr' specifies the pointer to the region of MIME data.
+   `size' specifies the size of the region.
+   `headers' specifies a map handle to store headers.  If it is `NULL', it is not used.  Each key
+   of the map is an uncapitalized header name.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   The return value is the pointer to the region of the body data.
+   If the content type is defined, the header map has the key "TYPE" specifying the type.  If the
+   character encoding is defined, the key "CHARSET" specifies the encoding name.  If the boundary
+   string of multipart is defined, the key "BOUNDARY" specifies the string.  If the content
+   disposition is defined, the key "DISPOSITION" specifies the direction.  If the file name is
+   defined, the key "FILENAME" specifies the name.  If the attribute name is defined, the key
+   "NAME" specifies the name.  Because the region of the return value is allocated with the
+   `malloc' call, it should be released with the `free' call when it is no longer in use. */
+char *tcmimebreak(const char *ptr, int size, TCMAP *headers, int *sp);
+
+
+/* Split multipart data of MIME into its parts.
+   `ptr' specifies the pointer to the region of multipart data of MIME.
+   `size' specifies the size of the region.
+   `boundary' specifies the boundary string.
+   The return value is a list object.  Each element of the list is the data of a part.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcmimeparts(const char *ptr, int size, const char *boundary);
 
 
 /* Compress a serial object with Packbits encoding.
@@ -1760,7 +1892,7 @@ typedef struct {                         /* type of structure for a bit stream o
 /* Delete a bitmap object */
 #define TCBITMAPDEL(TC_bitmap) \
   do { \
-    free((TC_bitmap)); \
+    tcfree((TC_bitmap)); \
   } while(false);
 
 
@@ -1859,9 +1991,48 @@ typedef struct {                         /* type of structure for a bit stream o
 
 #include <stdio.h>
 
-#define _TC_VERSION    "1.1.15"
-#define _TC_LIBVER     201
+#define _TC_VERSION    "1.2.9"
+#define _TC_LIBVER     310
 #define _TC_FORMATVER  "1.0"
+
+enum {                                   /* enumeration for error codes */
+  TCESUCCESS,                            /* success */
+  TCETHREAD,                             /* threading error */
+  TCEINVALID,                            /* invalid operation */
+  TCENOFILE,                             /* file not found */
+  TCENOPERM,                             /* no permission */
+  TCEMETA,                               /* invalid meta data */
+  TCERHEAD,                              /* invalid record header */
+  TCEOPEN,                               /* open error */
+  TCECLOSE,                              /* close error */
+  TCETRUNC,                              /* trunc error */
+  TCESYNC,                               /* sync error */
+  TCESTAT,                               /* stat error */
+  TCESEEK,                               /* seek error */
+  TCEREAD,                               /* read error */
+  TCEWRITE,                              /* write error */
+  TCEMMAP,                               /* mmap error */
+  TCELOCK,                               /* lock error */
+  TCEUNLINK,                             /* unlink error */
+  TCERENAME,                             /* rename error */
+  TCEMKDIR,                              /* mkdir error */
+  TCERMDIR,                              /* rmdir error */
+  TCEKEEP,                               /* existing record */
+  TCENOREC,                              /* no record found */
+  TCEMISC = 9999                         /* miscellaneous error */
+};
+
+enum {                                   /* enumeration for database type */
+  TCDBTHASH,                             /* hash table */
+  TCDBTBTREE,                            /* B+ tree */
+  TCDBTFIXED                             /* fixed-length */
+};
+
+
+/* Get the message string corresponding to an error code.
+   `ecode' specifies the error code.
+   The return value is the message string of the error code. */
+const char *tcerrmsg(int ecode);
 
 
 /* Show error message on the standard error output and exit.
@@ -1979,51 +2150,61 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
   } while(false);
 
 
-/* Alias of `tcmemdup'. */
+/* Alias of `tcmalloc'. */
 #if defined(_MYFASTEST)
 #define TCMALLOC(TC_res, TC_size) \
   do { \
-    (TC_res) = malloc(TC_size); \
+    (TC_res) = MYMALLOC(TC_size); \
   } while(false)
 #else
 #define TCMALLOC(TC_res, TC_size) \
   do { \
-    if(!((TC_res) = malloc(TC_size))) tcmyfatal("out of memory"); \
+    if(!((TC_res) = MYMALLOC(TC_size))) tcmyfatal("out of memory"); \
   } while(false)
 #endif
+
 
 /* Alias of `tccalloc'. */
 #if defined(_MYFASTEST)
 #define TCCALLOC(TC_res, TC_nmemb, TC_size) \
   do { \
-    (TC_res) = calloc((TC_nmemb), (TC_size)); \
+    (TC_res) = MYCALLOC((TC_nmemb), (TC_size)); \
   } while(false)
 #else
 #define TCCALLOC(TC_res, TC_nmemb, TC_size) \
   do { \
-    if(!((TC_res) = calloc((TC_nmemb), (TC_size)))) tcmyfatal("out of memory"); \
+    if(!((TC_res) = MYCALLOC((TC_nmemb), (TC_size)))) tcmyfatal("out of memory"); \
   } while(false)
 #endif
+
 
 /* Alias of `tcrealloc'. */
 #if defined(_MYFASTEST)
 #define TCREALLOC(TC_res, TC_ptr, TC_size) \
   do { \
-    (TC_res) = realloc((TC_ptr), (TC_size)); \
+    (TC_res) = MYREALLOC((TC_ptr), (TC_size)); \
   } while(false)
 #else
 #define TCREALLOC(TC_res, TC_ptr, TC_size) \
   do { \
-    if(!((TC_res) = realloc((TC_ptr), (TC_size)))) tcmyfatal("out of memory"); \
+    if(!((TC_res) = MYREALLOC((TC_ptr), (TC_size)))) tcmyfatal("out of memory"); \
   } while(false)
 #endif
+
 
 /* Alias of `tcmemdup'. */
 #define TCMEMDUP(TC_res, TC_ptr, TC_size) \
   do { \
-    TCMALLOC((TC_res), (TC_size) + 1);   \
-    memcpy((TC_res), (TC_ptr), (TC_size));      \
+    TCMALLOC((TC_res), (TC_size) + 1); \
+    memcpy((TC_res), (TC_ptr), (TC_size)); \
     (TC_res)[TC_size] = '\0'; \
+  } while(false)
+
+
+/* Alias of `tcfree'. */
+#define TCFREE(TC_ptr) \
+  do { \
+    MYFREE(TC_ptr); \
   } while(false)
 
 

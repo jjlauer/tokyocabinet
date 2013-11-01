@@ -97,38 +97,6 @@ typedef struct {                         /* type of structure for a hash databas
   int64_t cnt_adjrecc;                   /* tesing counter for record cache adjust times */
 } TCHDB;
 
-enum {                                   /* enumeration for error codes */
-  TCESUCCESS,                            /* success */
-  TCETHREAD,                             /* threading error */
-  TCEINVALID,                            /* invalid operation */
-  TCENOFILE,                             /* file not found */
-  TCENOPERM,                             /* no permission */
-  TCEMETA,                               /* invalid meta data */
-  TCERHEAD,                              /* invalid record header */
-  TCEOPEN,                               /* open error */
-  TCECLOSE,                              /* close error */
-  TCETRUNC,                              /* trunc error */
-  TCESYNC,                               /* sync error */
-  TCESTAT,                               /* stat error */
-  TCESEEK,                               /* seek error */
-  TCEREAD,                               /* read error */
-  TCEWRITE,                              /* write error */
-  TCEMMAP,                               /* mmap error */
-  TCELOCK,                               /* lock error */
-  TCEUNLINK,                             /* unlink error */
-  TCERENAME,                             /* rename error */
-  TCEMKDIR,                              /* mkdir error */
-  TCERMDIR,                              /* rmdir error */
-  TCEKEEP,                               /* existing record */
-  TCENOREC,                              /* no record found */
-  TCEMISC = 9999                         /* miscellaneous error */
-};
-
-enum {                                   /* enumeration for database type */
-  HDBTHASH,                              /* hash table */
-  HDBTBTREE                              /* B+ tree */
-};
-
 enum {                                   /* enumeration for additional flags */
   HDBFOPEN = 1 << 0,                     /* whether opened */
   HDBFFATAL = 1 << 1                     /* whetehr with fatal error */
@@ -438,10 +406,37 @@ char *tchdbiternext2(TCHDB *hdb);
 bool tchdbiternext3(TCHDB *hdb, TCXSTR *kxstr, TCXSTR *vxstr);
 
 
+/* Get forward matching keys in a hash database object.
+   `hdb' specifies the hash database object.
+   `pbuf' specifies the pointer to the region of the prefix.
+   `psiz' specifies the size of the region of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tchdbfwmkeys(TCHDB *hdb, const void *pbuf, int psiz, int max);
+
+
+/* Get forward matching string keys in a hash database object.
+   `hdb' specifies the hash database object.
+   `pstr' specifies the string of the prefix.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the corresponding keys.  This function does never fail
+   and return an empty list even if no key corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should be
+   deleted with the function `tclistdel' when it is no longer in use.  Note that this function
+   may be very slow because every key in the database is scanned. */
+TCLIST *tchdbfwmkeys2(TCHDB *hdb, const char *pstr, int max);
+
+
 /* Synchronize updated contents of a hash database object with the file and the device.
    `hdb' specifies the hash database object connected as a writer.
    If successful, the return value is true, else, it is false.
-   This function is useful when another process connects the same database file. */
+   This function is useful when another process connects to the same database file. */
 bool tchdbsync(TCHDB *hdb);
 
 
@@ -612,6 +607,32 @@ char *tchdbopaque(TCHDB *hdb);
    The return value is the number of used elements of the bucket array or 0 if the object does not
    connect to any database file. */
 uint64_t tchdbbnumused(TCHDB *hdb);
+
+
+/* Retrieve the next record of a record in a hash database object.
+   `hdb' specifies the hash database object.
+   `kbuf' specifies the pointer to the region of the key.  If it is `NULL', the first record is
+   retrieved.
+   `ksiz' specifies the size of the region of the key.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the value of the next record.
+   `NULL' is returned if no record corresponds.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when
+   it is no longer in use. */
+void *tchdbgetnext(TCHDB *hdb, const void *kbuf, int ksiz, int *sp);
+
+
+/* Retrieve the next record of a string record in a hash database object.
+   `hdb' specifies the hash database object.
+   `kstr' specifies the string of the key.  If it is `NULL', the first record is retrieved.
+   If successful, the return value is the string of the value of the next record.  `NULL' is
+   returned if no record corresponds.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tchdbgetnext2(TCHDB *hdb, const char *kstr);
 
 
 

@@ -373,7 +373,7 @@ static void *threadread(void *targ){
     int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrand(i) : i));
     int vsiz;
     char *vbuf = tcmdbget(mdb, kbuf, ksiz, &vsiz);
-    if(vbuf) free(vbuf);
+    if(vbuf) tcfree(vbuf);
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -441,7 +441,7 @@ static void *threadtypical(void *targ){
       for(int j = 0; !err && j < 10; j++){
         int ksiz;
         char *kbuf = tcmdbiternext(mdb, &ksiz);
-        if(kbuf) free(kbuf);
+        if(kbuf) tcfree(kbuf);
       }
     } else {
       int vsiz;
@@ -455,7 +455,7 @@ static void *threadtypical(void *targ){
             err = true;
           }
         }
-        free(vbuf);
+        tcfree(vbuf);
       } else {
         if(map && tcmapget(map, buf, len, &vsiz)){
           eprint("(validation)");
@@ -483,7 +483,7 @@ static void *threadtypical(void *targ){
           eprint("(validation)");
           err = true;
         }
-        free(vbuf);
+        tcfree(vbuf);
       } else {
         eprint("(validation)");
         err = true;

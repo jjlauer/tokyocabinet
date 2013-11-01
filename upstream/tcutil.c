@@ -34,8 +34,8 @@ void (*tcfatalfunc)(const char *message) = NULL;
 /* Allocate a region on memory. */
 void *tcmalloc(size_t size){
   assert(size > 0 && size < INT_MAX);
-  char *p = malloc(size);
-  if(!p) tcmyfatal("out of memory");
+  char *p;
+  TCMALLOC(p, size);
   return p;
 }
 
@@ -43,8 +43,8 @@ void *tcmalloc(size_t size){
 /* Allocate a nullified region on memory. */
 void *tccalloc(size_t nmemb, size_t size){
   assert(nmemb > 0 && size < INT_MAX && size > 0 && size < INT_MAX);
-  char *p = calloc(nmemb, size);
-  if(!p) tcmyfatal("out of memory");
+  char *p;
+  TCCALLOC(p, nmemb, size);
   return p;
 }
 
@@ -52,8 +52,8 @@ void *tccalloc(size_t nmemb, size_t size){
 /* Re-allocate a region on memory. */
 void *tcrealloc(void *ptr, size_t size){
   assert(size >= 0 && size < INT_MAX);
-  char *p = realloc(ptr, size);
-  if(!p) tcmyfatal("out of memory");
+  char *p;
+  TCREALLOC(p, ptr, size);
   return p;
 }
 
@@ -83,7 +83,7 @@ char *tcstrdup(const void *str){
 
 /* Free a region on memory. */
 void tcfree(void *ptr){
-  free(ptr);
+  TCFREE(ptr);
 }
 
 
@@ -158,8 +158,8 @@ TCXSTR *tcxstrdup(const TCXSTR *xstr){
 /* Delete an extensible string object. */
 void tcxstrdel(TCXSTR *xstr){
   assert(xstr);
-  free(xstr->ptr);
-  free(xstr);
+  TCFREE(xstr->ptr);
+  TCFREE(xstr);
 }
 
 
@@ -224,7 +224,7 @@ void *tcxstrtomalloc(TCXSTR *xstr){
   assert(xstr);
   char *ptr;
   ptr = xstr->ptr;
-  free(xstr);
+  TCFREE(xstr);
   return ptr;
 }
 
@@ -429,10 +429,10 @@ void tclistdel(TCLIST *list){
   TCLISTDATUM *array = list->array;
   int end = list->start + list->num;
   for(int i = list->start; i < end; i++){
-    free(array[i].ptr);
+    TCFREE(array[i].ptr);
   }
-  free(list->array);
-  free(list);
+  TCFREE(list->array);
+  TCFREE(list);
 }
 
 
@@ -714,6 +714,14 @@ void tclistsortci(TCLIST *list){
 }
 
 
+/* Sort elements of a list object by an arbitrary comparison function. */
+void tclistsortex(TCLIST *list, int (*cmp)(const TCLISTDATUM *, const TCLISTDATUM *)){
+  assert(list && cmp);
+  qsort(list->array + list->start, list->num, sizeof(list->array[0]),
+        (int (*)(const void *, const void *))cmp);
+}
+
+
 /* Search a list object for an element using liner search. */
 int tclistlsearch(const TCLIST *list, const void *ptr, int size){
   assert(list && ptr && size >= 0);
@@ -744,7 +752,7 @@ void tclistclear(TCLIST *list){
   TCLISTDATUM *array = list->array;
   int end = list->start + list->num;
   for(int i = list->start; i < end; i++){
-    free(array[i].ptr);
+    TCFREE(array[i].ptr);
   }
   list->start = 0;
   list->num = 0;
@@ -816,8 +824,8 @@ TCLIST *tclistload(const void *ptr, int size){
    are equivalent. */
 static int tclistelemcmp(const void *a, const void *b){
   assert(a && b);
-  char *ao = ((TCLISTDATUM *)a)->ptr;
-  char *bo = ((TCLISTDATUM *)b)->ptr;
+  unsigned char *ao = (unsigned char *)((TCLISTDATUM *)a)->ptr;
+  unsigned char *bo = (unsigned char *)((TCLISTDATUM *)b)->ptr;
   int size = (((TCLISTDATUM *)a)->size < ((TCLISTDATUM *)b)->size) ?
     ((TCLISTDATUM *)a)->size : ((TCLISTDATUM *)b)->size;
   for(int i = 0; i < size; i++){
@@ -837,8 +845,8 @@ static int tclistelemcmpci(const void *a, const void *b){
   assert(a && b);
   TCLISTDATUM *ap = (TCLISTDATUM *)a;
   TCLISTDATUM *bp = (TCLISTDATUM *)b;
-  char *ao = ap->ptr;
-  char *bo = bp->ptr;
+  unsigned char *ao = (unsigned char *)ap->ptr;
+  unsigned char *bo = (unsigned char *)bp->ptr;
   int size = (ap->size < bp->size) ? ap->size : bp->size;
   for(int i = 0; i < size; i++){
     int ac = ao[i];
@@ -913,10 +921,7 @@ TCMAP *tcmapnew2(uint32_t bnum){
   TCMAP *map;
   TCMALLOC(map, sizeof(*map));
   TCMAPREC **buckets;
-  TCMALLOC(buckets, sizeof(map->buckets[0]) * bnum);
-  for(int i = 0; i < bnum; i++){
-    buckets[i] = NULL;
-  }
+  TCCALLOC(buckets, bnum, sizeof(map->buckets[0]));
   map->buckets = buckets;
   map->first = NULL;
   map->last = NULL;
@@ -952,11 +957,11 @@ void tcmapdel(TCMAP *map){
   TCMAPREC *rec = map->first;
   while(rec){
     TCMAPREC *next = rec->next;
-    free(rec);
+    TCFREE(rec);
     rec = next;
   }
-  free(map->buckets);
-  free(map);
+  TCFREE(map->buckets);
+  TCFREE(map);
 }
 
 
@@ -1311,7 +1316,7 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
           }
           tmp->right = rec->right;
         }
-        free(rec);
+        TCFREE(rec);
         return true;
       }
     }
@@ -1633,7 +1638,7 @@ void tcmapclear(TCMAP *map){
   TCMAPREC *rec = map->first;
   while(rec){
     TCMAPREC *next = rec->next;
-    free(rec);
+    TCFREE(rec);
     rec = next;
   }
   TCMAPREC **buckets = map->buckets;
@@ -1799,10 +1804,10 @@ void tcmdbdel(TCMDB *mdb){
     pthread_rwlock_destroy((pthread_rwlock_t *)mdb->mmtxs + i);
   }
   pthread_mutex_destroy(mdb->imtx);
-  free(mdb->maps);
-  free(mdb->imtx);
-  free(mdb->mmtxs);
-  free(mdb);
+  TCFREE(mdb->maps);
+  TCFREE(mdb->imtx);
+  TCFREE(mdb->mmtxs);
+  TCFREE(mdb);
 }
 
 
@@ -2017,6 +2022,38 @@ char *tcmdbiternext2(TCMDB *mdb){
 }
 
 
+/* Get forward matching keys in an on-memory database object. */
+TCLIST *tcmdbfwmkeys(TCMDB *mdb, const void *pbuf, int psiz, int max){
+  assert(mdb && pbuf && psiz >= 0);
+  TCLIST* keys = tclistnew();
+  if(pthread_mutex_lock(mdb->imtx) != 0) return keys;
+  if(max < 0) max = INT_MAX;
+  for(int i = 0; i < TCMDBMNUM && TCLISTNUM(keys) < max; i++){
+    if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + i) == 0){
+      TCMAP *map = mdb->maps[i];
+      TCMAPREC *cur = map->cur;
+      tcmapiterinit(map);
+      int ksiz;
+      const char *kbuf;
+      while(TCLISTNUM(keys) < max && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
+        if(ksiz >= psiz && !memcmp(kbuf, pbuf, psiz)) tclistpush(keys, kbuf, ksiz);
+      }
+      map->cur = cur;
+      pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
+    }
+  }
+  pthread_mutex_unlock(mdb->imtx);
+  return keys;
+}
+
+
+/* Get forward matching string keys in an on-memory database object. */
+TCLIST *tcmdbfwmkeys2(TCMDB *mdb, const char *pstr, int max){
+  assert(mdb && pstr);
+  return tcmdbfwmkeys(mdb, pstr, strlen(pstr), max);
+}
+
+
 /* Get the number of records stored in an on-memory database. */
 uint64_t tcmdbrnum(TCMDB *mdb){
   assert(mdb);
@@ -2101,10 +2138,10 @@ void tcmpooldel(TCMPOOL *mpool){
   for(int i = mpool->num - 1; i >= 0; i--){
     elems[i].del(elems[i].ptr);
   }
-  free(elems);
+  TCFREE(elems);
   pthread_mutex_destroy(mpool->mutex);
-  free(mpool->mutex);
-  free(mpool);
+  TCFREE(mpool->mutex);
+  TCFREE(mpool);
 }
 
 
@@ -2212,6 +2249,7 @@ static void tcmpooldelglobal(void){
 
 #define TCRANDDEV      "/dev/urandom"    // path of the random device file
 #define TCDISTBUFSIZ   16384             // size of an distance buffer
+#define TCCHORDVNNUM   128               // number of virtual node of Chord
 
 
 /* File descriptor of random number generator. */
@@ -2221,6 +2259,7 @@ int tcrandomdevfd = -1;
 /* private function prototypes */
 static void tcrandomfdclose(void);
 static time_t tcmkgmtime(struct tm *tm);
+static int tcchordcmp(const void *a, const void *b);
 
 
 /* Get the larger value of two integers. */
@@ -2369,7 +2408,7 @@ int tcstrdist(const char *astr, const char *bstr){
     }
   }
   int rv = tbl[alen*dsiz+blen];
-  if(tbl != tbuf) free(tbl);
+  if(tbl != tbuf) TCFREE(tbl);
   return rv;
 }
 
@@ -2423,9 +2462,9 @@ int tcstrdistutf(const char *astr, const char *bstr){
   aary++;
   bary++;
   int rv = tbl[alen*dsiz+blen];
-  if(tbl != tbuf) free(tbl);
-  if(bary != bbuf) free(bary);
-  if(aary != abuf) free(aary);
+  if(tbl != tbuf) TCFREE(tbl);
+  if(bary != bbuf) TCFREE(bary);
+  if(aary != abuf) TCFREE(aary);
   return rv;
 }
 
@@ -2645,6 +2684,132 @@ char *tcstrjoin(TCLIST *list, char delim){
 }
 
 
+/* Check whether a string matches a regular expression. */
+bool tcregexmatch(const char *str, const char *regex){
+  assert(str && regex);
+  int options = REG_EXTENDED | REG_NOSUB;
+  if(*regex == '*'){
+    options |= REG_ICASE;
+    regex++;
+  }
+  regex_t rbuf;
+  if(regcomp(&rbuf, regex, options) != 0) return false;
+  bool rv = regexec(&rbuf, str, 0, NULL, 0) == 0;
+  regfree(&rbuf);
+  return rv;
+}
+
+
+/* Replace each substring matching a regular expression string. */
+char *tcregexreplace(const char *str, const char *regex, const char *alt){
+  assert(str && regex && alt);
+  int options = REG_EXTENDED;
+  if(*regex == '*'){
+    options |= REG_ICASE;
+    regex++;
+  }
+  regex_t rbuf;
+  if(regex[0] == '\0' || regcomp(&rbuf, regex, options) != 0) return tcstrdup(str);
+  regmatch_t subs[256];
+  if(regexec(&rbuf, str, 32, subs, 0) != 0){
+    regfree(&rbuf);
+    return tcstrdup(str);
+  }
+  const char *sp = str;
+  TCXSTR *xstr = tcxstrnew();
+  bool first = true;
+  while(sp[0] != '\0' && regexec(&rbuf, sp, 10, subs, first ? 0 : REG_NOTBOL) == 0){
+    first = false;
+    if(subs[0].rm_so == -1) break;
+    tcxstrcat(xstr, sp, subs[0].rm_so);
+    for(const char *rp = alt; *rp != '\0'; rp++){
+      if(*rp == '\\'){
+        if(rp[1] >= '0' && rp[1] <= '9'){
+          int num = rp[1] - '0';
+          if(subs[num].rm_so != -1 && subs[num].rm_eo != -1)
+            tcxstrcat(xstr, sp + subs[num].rm_so, subs[num].rm_eo - subs[num].rm_so);
+          ++rp;
+        } else if(rp[1] != '\0'){
+          tcxstrcat(xstr, ++rp, 1);
+        }
+      } else if(*rp == '&'){
+        tcxstrcat(xstr, sp + subs[0].rm_so, subs[0].rm_eo - subs[0].rm_so);
+      } else {
+        tcxstrcat(xstr, rp, 1);
+      }
+    }
+    sp += subs[0].rm_eo;
+    if(subs[0].rm_eo < 1) break;
+  }
+  tcxstrcat2(xstr, sp);
+  regfree(&rbuf);
+  return tcxstrtomalloc(xstr);
+}
+
+
+/* Create a Chord hash object. */
+TCCHORD *tcchordnew(int range){
+  assert(range > 0);
+  TCCHORD *chord;
+  TCMALLOC(chord, sizeof(*chord));
+  int nnum = range * TCCHORDVNNUM;
+  TCCHORDNODE *nodes;
+  TCMALLOC(nodes, nnum * sizeof(*nodes));
+  unsigned int seed = 725;
+  for(int i = 0; i < range; i++){
+    int end = (i + 1) * TCCHORDVNNUM;
+    for(int j = i * TCCHORDVNNUM; j < end; j++){
+      nodes[j].seq = i;
+      nodes[j].hash = (seed = seed * 123456761 + 211);
+    }
+  }
+  qsort(nodes, nnum, sizeof(*nodes), tcchordcmp);
+  chord->nodes = nodes;
+  chord->nnum = nnum;
+  return chord;
+}
+
+
+/* Delete a Chord hash object. */
+void tcchorddel(TCCHORD *chord){
+  assert(chord);
+  TCFREE(chord->nodes);
+  TCFREE(chord);
+}
+
+
+/* Get the Chord hash value of a record. */
+int tcchordhash(TCCHORD *chord, const void *ptr, int size){
+  assert(chord && ptr && size >= 0);
+  uint32_t hash = 19771007;
+  const char *rp = (char *)ptr + size;
+  while(size--){
+    hash = ((hash << 5) - hash) ^ *(uint8_t *)--rp;
+    hash ^= hash << 7;
+  }
+  TCCHORDNODE *nodes = chord->nodes;
+  int low = 0;
+  int high = chord->nnum;
+  while(low < high){
+    int mid = (low + high) >> 1;
+    uint32_t nhash = nodes[mid].hash;
+    if(hash < nhash){
+      high = mid;
+    } else if(hash > nhash){
+      low = mid + 1;
+    } else {
+      low = mid;
+      break;
+    }
+
+
+
+  }
+  if(low >= chord->nnum) low = 0;
+  return nodes[low].seq & INT_MAX;
+}
+
+
 /* Get the time of day in seconds. */
 double tctime(void){
   struct timeval tv;
@@ -2656,21 +2821,8 @@ double tctime(void){
 /* Get the Gregorian calendar of a time. */
 void tccalendar(int64_t t, int jl, int *yearp, int *monp, int *dayp,
                 int *hourp, int *minp, int *secp){
-  if(t == INT64_MAX || jl == INT_MAX){
-    struct timeval tv;
-    struct timezone tz;
-    if(gettimeofday(&tv, &tz) == 0){
-      if(t == INT64_MAX) t = tv.tv_sec;
-      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
-    } else {
-      if(yearp) *yearp = 0;
-      if(monp) *monp = 0;
-      if(dayp) *dayp = 0;
-      if(hourp) *hourp = 0;
-      if(minp) *minp = 0;
-      if(secp) *secp = 0;
-    }
-  }
+  if(t == INT64_MAX) t = time(NULL);
+  if(jl == INT_MAX) jl = tcjetlag();
   time_t tt = (time_t)t + jl;
   struct tm ts;
   if(!gmtime_r(&tt, &ts)){
@@ -2693,17 +2845,8 @@ void tccalendar(int64_t t, int jl, int *yearp, int *monp, int *dayp,
 /* Format a date as a string in W3CDTF. */
 void tcdatestrwww(int64_t t, int jl, char *buf){
   assert(buf);
-  if(t == INT64_MAX || jl == INT_MAX){
-    struct timeval tv;
-    struct timezone tz;
-    if(gettimeofday(&tv, &tz) == 0){
-      if(t == INT64_MAX) t = tv.tv_sec;
-      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
-    } else {
-      if(t == INT64_MAX) t = time(NULL);
-      if(jl == INT_MAX) jl = 0;
-    }
-  }
+  if(t == INT64_MAX) t = time(NULL);
+  if(jl == INT_MAX) jl = tcjetlag();
   time_t tt = (time_t)t + jl;
   struct tm ts;
   if(!gmtime_r(&tt, &ts)) memset(&ts, 0, sizeof(ts));
@@ -2727,17 +2870,8 @@ void tcdatestrwww(int64_t t, int jl, char *buf){
 /* Format a date as a string in RFC 1123 format. */
 void tcdatestrhttp(int64_t t, int jl, char *buf){
   assert(buf);
-  if(t == INT64_MAX || jl == INT_MAX){
-    struct timeval tv;
-    struct timezone tz;
-    if(gettimeofday(&tv, &tz) == 0){
-      if(t == INT64_MAX) t = tv.tv_sec;
-      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
-    } else {
-      if(t == INT64_MAX) t = time(NULL);
-      if(jl == INT_MAX) jl = 0;
-    }
-  }
+  if(t == INT64_MAX) t = time(NULL);
+  if(jl == INT_MAX) jl = tcjetlag();
   time_t tt = (time_t)t + jl;
   struct tm ts;
   if(!gmtime_r(&tt, &ts)) memset(&ts, 0, sizeof(ts));
@@ -2965,6 +3099,13 @@ int64_t tcstrmktime(const char *str){
 }
 
 
+/* Get the jet lag of the local time. */
+int tcjetlag(void){
+  tzset();
+  return -timezone;
+}
+
+
 /* Get the day of week of a date. */
 int tcdayofweek(int year, int mon, int day){
   if(mon < 3){
@@ -2981,6 +3122,17 @@ static void tcrandomfdclose(void){
 }
 
 
+/* Compare two Chord nodes.
+   `a' specifies the pointer to one node object.
+   `b' specifies the pointer to the other node object.
+   The return value is positive if the former is big, negative if the latter is big, 0 if both
+   are equivalent. */
+static int tcchordcmp(const void *a, const void *b){
+  if(((TCCHORDNODE *)a)->hash == ((TCCHORDNODE *)b)->hash) return 0;
+  return ((TCCHORDNODE *)a)->hash > ((TCCHORDNODE *)b)->hash;
+}
+
+
 /* Make the GMT from a time structure.
    `tm' specifies the pointer to the time structure.
    The return value is the GMT. */
@@ -2990,18 +3142,7 @@ static time_t tcmkgmtime(struct tm *tm){
   return timegm(tm);
 #else
   assert(tm);
-  static int jl = INT_MAX;
-  if(jl == INT_MAX){
-    struct timeval tv;
-    struct timezone tz;
-    if(gettimeofday(&tv, &tz) == 0){
-      jl = tz.tz_minuteswest * -60;
-    } else {
-      jl = 0;
-    }
-  }
-  tm->tm_sec += jl;
-  return mktime(tm);
+  return mktime(tm) + tcjetlag();
 #endif
 }
 
@@ -3152,6 +3293,22 @@ TCLIST *tcreaddir(const char *path){
 }
 
 
+/* Expand a pattern into a list of matched paths. */
+TCLIST *tcglobpat(const char *pattern){
+  assert(pattern);
+  TCLIST *list = tclistnew();
+  glob_t gbuf;
+  memset(&gbuf, 0, sizeof(gbuf));
+  if(glob(pattern, GLOB_ERR | GLOB_NOSORT, NULL, &gbuf) == 0){
+    for(int i = 0; i < gbuf.gl_pathc; i++){
+      tclistpush2(list, gbuf.gl_pathv[i]);
+    }
+    globfree(&gbuf);
+  }
+  return list;
+}
+
+
 /* Remove a file or a directory and its sub ones recursively. */
 bool tcremovelink(const char *path){
   assert(path);
@@ -3171,7 +3328,7 @@ bool tcremovelink(const char *path){
       cpath = tcsprintf("%s%c%s", path, MYPATHCHR, elem);
     }
     tcremovelink(cpath);
-    free(cpath);
+    TCFREE(cpath);
   }
   tclistdel(list);
   return rmdir(path) == 0 ? true : false;
@@ -3316,8 +3473,22 @@ char *tcurldecode(const char *str, int *sp){
 TCMAP *tcurlbreak(const char *str){
   assert(str);
   TCMAP *map = tcmapnew2(TCURLELBNUM);
-  char *tmp = tcstrdup(str);
-  const char *rp = tcstrtrim(tmp);
+  char *trim = tcstrdup(str);
+  tcstrtrim(trim);
+  const char *rp = trim;
+  char *norm;
+  TCMALLOC(norm, strlen(trim) * 3 + 1);
+  char *wp = norm;
+  while(*rp != '\0'){
+    if(*rp > 0x20 && *rp < 0x7f){
+      *(wp++) = *rp;
+    } else {
+      wp += sprintf(wp, "%%%02X", *(unsigned char *)rp);
+    }
+    rp++;
+  }
+  *wp = '\0';
+  rp = norm;
   tcmapput2(map, "self", rp);
   bool serv = false;
   if(tcstrifwm(rp, "http://")){
@@ -3386,7 +3557,8 @@ TCMAP *tcurlbreak(const char *str){
   } else {
     tcmapput2(map, "path", rp);
   }
-  free(tmp);
+  TCFREE(norm);
+  TCFREE(trim);
   if((rp = tcmapget2(map, "path")) != NULL){
     if((ep = strrchr(rp, '/')) != NULL){
       if(ep[1] != '\0') tcmapput2(map, "file", ep + 1);
@@ -3444,21 +3616,21 @@ char *tcurlresolve(const char *base, const char *target){
       tmp = tcurldecode(vbuf, &vsiz);
       enc = tcurlencode(tmp, vsiz);
       tcxstrcat2(rbuf, enc);
-      free(enc);
-      free(tmp);
+      TCFREE(enc);
+      TCFREE(tmp);
       TCXSTRCAT(rbuf, ":", 1);
       wp++;
       tmp = tcurldecode(wp, &vsiz);
       enc = tcurlencode(tmp, vsiz);
       tcxstrcat2(rbuf, enc);
-      free(enc);
-      free(tmp);
+      TCFREE(enc);
+      TCFREE(tmp);
     } else {
       tmp = tcurldecode(vbuf, &vsiz);
       enc = tcurlencode(tmp, vsiz);
       tcxstrcat2(rbuf, enc);
-      free(enc);
-      free(tmp);
+      TCFREE(enc);
+      TCFREE(tmp);
     }
     TCXSTRCAT(rbuf, "@", 1);
   }
@@ -3467,8 +3639,8 @@ char *tcurlresolve(const char *base, const char *target){
     tcstrtolower(tmp);
     enc = tcurlencode(tmp, vsiz);
     tcxstrcat2(rbuf, enc);
-    free(enc);
-    free(tmp);
+    TCFREE(enc);
+    TCFREE(tmp);
   } else {
     TCXSTRCAT(rbuf, "localhost", 9);
   }
@@ -3488,12 +3660,12 @@ char *tcurlresolve(const char *base, const char *target){
   } else {
     opaths = tcstrsplit("/", "/");
   }
-  free(tclistpop2(opaths));
+  TCFREE(tclistpop2(opaths));
   for(int i = 0; i < TCLISTNUM(opaths); i++){
     vbuf = tclistval(opaths, i, &vsiz);
     if(vsiz < 1 || !strcmp(vbuf, ".")) continue;
     if(!strcmp(vbuf, "..")){
-      free(tclistpop2(bpaths));
+      TCFREE(tclistpop2(bpaths));
     } else {
       TCLISTPUSH(bpaths, vbuf, vsiz);
     }
@@ -3504,7 +3676,7 @@ char *tcurlresolve(const char *base, const char *target){
     vbuf = tclistval(opaths, i, &vsiz);
     if(vsiz < 1 || !strcmp(vbuf, ".")) continue;
     if(!strcmp(vbuf, "..")){
-      free(tclistpop2(bpaths));
+      TCFREE(tclistpop2(bpaths));
     } else {
       TCLISTPUSH(bpaths, vbuf, vsiz);
     }
@@ -3520,8 +3692,8 @@ char *tcurlresolve(const char *base, const char *target){
     enc = tcurlencode(tmp, strlen(tmp));
     TCXSTRCAT(rbuf, "/", 1);
     tcxstrcat2(rbuf, enc);
-    free(enc);
-    free(tmp);
+    TCFREE(enc);
+    TCFREE(tmp);
   }
   if(tcstrbwm(path, "/")) TCXSTRCAT(rbuf, "/", 1);
   tclistdel(bpaths);
@@ -3537,21 +3709,21 @@ char *tcurlresolve(const char *base, const char *target){
         tmp = tcurldecode(vbuf, &vsiz);
         enc = tcurlencode(tmp, vsiz);
         tcxstrcat2(rbuf, enc);
-        free(enc);
-        free(tmp);
+        TCFREE(enc);
+        TCFREE(tmp);
         TCXSTRCAT(rbuf, "=", 1);
         wp++;
         tmp = tcurldecode(wp, &vsiz);
         enc = tcurlencode(tmp, strlen(tmp));
         tcxstrcat2(rbuf, enc);
-        free(enc);
-        free(tmp);
+        TCFREE(enc);
+        TCFREE(tmp);
       } else {
         tmp = tcurldecode(vbuf, &vsiz);
         enc = tcurlencode(tmp, vsiz);
         tcxstrcat2(rbuf, enc);
-        free(enc);
-        free(tmp);
+        TCFREE(enc);
+        TCFREE(tmp);
       }
     }
     tclistdel(qelems);
@@ -3561,8 +3733,8 @@ char *tcurlresolve(const char *base, const char *target){
     enc = tcurlencode(tmp, vsiz);
     TCXSTRCAT(rbuf, "#", 1);
     tcxstrcat2(rbuf, enc);
-    free(enc);
-    free(tmp);
+    TCFREE(enc);
+    TCFREE(tmp);
   }
   tcmapdel(belems);
   tcmapdel(telems);
@@ -3742,7 +3914,7 @@ char *tcmimeencode(const char *str, const char *encname, bool base){
   wp += sprintf(wp, "=?%s?%c?", encname, base ? 'B' : 'Q');
   char *enc = base ? tcbaseencode(str, len) : tcquoteencode(str, len);
   wp += sprintf(wp, "%s?=", enc);
-  free(enc);
+  TCFREE(enc);
   return buf;
 }
 
@@ -3774,8 +3946,8 @@ char *tcmimedecode(const char *str, char *enp){
       int len;
       char *dec = quoted ? tcquotedecode(tmp, &len) : tcbasedecode(tmp, &len);
       wp += sprintf(wp, "%s", dec);
-      free(dec);
-      free(tmp);
+      TCFREE(dec);
+      TCFREE(tmp);
       str = ep + 1;
       if(*str != '\0') str++;
     } else {
@@ -3785,6 +3957,181 @@ char *tcmimedecode(const char *str, char *enp){
   }
   *wp = '\0';
   return buf;
+}
+
+
+/* Split a string of MIME into headers and the body. */
+char *tcmimebreak(const char *ptr, int size, TCMAP *headers, int *sp){
+  assert(ptr && size >= 0 && sp);
+  const char *head = NULL;
+  int hlen = 0;
+  for(int i = 0; i < size; i++){
+    if(i < size - 4 && ptr[i] == '\r' && ptr[i+1] == '\n' &&
+       ptr[i+2] == '\r' && ptr[i+3] == '\n'){
+      head = ptr;
+      hlen = i;
+      ptr += i + 4;
+      size -= i + 4;
+      break;
+    } else if(i < size - 2 && ptr[i] == '\n' && ptr[i+1] == '\n'){
+      head = ptr;
+      hlen = i;
+      ptr += i + 2;
+      size -= i + 2;
+      break;
+    }
+  }
+  if(head && headers){
+    char *hbuf;
+    TCMALLOC(hbuf, hlen + 1);
+    int wi = 0;
+    for(int i = 0; i < hlen; i++){
+      if(head[i] == '\r') continue;
+      if(i < hlen - 1 && head[i] == '\n' && (head[i+1] == ' ' || head[i+1] == '\t')){
+        hbuf[wi++] = ' ';
+        i++;
+      } else {
+        hbuf[wi++] = head[i];
+      }
+    }
+    hbuf[wi] = '\0';
+    TCLIST *list = tcstrsplit(hbuf, "\n");
+    int ln = TCLISTNUM(list);
+    for(int i = 0; i < ln; i++){
+      const char *line = TCLISTVALPTR(list, i);
+      const char *pv = strchr(line, ':');
+      if(pv){
+        char *name;
+        TCMEMDUP(name, line, pv - line);
+        for(int j = 0; name[j] != '\0'; j++){
+          if(name[j] >= 'A' && name[j] <= 'Z') name[j] -= 'A' - 'a';
+        }
+        pv++;
+        while(*pv == ' ' || *pv == '\t'){
+          pv++;
+        }
+        tcmapput2(headers, name, pv);
+        TCFREE(name);
+      }
+    }
+    tclistdel(list);
+    TCFREE(hbuf);
+    const char *pv = tcmapget2(headers, "content-type");
+    if(pv){
+      const char *ep = strchr(pv, ';');
+      if(ep){
+        tcmapput(headers, "TYPE", 4, pv, ep - pv);
+        do {
+          ep++;
+          while(ep[0] == ' '){
+            ep++;
+          }
+          if(tcstrifwm(ep, "charset=")){
+            ep += 8;
+            while(*ep > '\0' && *ep <= ' '){
+              ep++;
+            }
+            if(ep[0] == '"') ep++;
+            pv = ep;
+            while(ep[0] != '\0' && ep[0] != ' ' && ep[0] != '"' && ep[0] != ';'){
+              ep++;
+            }
+            tcmapput(headers, "CHARSET", 7, pv, ep - pv);
+          } else if(tcstrifwm(ep, "boundary=")){
+            ep += 9;
+            while(*ep > '\0' && *ep <= ' '){
+              ep++;
+            }
+            if(ep[0] == '"'){
+              ep++;
+              pv = ep;
+              while(ep[0] != '\0' && ep[0] != '"'){
+                ep++;
+              }
+            } else {
+              pv = ep;
+              while(ep[0] != '\0' && ep[0] != ' ' && ep[0] != '"' && ep[0] != ';'){
+                ep++;
+              }
+            }
+            tcmapput(headers, "BOUNDARY", 8, pv, ep - pv);
+          }
+        } while((ep = strchr(ep, ';')) != NULL);
+      } else {
+        tcmapput(headers, "TYPE", 4, pv, strlen(pv));
+      }
+    }
+    if((pv = tcmapget2(headers, "content-disposition")) != NULL){
+      char *ep = strchr(pv, ';');
+      if(ep){
+        tcmapput(headers, "DISPOSITION", 11, pv, ep - pv);
+        do {
+          ep++;
+          while(ep[0] == ' '){
+            ep++;
+          }
+          if(tcstrifwm(ep, "filename=")){
+            ep += 9;
+            if(ep[0] == '"') ep++;
+            pv = ep;
+            while(ep[0] != '\0' && ep[0] != '"'){
+              ep++;
+            }
+            tcmapput(headers, "FILENAME", 8, pv, ep - pv);
+          } else if(tcstrifwm(ep, "name=")){
+            ep += 5;
+            if(ep[0] == '"') ep++;
+            pv = ep;
+            while(ep[0] != '\0' && ep[0] != '"'){
+              ep++;
+            }
+            tcmapput(headers, "NAME", 4, pv, ep - pv);
+          }
+        } while((ep = strchr(ep, ';')) != NULL);
+      } else {
+        tcmapput(headers, "DISPOSITION", 11, pv, strlen(pv));
+      }
+    }
+  }
+  *sp = size;
+  char *rv;
+  TCMEMDUP(rv, ptr, size);
+  return rv;
+}
+
+
+/* Split multipart data of MIME into its parts. */
+TCLIST *tcmimeparts(const char *ptr, int size, const char *boundary){
+  assert(ptr && size >= 0 && boundary);
+  TCLIST *list = tclistnew();
+  int blen = strlen(boundary);
+  if(blen < 1) return list;
+  const char *pv = NULL;
+  for(int i = 0; i < size; i++){
+    if(ptr[i] == '-' && ptr[i+1] == '-' && i + 2 + blen < size &&
+       tcstrfwm(ptr + i + 2, boundary) && strchr("\t\n\v\f\r ", ptr[i+2+blen])){
+      pv = ptr + i + 2 + blen;
+      if(*pv == '\r') pv++;
+      if(*pv == '\n') pv++;
+      size -= pv - ptr;
+      ptr = pv;
+      break;
+    }
+  }
+  if(!pv) return list;
+  for(int i = 0; i < size; i++){
+    if(ptr[i] == '-' && ptr[i+1] == '-' && i + 2 + blen < size &&
+       tcstrfwm(ptr + i + 2, boundary) && strchr("\t\n\v\f\r -", ptr[i+2+blen])){
+      const char *ep = ptr + i;
+      if(ep > ptr && ep[-1] == '\n') ep--;
+      if(ep > ptr && ep[-1] == '\r') ep--;
+      if(ep > pv) TCLISTPUSH(list, pv, ep - pv);
+      pv = ptr + i + 2 + blen;
+      if(*pv == '\r') pv++;
+      if(*pv == '\n') pv++;
+    }
+  }
+  return list;
 }
 
 
@@ -4156,8 +4503,8 @@ TCMAP *tcxmlattrs(const char *str){
       TCMEMDUP(copy, val, vsiz);
       char *raw = tcxmlunescape(copy);
       tcmapputkeep(map, (char *)key, ksiz, raw, strlen(raw));
-      free(raw);
-      free(copy);
+      TCFREE(raw);
+      TCFREE(copy);
     }
   }
   return map;
@@ -4196,6 +4543,38 @@ static void tcmtfencode(char *ptr, int size);
 static void tcmtfdecode(char *ptr, int size);
 static int tcgammaencode(const char *ptr, int size, char *obuf);
 static int tcgammadecode(const char *ptr, int size, char *obuf);
+
+
+/* Get the message string corresponding to an error code. */
+const char *tcerrmsg(int ecode){
+  switch(ecode){
+  case TCESUCCESS: return "success";
+  case TCETHREAD: return "threading error";
+  case TCEINVALID: return "invalid operation";
+  case TCENOFILE: return "file not found";
+  case TCENOPERM: return "no permission";
+  case TCEMETA: return "invalid meta data";
+  case TCERHEAD: return "invalid record header";
+  case TCEOPEN: return "open error";
+  case TCECLOSE: return "close error";
+  case TCETRUNC: return "trunc error";
+  case TCESYNC: return "sync error";
+  case TCESTAT: return "stat error";
+  case TCESEEK: return "seek error";
+  case TCEREAD: return "read error";
+  case TCEWRITE: return "write error";
+  case TCEMMAP: return "mmap error";
+  case TCELOCK: return "lock error";
+  case TCEUNLINK: return "unlink error";
+  case TCERENAME: return "rename error";
+  case TCEMKDIR: return "mkdir error";
+  case TCERMDIR: return "rmdir error";
+  case TCEKEEP: return "existing record";
+  case TCENOREC: return "no record found";
+  case TCEMISC: return "miscellaneous error";
+  }
+  return "unknown error";
+}
 
 
 /* Show error message on the standard error output and exit. */
@@ -4379,7 +4758,7 @@ char *tcbwtencode(const char *ptr, int size, int *idxp){
       result[i] = ptr[idx-1];
     }
   }
-  if(arrays != abuf) free(arrays);
+  if(arrays != abuf) TCFREE(arrays);
   result[size] = '\0';
   return result;
 }
@@ -4434,7 +4813,7 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
     idx = tcbwtsearchrec(array, size, array[idx].fchr);
   }
   *wp = '\0';
-  if(array != abuf) free(array);
+  if(array != abuf) TCFREE(array);
   return result;
 }
 
@@ -4503,7 +4882,7 @@ static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level)
     }
   }
   memcpy(arrays, narrays, anum * sizeof(*narrays));
-  if(narrays != nbuf) free(narrays);
+  if(narrays != nbuf) TCFREE(narrays);
 }
 
 
@@ -4691,7 +5070,7 @@ static void tcbwtsortreccount(TCBWTREC *array, int anum){
     narray[accum[array[i].tchr>>23]++] = array[i];
   }
   memcpy(array, narray, anum * sizeof(*narray));
-  if(narray != nbuf) free(narray);
+  if(narray != nbuf) TCFREE(narray);
 }
 
 

@@ -1,4 +1,4 @@
-.TH "TCUCODEC" 1 "2008-01-17" "Man Page" "Tokyo Cabinet"
+.TH "TCUCODEC" 1 "2008-06-18" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcucodec \- popular encoders and decoders
@@ -24,7 +24,7 @@ Perform Base64 encoding and its decoding.
 Perform quoted\-printable encoding and its decoding.
 .RE
 .br
-\fBtcucodec mime \fR[\fB\-d\fR]\fB \fR[\fB\-en \fIname\fB\fR]\fB \fR[\fB\-q\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
+\fBtcucodec mime \fR[\fB\-d\fR]\fB \fR[\fB\-en \fIname\fB\fR]\fB \fR[\fB\-q\fR]\fB \fR[\fB\-on\fR]\fB \fR[\fB\-hd\fR]\fB \fR[\fB\-bd\fR]\fB \fR[\fB\-part \fInum\fB\fR]\fB \fR[\fB\fIfile\fB\fR]\fB\fR
 .RS
 Perform MIME encoding and its decoding.
 .RE
@@ -77,6 +77,14 @@ Options feature the following.
 \fB\-en\fR \fIname\fR : specify the input encoding, which is UTF\-8 by default.
 .br
 \fB\-q\fR : use quoted\-printable encoding, which is Base64 by default.
+.br
+\fB\-on\fR : output the charset name when decoding.
+.br
+\fB\-bd\fR : perform MIME parsing and output the body.
+.br
+\fB\-hd\fR : perform MIME parsing and output the headers.
+.br
+\fB\-part\fR \fInum\fR : perform MIME parsing and output the specified part.
 .br
 \fB\-bwt\fR : convert by BWT as preprocessing.
 .br

@@ -27,7 +27,6 @@ const char *g_progname;                  // program name
 int main(int argc, char **argv);
 static void usage(void);
 static void printerr(TCADB *adb);
-static void deldb(const char *name);
 static int printdata(const char *ptr, int size, bool px);
 static char *hextoobj(const char *str, int *sp);
 static int runcreate(int argc, char **argv);
@@ -43,7 +42,7 @@ static int procput(const char *name, const char *kbuf, int ksiz, const char *vbu
                    int dmode);
 static int procout(const char *name, const char *kbuf, int ksiz);
 static int procget(const char *name, const char *kbuf, int ksiz, bool px, bool pz);
-static int proclist(const char *name, int max, bool pv, bool px);
+static int proclist(const char *name, int max, bool pv, bool px, const char *fmstr);
 static int procversion(void);
 
 
@@ -83,7 +82,7 @@ static void usage(void){
   fprintf(stderr, "  %s put [-sx] [-dk|-dc] name key value\n", g_progname);
   fprintf(stderr, "  %s out [-sx] name key\n", g_progname);
   fprintf(stderr, "  %s get [-sx] [-px] [-pz] name key\n", g_progname);
-  fprintf(stderr, "  %s list [-m num] [-pv] [-px] name\n", g_progname);
+  fprintf(stderr, "  %s list [-m num] [-pv] [-px] [-fm str] name\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -93,16 +92,6 @@ static void usage(void){
 /* print error information */
 static void printerr(TCADB *adb){
   fprintf(stderr, "%s: error\n", g_progname);
-}
-
-
-/* delete the existing file of a database name */
-static void deldb(const char *name){
-  char path[PATH_MAX];
-  sprintf(path, "%s", name);
-  char *pv = strchr(path, '#');
-  if(pv) *pv = '\0';
-  unlink(path);
 }
 
 
@@ -177,7 +166,7 @@ static int runinform(int argc, char **argv){
   if(!name) usage();
   name = tcsprintf("%s#mode=r", name);
   int rv = procinform(name);
-  free(name);
+  tcfree(name);
   return rv;
 }
 
@@ -223,8 +212,8 @@ static int runput(int argc, char **argv){
     vbuf = tcmemdup(value, vsiz);
   }
   int rv = procput(name, kbuf, ksiz, vbuf, vsiz, dmode);
-  free(vbuf);
-  free(kbuf);
+  tcfree(vbuf);
+  tcfree(kbuf);
   return rv;
 }
 
@@ -259,7 +248,7 @@ static int runout(int argc, char **argv){
     kbuf = tcmemdup(key, ksiz);
   }
   int rv = procout(name, kbuf, ksiz);
-  free(kbuf);
+  tcfree(kbuf);
   return rv;
 }
 
@@ -301,8 +290,8 @@ static int runget(int argc, char **argv){
   }
   name = tcsprintf("%s#mode=r", name);
   int rv = procget(name, kbuf, ksiz, px, pz);
-  free(name);
-  free(kbuf);
+  tcfree(name);
+  tcfree(kbuf);
   return rv;
 }
 
@@ -313,6 +302,7 @@ static int runlist(int argc, char **argv){
   int max = -1;
   bool pv = false;
   bool px = false;
+  char *fmstr = NULL;
   for(int i = 2; i < argc; i++){
     if(!name && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-m")){
@@ -322,6 +312,9 @@ static int runlist(int argc, char **argv){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
         px = true;
+      } else if(!strcmp(argv[i], "-fm")){
+        if(++i >= argc) usage();
+        fmstr = argv[i];
       } else {
         usage();
       }
@@ -333,8 +326,8 @@ static int runlist(int argc, char **argv){
   }
   if(!name) usage();
   name = tcsprintf("%s#mode=r", name);
-  int rv = proclist(name, max, pv, px);
-  free(name);
+  int rv = proclist(name, max, pv, px, fmstr);
+  tcfree(name);
   return rv;
 }
 
@@ -348,7 +341,6 @@ static int runversion(int argc, char **argv){
 
 /* perform create command */
 static int proccreate(const char *name){
-  deldb(name);
   TCADB *adb = tcadbnew();
   if(!tcadbopen(adb, name)){
     printerr(adb);
@@ -460,7 +452,7 @@ static int procget(const char *name, const char *kbuf, int ksiz, bool px, bool p
   if(vbuf){
     printdata(vbuf, vsiz, px);
     if(!pz) putchar('\n');
-    free(vbuf);
+    tcfree(vbuf);
   } else {
     printerr(adb);
     err = true;
@@ -475,7 +467,7 @@ static int procget(const char *name, const char *kbuf, int ksiz, bool px, bool p
 
 
 /* perform list command */
-static int proclist(const char *name, int max, bool pv, bool px){
+static int proclist(const char *name, int max, bool pv, bool px, const char *fmstr){
   TCADB *adb = tcadbnew();
   if(!tcadbopen(adb, name)){
     printerr(adb);
@@ -483,27 +475,47 @@ static int proclist(const char *name, int max, bool pv, bool px){
     return 1;
   }
   bool err = false;
-  if(!tcadbiterinit(adb)){
-    printerr(adb);
-    err = true;
-  }
-  int ksiz;
-  char *kbuf;
-  int cnt = 0;
-  while((kbuf = tcadbiternext(adb, &ksiz)) != NULL){
-    printdata(kbuf, ksiz, px);
-    if(pv){
-      int vsiz;
-      char *vbuf = tcadbget(adb, kbuf, ksiz, &vsiz);
-      if(vbuf){
-        putchar('\t');
-        printdata(vbuf, vsiz, px);
-        free(vbuf);
+  if(fmstr){
+    TCLIST *keys = tcadbfwmkeys2(adb, fmstr, max);
+    for(int i = 0; i < tclistnum(keys); i++){
+      int ksiz;
+      const char *kbuf = tclistval(keys, i, &ksiz);
+      printdata(kbuf, ksiz, px);
+      if(pv){
+        int vsiz;
+        char *vbuf = tcadbget(adb, kbuf, ksiz, &vsiz);
+        if(vbuf){
+          putchar('\t');
+          printdata(vbuf, vsiz, px);
+          tcfree(vbuf);
+        }
       }
+      putchar('\n');
     }
-    putchar('\n');
-    free(kbuf);
-    if(max >= 0 && ++cnt >= max) break;
+    tclistdel(keys);
+  } else {
+    if(!tcadbiterinit(adb)){
+      printerr(adb);
+      err = true;
+    }
+    int ksiz;
+    char *kbuf;
+    int cnt = 0;
+    while((kbuf = tcadbiternext(adb, &ksiz)) != NULL){
+      printdata(kbuf, ksiz, px);
+      if(pv){
+        int vsiz;
+        char *vbuf = tcadbget(adb, kbuf, ksiz, &vsiz);
+        if(vbuf){
+          putchar('\t');
+          printdata(vbuf, vsiz, px);
+          tcfree(vbuf);
+        }
+      }
+      putchar('\n');
+      tcfree(kbuf);
+      if(max >= 0 && ++cnt >= max) break;
+    }
   }
   if(!tcadbclose(adb)){
     if(!err) printerr(adb);

@@ -24,6 +24,7 @@ HEADERFILES = @MYHEADERFILES@
 LIBRARYFILES = @MYLIBRARYFILES@
 LIBOBJFILES = @MYLIBOBJFILES@
 COMMANDFILES = @MYCOMMANDFILES@
+CGIFILES = @MYCGIFILES@
 MAN1FILES = @MYMAN1FILES@
 MAN3FILES = @MYMAN3FILES@
 DOCUMENTFILES = @MYDOCUMENTFILES@
@@ -70,12 +71,13 @@ POSTCMD = @MYPOSTCMD@
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $<
 
 
+
 #================================================================
 # Actions
 #================================================================
 
 
-all : $(LIBRARYFILES) $(COMMANDFILES)
+all : $(LIBRARYFILES) $(COMMANDFILES) $(CGIFILES)
 	@$(POSTCMD)
 	@printf '\n'
 	@printf '#================================================================\n'
@@ -84,7 +86,7 @@ all : $(LIBRARYFILES) $(COMMANDFILES)
 
 
 clean :
-	rm -rf $(LIBRARYFILES) $(LIBOBJFILES) $(COMMANDFILES) \
+	rm -rf $(LIBRARYFILES) $(LIBOBJFILES) $(COMMANDFILES) $(CGIFILES) \
 	  *.o a.out check.in check.out gmon.out leak.log casket casket-* casket.* *~ hoge moge
 
 
@@ -110,6 +112,8 @@ install :
 	cp -Rf $(LIBRARYFILES) $(DESTDIR)$(LIBDIR)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	cp -Rf $(COMMANDFILES) $(DESTDIR)$(BINDIR)
+	mkdir -p $(DESTDIR)$(LIBEXECDIR)
+	cp -Rf $(CGIFILES) $(DESTDIR)$(LIBEXECDIR)
 	mkdir -p $(DESTDIR)$(DATADIR)
 	cp -Rf $(DOCUMENTFILES) $(DESTDIR)$(DATADIR)
 	mkdir -p $(DESTDIR)$(MAN1DIR)
@@ -133,6 +137,7 @@ uninstall :
 	cd $(DESTDIR)$(INCLUDEDIR) && rm -f $(HEADERFILES)
 	cd $(DESTDIR)$(LIBDIR) && rm -f $(LIBRARYFILES)
 	cd $(DESTDIR)$(BINDIR) && rm -f $(COMMANDFILES)
+	cd $(DESTDIR)$(LIBEXECDIR) && rm -f $(CGIFILES)
 	cd $(DESTDIR)$(MAN1DIR) && rm -f $(MAN1FILES)
 	cd $(DESTDIR)$(MAN3DIR) && rm -f $(MAN3FILES)
 	rm -rf $(DESTDIR)$(DATADIR)
@@ -148,6 +153,8 @@ dist :
 
 
 distclean : clean
+	cd example && make clean
+	cd bros && make clean
 	rm -rf Makefile tokyocabinet.pc config.cache config.log config.status autom4te.cache
 
 
@@ -162,9 +169,9 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcutest wicked 50000
 	$(RUNENV) $(RUNCMD) ./tcumttest combo 5 50000 500
 	$(RUNENV) $(RUNCMD) ./tcumttest combo -rnd 5 50000 500
-	$(RUNENV) $(RUNCMD) ./tchmttest typical casket 5 50000 5000
-	$(RUNENV) $(RUNCMD) ./tchmttest typical -rr 1000 casket 5 50000 5000
-	$(RUNENV) $(RUNCMD) ./tchmttest typical -rc 50000 -nc casket 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest typical 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest typical -rr 1000 5 50000 5000
+	$(RUNENV) $(RUNCMD) ./tcumttest typical -nc 5 50000 5000
 	$(RUNENV) $(RUNCMD) ./tcucodec url Makefile > check.in
 	$(RUNENV) $(RUNCMD) ./tcucodec url -d check.in > check.out
 	$(RUNENV) $(RUNCMD) ./tcucodec base Makefile > check.in
@@ -198,10 +205,11 @@ check :
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -tl -td -pn 5000 casket 50000 500 5 15
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -nl -pn 500 -rl casket 5000 500 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -tb -pn 500 casket 5000 500 5 5
+	$(RUNENV) $(RUNCMD) ./tchmgr list -pv casket > check.out
+	$(RUNENV) $(RUNCMD) ./tchmgr list -pv -fm 1 -px casket > check.out
 	$(RUNENV) $(RUNCMD) ./tchtest misc casket 5000
 	$(RUNENV) $(RUNCMD) ./tchtest misc -tl -td casket 5000
 	$(RUNENV) $(RUNCMD) ./tchtest misc -mt -tb casket 500
-	$(RUNENV) $(RUNCMD) ./tchmgr list -pv casket > check.out
 	$(RUNENV) $(RUNCMD) ./tchtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -tl -td casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -mt -tb casket 5000
@@ -241,7 +249,7 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcbtest read casket
 	$(RUNENV) $(RUNCMD) ./tcbtest remove casket
 	$(RUNENV) $(RUNCMD) ./tcbmgr list -rb 00001000 00002000 casket > check.out
-	$(RUNENV) $(RUNCMD) ./tcbmgr list -rp 000001 casket > check.out
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -fm 000001 casket > check.out
 	$(RUNENV) $(RUNCMD) ./tcbtest write -mt -tl -td -ls 1024 casket 50000 5000 5000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest read -mt -nb casket
 	$(RUNENV) $(RUNCMD) ./tcbtest remove -mt casket
@@ -251,12 +259,12 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcbtest rcat -lc 5 -nc 5 -pn 500 casket 50000 5 5 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest rcat -tl -td -pn 5000 casket 50000 5 5 500 5 15
 	$(RUNENV) $(RUNCMD) ./tcbtest rcat -nl -pn 5000 -rl casket 15000 5 5 500 5 5
-	$(RUNENV) $(RUNCMD) ./tcbtest rcat -tb -pn 5000 casket 15000 5 5 500 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest rcat -ca 1000 -tb -pn 5000 casket 15000 5 5 500 5 5
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > check.out
 	$(RUNENV) $(RUNCMD) ./tcbtest queue casket 15000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbtest misc casket 5000
 	$(RUNENV) $(RUNCMD) ./tcbtest misc -tl -td casket 5000
 	$(RUNENV) $(RUNCMD) ./tcbtest misc -mt -tb casket 500
-	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > check.out
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked -tl -td casket 50000
 	$(RUNENV) $(RUNCMD) ./tcbtest wicked -mt -tb casket 5000
@@ -306,20 +314,68 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcbmgr get casket four > check.out
 	$(RUNENV) $(RUNCMD) ./tcbmgr get casket five > check.out
 	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > check.out
-	$(RUNENV) $(RUNCMD) ./tcatest write 'casket.tch#bnum=5000' 50000
+	$(RUNENV) $(RUNCMD) ./tcftest write casket 50000 50
+	$(RUNENV) $(RUNCMD) ./tcftest read casket
+	$(RUNENV) $(RUNCMD) ./tcftest remove casket
+	$(RUNENV) $(RUNCMD) ./tcftest write casket 50000 50
+	$(RUNENV) $(RUNCMD) ./tcftest read -mt -nb casket
+	$(RUNENV) $(RUNCMD) ./tcftest remove -mt casket
+	$(RUNENV) $(RUNCMD) ./tcftest rcat -pn 500 casket 50000 50
+	$(RUNENV) $(RUNCMD) ./tcftest rcat -nl -pn 500 -rl casket 5000 500
+	$(RUNENV) $(RUNCMD) ./tcfmgr list -pv casket > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr list -pv -ri "[100,200)" -px casket > check.out
+	$(RUNENV) $(RUNCMD) ./tcftest misc casket 5000
+	$(RUNENV) $(RUNCMD) ./tcftest misc -mt -nl casket 500
+	$(RUNENV) $(RUNCMD) ./tcftest wicked casket 50000
+	$(RUNENV) $(RUNCMD) ./tcftest wicked -mt -nb casket 50000
+	$(RUNENV) $(RUNCMD) ./tcfmttest write casket 5 5000 50
+	$(RUNENV) $(RUNCMD) ./tcfmttest read casket 5
+	$(RUNENV) $(RUNCMD) ./tcfmttest read -rnd casket 5
+	$(RUNENV) $(RUNCMD) ./tcfmttest remove casket 5
+	$(RUNENV) $(RUNCMD) ./tcfmttest wicked -nc casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tcfmttest wicked casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tcfmttest typical casket 5 50000 50
+	$(RUNENV) $(RUNCMD) ./tcfmttest typical -rr 1000 casket 5 50000 50
+	$(RUNENV) $(RUNCMD) ./tcfmttest typical -nc casket 5 50000 50
+	$(RUNENV) $(RUNCMD) ./tcfmgr create casket 50
+	$(RUNENV) $(RUNCMD) ./tcfmgr inform casket
+	$(RUNENV) $(RUNCMD) ./tcfmgr put casket 1 first
+	$(RUNENV) $(RUNCMD) ./tcfmgr put casket 2 second
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dk casket 3 third
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dc casket 3 third
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dc casket 3 third
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dc casket 3 third
+	$(RUNENV) $(RUNCMD) ./tcfmgr put casket 4 fourth
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dk casket 5 fifth
+	$(RUNENV) $(RUNCMD) ./tcfmgr out casket 1
+	$(RUNENV) $(RUNCMD) ./tcfmgr out casket 2
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 3 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 4 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 5 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr list -pv casket > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr optimize casket 5
+	$(RUNENV) $(RUNCMD) ./tcfmgr put -dc casket 3 third
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 3 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 4 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr get casket 5 > check.out
+	$(RUNENV) $(RUNCMD) ./tcfmgr list -pv casket > check.out
+	$(RUNENV) $(RUNCMD) ./tcatest write 'casket.tch#mode=wct#bnum=5000' 50000
 	$(RUNENV) $(RUNCMD) ./tcatest read 'casket.tch#mode=r'
-	$(RUNENV) $(RUNCMD) ./tcatest remove 'casket.tch'
-	$(RUNENV) $(RUNCMD) ./tcatest misc 'casket.tch#bnum=500#opts=ld' 5000
-	$(RUNENV) $(RUNCMD) ./tcatest wicked 'casket.tch' 5000
-	$(RUNENV) $(RUNCMD) ./tcatest write 'casket.tcb#lmemb=5#nmemb=5' 50000
+	$(RUNENV) $(RUNCMD) ./tcatest remove 'casket.tch#mode=w'
+	$(RUNENV) $(RUNCMD) ./tcatest misc 'casket.tch#mode=wct#bnum=500#opts=ld' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest wicked 'casket.tch#mode=wct' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest write 'casket.tcb#mode=wct#lmemb=5#nmemb=5' 50000
 	$(RUNENV) $(RUNCMD) ./tcatest read 'casket.tcb#mode=r'
-	$(RUNENV) $(RUNCMD) ./tcatest remove 'casket.tcb'
-	$(RUNENV) $(RUNCMD) ./tcatest misc 'casket.tcb#lmemb=5#nmemb=5#opts=ld' 5000
-	$(RUNENV) $(RUNCMD) ./tcatest wicked 'casket.tcb' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest remove 'casket.tcb#mode=w'
+	$(RUNENV) $(RUNCMD) ./tcatest misc 'casket.tcb#mode=wct#lmemb=5#nmemb=5#opts=ld' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest wicked 'casket.tcb#mode=wct' 5000
+	$(RUNENV) $(RUNCMD) ./tcatest write 'casket.tcf#mode=wct#width=10' 50000
+	$(RUNENV) $(RUNCMD) ./tcatest read 'casket.tcf#mode=r'
+	$(RUNENV) $(RUNCMD) ./tcatest remove 'casket.tcf#mode=w'
 	$(RUNENV) $(RUNCMD) ./tcatest write '*#bnum=5000#cap=100' 50000
 	$(RUNENV) $(RUNCMD) ./tcatest misc '*' 5000
 	$(RUNENV) $(RUNCMD) ./tcatest wicked '*' 5000
-	$(RUNENV) $(RUNCMD) ./tcamgr create 'casket.tch#bnum=3'
+	$(RUNENV) $(RUNCMD) ./tcamgr create 'casket.tch#mode=wct#bnum=3'
 	$(RUNENV) $(RUNCMD) ./tcamgr inform 'casket.tch'
 	$(RUNENV) $(RUNCMD) ./tcamgr put casket.tch one first
 	$(RUNENV) $(RUNCMD) ./tcamgr put casket.tch two second
@@ -334,7 +390,7 @@ check :
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch three > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch four > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch five > check.out
-	$(RUNENV) $(RUNCMD) ./tcamgr list -pv casket.tch > check.out
+	$(RUNENV) $(RUNCMD) ./tcamgr list -pv -fm f casket.tch > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr put -dc casket.tch three third
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch three > check.out
 	$(RUNENV) $(RUNCMD) ./tcamgr get casket.tch four > check.out
@@ -371,6 +427,18 @@ check-thread :
 	$(RUNENV) $(RUNCMD) ./tcbmttest typical casket 5 100000 5 5
 	$(RUNENV) $(RUNCMD) ./tcbmttest typical -nc -rr 1000 casket 5 100000 5 5
 	rm -rf casket*
+
+
+check-forever :
+	while true ; \
+	  do \
+	    make check || break ; \
+	    make check || break ; \
+	    make check || break ; \
+	    make check || break ; \
+	    make check || break ; \
+	    make check-thread || break ; \
+	  done
 
 
 dicthdb :
@@ -462,11 +530,27 @@ tcbmgr : tcbmgr.o $(LIBRARYFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
 
+tcftest : tcftest.o $(LIBRARYFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
+tcfmttest : tcfmttest.o $(LIBRARYFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
+tcfmgr : tcfmgr.o $(LIBRARYFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
 tcatest : tcatest.o $(LIBRARYFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
 
 tcamgr : tcamgr.o $(LIBRARYFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
+tcawmgr.cgi : tcawmgr.o $(LIBRARYFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
 
@@ -478,13 +562,17 @@ tchdb.o : tchdb.h tcutil.h myconf.h
 
 tcbdb.o : tcbdb.h tchdb.h tcutil.h myconf.h
 
+tcfdb.o : tcfdb.h tcutil.h myconf.h
+
 tcutest.o tcucodec.o : tcutil.h myconf.h
 
 tchtest.o tchmttest.o tchmgr.o : tcutil.h tchdb.h myconf.h
 
 tcbtest.o tcbmttest.o tcbmgr.o : tcutil.h tchdb.h tcbdb.h myconf.h
 
-tcatest.o : tcutil.h tchdb.h tcbdb.h tcadb.h myconf.h
+tcftest.o tcfmttest.o tcfmgr.o : tcutil.h tcfdb.h myconf.h
+
+tcatest.o tcamgr.o tcawmgr.o : tcutil.h tchdb.h tcbdb.h tcadb.h myconf.h
 
 
 

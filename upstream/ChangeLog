@@ -1,3 +1,115 @@
+2008-06-17  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcjetlag): new function.
+
+	* tcutil.c (tcmkgmtime): a bug related to time difference was fixed.
+
+	* tchdb.c (tchdbgetnext, tchdbgetnext2): new functions.
+
+	* tchtest.c (runwrite, procwrite): "-rnd" option was added.
+
+	* tcbtest.c (runwrite, procwrite): "-rnd" option was added.
+
+	* tcftest.c (runwrite, procwrite): "-rnd" option was added.
+
+	- Release: 1.2.9
+
+2008-06-01  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcerrmsg): new function.
+
+	* tcfdb.h, tcfdb.c: new files.
+
+	* tcadb.c: fixed-length database is now supported.
+
+	- Release: 1.2.8
+
+2008-05-23  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+	
+	* tcutil.c (tcchordnew, tcchorddel, tcchordhash): new functions.
+
+	* tcbdb.c (tcbdbleafload, tcbdbnodeload): memory leak bugs with multi-thread were fixed.
+
+	- Release: 1.2.7
+
+2008-05-01  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* myconf.h: code cleanup.
+
+	* tcutil.c (tcmimebreak, tcmimeparts): new functions.
+
+	* tchdb.c, tcbdb.c, tcadb.c: "free" was replaced by "tcfree".
+
+	* tcbdb.c (tcbdbtrancommit, tcbdbtranabort): cache adjustment was added.
+
+	* tchdb.c (tchdbsetecode): a bug of processing unopened files was fixed.
+
+	* tcawmgr.c: new file.
+
+	- Release: 1.2.6
+
+2008-04-22  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tcbdbcmpdecimal, tcbdbcmpint32, tcbdbcmpint64): bugs of overflow were fixed.
+
+	- Release: 1.2.5
+
+2008-04-13  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tcbdbopenimpl): comparison function checking was added.
+
+	* tcadb.c (tcadbopen): "capnum" option is now supported for B+ tree.
+
+	- Release: 1.2.4
+
+2008-04-07  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcregexmatch, tcregexreplace, tcglobpat): new functions.
+
+	* tcbdb.c (tcbdbcmpfunc, tcbdbcmpop): new functions.
+
+	* tcbdb.c (tcbdboptimizeimpl): leaf size limitation is now implemented.
+
+	* tcbdb.c (tcbdbsetcapnum): new function.
+
+	- Release: 1.2.3
+
+2008-03-19  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapnew2): "calloc" is now used.
+
+	* tcbdb.c (tcbdbputimpl): algorithm to divide large leaves was modified.
+
+	- Release: 1.2.2
+
+2008-03-13  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tclistelemcmp, tclistelemcmpci): bugs about multibyte ordering were fixed.
+
+	* tcutil.c (tclistsortex): new function.
+
+	* tcbdb.c (tcbdbsetecode): new function.
+
+	* tcadb.c (tcadbopen): "c", "t", "e", and "w" options were added.
+
+	- Release: 1.2.1
+
+2008-02-18  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcmdb.c (tcmdbfwmkeys, tcmdbfwmkeys2): new functions.
+
+	* tchdb.c (tchdbfwmkeys, tchdbfwmkeys2): new functions.
+
+	* tcbdb.c (tcbdbfwmkeys, tcbdbfwmkeys2): new functions instead of "tcbdbrange3".
+
+	* tcadb.c (tcadbfwmkeys, tcadbfwmkeys2): new functions.
+
+	* tcbdb.c (tcbdbrangeimpl): a bug related to mutex operation was fixed.
+
+	- The library version was bumped up for some binary packages.
+
+	- Release: 1.2.0
+
 2008-02-15  Mikio Hirabayashi  <mikio@users.sourceforge.net>
 
 	* tcutil.c (tcbwtsortchrcount): time efficiency was improved.

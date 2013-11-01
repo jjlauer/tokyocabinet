@@ -42,17 +42,18 @@ static int runmisc(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int procwrite(const char *path, int rnum, int lmemb, int nmemb, int bnum,
                      int apow, int fpow, bool mt, BDBCMP cmp, int opts,
-                     int lcnum, int ncnum, int lsmax, int omode);
+                     int lcnum, int ncnum, int lsmax, int capnum, int omode, bool rnd);
 static int procread(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum,
-                    int omode, bool wb);
-static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum, int omode);
+                    int omode, bool wb, bool rnd);
+static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum, int omode,
+                      bool rnd);
 static int procrcat(const char *path, int rnum,
                     int lmemb, int nmemb, int bnum, int apow, int fpow,
-                    bool mt, BDBCMP cmp, int opts, int lcnum, int ncnum, int lsmax,
+                    bool mt, BDBCMP cmp, int opts, int lcnum, int ncnum, int lsmax, int capnum,
                     int omode, int pnum, bool rl);
 static int procqueue(const char *path, int rnum, int lmemb, int nmemb, int bnum,
                      int apow, int fpow, bool mt, BDBCMP cmp, int opts,
-                     int lcnum, int ncnum, int lsmax, int omode);
+                     int lcnum, int ncnum, int lsmax, int capnum, int omode);
 static int procmisc(const char *path, int rnum, bool mt, int opts, int omode);
 static int procwicked(const char *path, int rnum, bool mt, int opts, int omode);
 
@@ -92,17 +93,19 @@ static void usage(void){
   fprintf(stderr, "%s: test cases of the B+ tree database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s write [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num] [-ls num]"
-          " [-nl|-nb] path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
-  fprintf(stderr, "  %s read [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb] [-wb]"
+  fprintf(stderr, "  %s write [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num]"
+          " [-ls num] [-ca num] [-nl|-nb] [-rnd] path rnum"
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
+  fprintf(stderr, "  %s read [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb] [-wb] [-rnd]"
           " path\n", g_progname);
-  fprintf(stderr, "  %s remove [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb]"
+  fprintf(stderr, "  %s remove [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb] [-rnd]"
           " path\n", g_progname);
-  fprintf(stderr, "  %s rcat [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num] [-ls num]"
-          " [-nl|-nb] [-pn num] [-rl] path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n",
+  fprintf(stderr, "  %s rcat [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num]"
+          " [-ls num] [-ca num] [-nl|-nb] [-pn num] [-rl] path rnum"
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
+  fprintf(stderr, "  %s queue [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num]"
+          " [-ls num] [-ca num] [-nl|-nb] path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n",
           g_progname);
-  fprintf(stderr, "  %s queue [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num] [-ls num]"
-          " [-nl|-nb] path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s misc [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "\n");
@@ -183,7 +186,9 @@ static int runwrite(int argc, char **argv){
   int lcnum = 0;
   int ncnum = 0;
   int lsmax = 0;
+  int capnum = 0;
   int omode = 0;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -209,10 +214,15 @@ static int runwrite(int argc, char **argv){
       } else if(!strcmp(argv[i], "-ls")){
         if(++i >= argc) usage();
         lsmax = atoi(argv[i]);
+      } else if(!strcmp(argv[i], "-ca")){
+        if(++i >= argc) usage();
+        capnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -243,7 +253,7 @@ static int runwrite(int argc, char **argv){
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
   int rv = procwrite(path, rnum, lmemb, nmemb, bnum, apow, fpow,
-                     mt, cmp, opts, lcnum, ncnum, lsmax, omode);
+                     mt, cmp, opts, lcnum, ncnum, lsmax, capnum, omode, rnd);
   return rv;
 }
 
@@ -257,6 +267,7 @@ static int runread(int argc, char **argv){
   int ncnum = 0;
   int omode = 0;
   bool wb = false;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -279,6 +290,8 @@ static int runread(int argc, char **argv){
         omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-wb")){
         wb = true;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -289,7 +302,7 @@ static int runread(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procread(path, mt, cmp, lcnum, ncnum, omode, wb);
+  int rv = procread(path, mt, cmp, lcnum, ncnum, omode, wb, rnd);
   return rv;
 }
 
@@ -302,6 +315,7 @@ static int runremove(int argc, char **argv){
   int lcnum = 0;
   int ncnum = 0;
   int omode = 0;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
@@ -322,6 +336,8 @@ static int runremove(int argc, char **argv){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -332,7 +348,7 @@ static int runremove(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procremove(path, mt, cmp, lcnum, ncnum, omode);
+  int rv = procremove(path, mt, cmp, lcnum, ncnum, omode, rnd);
   return rv;
 }
 
@@ -352,6 +368,7 @@ static int runrcat(int argc, char **argv){
   int lcnum = 0;
   int ncnum = 0;
   int lsmax = 0;
+  int capnum = 0;
   int omode = 0;
   int pnum = 0;
   bool rl = false;
@@ -380,6 +397,9 @@ static int runrcat(int argc, char **argv){
       } else if(!strcmp(argv[i], "-ls")){
         if(++i >= argc) usage();
         lsmax = atoi(argv[i]);
+      } else if(!strcmp(argv[i], "-ca")){
+        if(++i >= argc) usage();
+        capnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -419,7 +439,7 @@ static int runrcat(int argc, char **argv){
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
   int rv = procrcat(path, rnum, lmemb, nmemb, bnum, apow, fpow, mt, cmp, opts,
-                    lcnum, ncnum, lsmax, omode, pnum, rl);
+                    lcnum, ncnum, lsmax, capnum, omode, pnum, rl);
   return rv;
 }
 
@@ -439,6 +459,7 @@ static int runqueue(int argc, char **argv){
   int lcnum = 0;
   int ncnum = 0;
   int lsmax = 0;
+  int capnum = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
@@ -465,6 +486,9 @@ static int runqueue(int argc, char **argv){
       } else if(!strcmp(argv[i], "-ls")){
         if(++i >= argc) usage();
         lsmax = atoi(argv[i]);
+      } else if(!strcmp(argv[i], "-ca")){
+        if(++i >= argc) usage();
+        capnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -499,7 +523,7 @@ static int runqueue(int argc, char **argv){
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
   int rv = procqueue(path, rnum, lmemb, nmemb, bnum, apow, fpow,
-                     mt, cmp, opts, lcnum, ncnum, lsmax, omode);
+                     mt, cmp, opts, lcnum, ncnum, lsmax, capnum, omode);
   return rv;
 }
 
@@ -587,11 +611,11 @@ static int runwicked(int argc, char **argv){
 /* perform write command */
 static int procwrite(const char *path, int rnum, int lmemb, int nmemb, int bnum,
                      int apow, int fpow, bool mt, BDBCMP cmp, int opts,
-                     int lcnum, int ncnum, int lsmax, int omode){
+                     int lcnum, int ncnum, int lsmax, int capnum, int omode, bool rnd){
   iprintf("<Writing Test>\n  path=%s  rnum=%d  lmemb=%d  nmemb=%d  bnum=%d  apow=%d  fpow=%d"
-          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  omode=%d\n\n",
-          path, rnum, lmemb, nmemb, bnum, apow, fpow, mt, (void *)(intptr_t)cmp,
-          opts, lcnum, ncnum, lsmax, omode);
+          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  capnum=%d  omode=%d"
+          "  rnd=%d\n\n", path, rnum, lmemb, nmemb, bnum, apow, fpow, mt, (void *)(intptr_t)cmp,
+          opts, lcnum, ncnum, lsmax, capnum, omode, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -616,7 +640,12 @@ static int procwrite(const char *path, int rnum, int lmemb, int nmemb, int bnum,
     eprint(bdb, "tcbdbsetlsmax");
     err = true;
   }
-  if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
+  if(!tcbdbsetcapnum(bdb, capnum)){
+    eprint(bdb, "tcbdbsetcapnum");
+    err = true;
+  }
+  if(!rnd) omode |= BDBOTRUNC;
+  if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | omode)){
     eprint(bdb, "tcbdbopen");
     err = true;
   }
@@ -624,17 +653,17 @@ static int procwrite(const char *path, int rnum, int lmemb, int nmemb, int bnum,
     char buf[RECBUFSIZ];
     int len;
     if(cmp == tcbdbcmpdecimal){
-      len = sprintf(buf, "%d", i);
+      len = sprintf(buf, "%d", rnd ? myrand(rnum) + 1 : i);
     } else if(cmp == tcbdbcmpint32){
-      int32_t lnum = i;
+      int32_t lnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(buf, &lnum, sizeof(lnum));
       len = sizeof(lnum);
     } else if(cmp == tcbdbcmpint64){
-      int64_t llnum = i;
+      int64_t llnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(buf, &llnum, sizeof(llnum));
       len = sizeof(llnum);
     } else {
-      len = sprintf(buf, "%08d", i);
+      len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     }
     if(!tcbdbput(bdb, buf, len, buf, len)){
       eprint(bdb, "tcbdbput");
@@ -663,9 +692,9 @@ static int procwrite(const char *path, int rnum, int lmemb, int nmemb, int bnum,
 
 /* perform read command */
 static int procread(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum,
-                    int omode, bool wb){
-  iprintf("<Reading Test>\n  path=%s  mt=%d  cmp=%p  lcnum=%d  ncnum=%d  omode=%d  wb=%d\n",
-          path, mt, (void *)(intptr_t)cmp, lcnum, ncnum, omode, wb);
+                    int omode, bool wb, bool rnd){
+  iprintf("<Reading Test>\n  path=%s  mt=%d  cmp=%p  lcnum=%d  ncnum=%d  omode=%d  wb=%d"
+          "  rnd=%d\n\n", path, mt, (void *)(intptr_t)cmp, lcnum, ncnum, omode, wb, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -691,35 +720,35 @@ static int procread(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum,
     char kbuf[RECBUFSIZ];
     int ksiz;
     if(cmp == tcbdbcmpdecimal){
-      ksiz = sprintf(kbuf, "%d", i);
+      ksiz = sprintf(kbuf, "%d", rnd ? myrand(rnum) + 1 : i);
     } else if(cmp == tcbdbcmpint32){
-      int32_t lnum = i;
+      int32_t lnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(kbuf, &lnum, sizeof(lnum));
       ksiz = sizeof(lnum);
     } else if(cmp == tcbdbcmpint64){
-      int64_t llnum = i;
+      int64_t llnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(kbuf, &llnum, sizeof(llnum));
       ksiz = sizeof(llnum);
     } else {
-      ksiz = sprintf(kbuf, "%08d", i);
+      ksiz = sprintf(kbuf, "%08d", rnd ? myrand(rnum) + 1 : i);
     }
     int vsiz;
     if(wb){
       int vsiz;
       const char *vbuf = tcbdbget3(bdb, kbuf, ksiz, &vsiz);
-      if(!vbuf){
+      if(!vbuf && !(rnd && tcbdbecode(bdb) == TCENOREC)){
         eprint(bdb, "tcbdbget3");
         err = true;
         break;
       }
     } else {
       char *vbuf = tcbdbget(bdb, kbuf, ksiz, &vsiz);
-      if(!vbuf){
+      if(!vbuf && !(rnd && tcbdbecode(bdb) == TCENOREC)){
         eprint(bdb, "tcbdbget");
         err = true;
         break;
       }
-      free(vbuf);
+      tcfree(vbuf);
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -742,9 +771,10 @@ static int procread(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum,
 
 
 /* perform remove command */
-static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum, int omode){
-  iprintf("<Removing Test>\n  path=%s  mt=%d  cmp=%p  lcnum=%d  ncnum=%d  omode=%d\n",
-          path, mt, (void *)(intptr_t)cmp, lcnum, ncnum, omode);
+static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnum, int omode,
+                      bool rnd){
+  iprintf("<Removing Test>\n  path=%s  mt=%d  cmp=%p  lcnum=%d  ncnum=%d  omode=%d  rnd=%d\n\n",
+          path, mt, (void *)(intptr_t)cmp, lcnum, ncnum, omode, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -770,19 +800,19 @@ static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnu
     char kbuf[RECBUFSIZ];
     int ksiz;
     if(cmp == tcbdbcmpdecimal){
-      ksiz = sprintf(kbuf, "%d", i);
+      ksiz = sprintf(kbuf, "%d", rnd ? myrand(rnum) + 1 : i);
     } else if(cmp == tcbdbcmpint32){
-      int32_t lnum = i;
+      int32_t lnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(kbuf, &lnum, sizeof(lnum));
       ksiz = sizeof(lnum);
     } else if(cmp == tcbdbcmpint64){
-      int64_t llnum = i;
+      int64_t llnum = rnd ? myrand(rnum) + 1 : i;
       memcpy(kbuf, &llnum, sizeof(llnum));
       ksiz = sizeof(llnum);
     } else {
-      ksiz = sprintf(kbuf, "%08d", i);
+      ksiz = sprintf(kbuf, "%08d", rnd ? myrand(rnum) + 1 : i);
     }
-    if(!tcbdbout(bdb, kbuf, ksiz)){
+    if(!tcbdbout(bdb, kbuf, ksiz) && !(rnd && tcbdbecode(bdb) == TCENOREC)){
       eprint(bdb, "tcbdbout");
       err = true;
       break;
@@ -810,13 +840,14 @@ static int procremove(const char *path, bool mt, BDBCMP cmp, int lcnum, int ncnu
 /* perform rcat command */
 static int procrcat(const char *path, int rnum,
                     int lmemb, int nmemb, int bnum, int apow, int fpow,
-                    bool mt, BDBCMP cmp, int opts, int lcnum, int ncnum, int lsmax,
+                    bool mt, BDBCMP cmp, int opts, int lcnum, int ncnum, int lsmax, int capnum,
                     int omode, int pnum, bool rl){
   iprintf("<Random Concatenating Test>\n"
           "  path=%s  rnum=%d  lmemb=%d  nmemb=%d  bnum=%d  apow=%d  fpow=%d"
-          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  omode=%d  pnum=%d  rl=%d\n\n",
+          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  capnum=%d"
+          "  omode=%d  pnum=%d  rl=%d\n\n",
           path, rnum, lmemb, nmemb, bnum, apow, fpow, mt, (void *)(intptr_t)cmp,
-          opts, lcnum, ncnum, lsmax, omode, pnum, rl);
+          opts, lcnum, ncnum, lsmax, capnum, omode, pnum, rl);
   if(pnum < 1) pnum = rnum;
   bool err = false;
   double stime = tctime();
@@ -840,6 +871,10 @@ static int procrcat(const char *path, int rnum,
   }
   if(!tcbdbsetlsmax(bdb, lsmax)){
     eprint(bdb, "tcbdbsetlsmax");
+    err = true;
+  }
+  if(!tcbdbsetcapnum(bdb, capnum)){
+    eprint(bdb, "tcbdbsetcapnum");
     err = true;
   }
   if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | BDBOTRUNC | omode)){
@@ -903,11 +938,11 @@ static int procrcat(const char *path, int rnum,
 /* perform queue command */
 static int procqueue(const char *path, int rnum, int lmemb, int nmemb, int bnum,
                      int apow, int fpow, bool mt, BDBCMP cmp, int opts,
-                     int lcnum, int ncnum, int lsmax, int omode){
+                     int lcnum, int ncnum, int lsmax, int capnum, int omode){
   iprintf("<Queueing Test>\n  path=%s  rnum=%d  lmemb=%d  nmemb=%d  bnum=%d  apow=%d  fpow=%d"
-          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  omode=%d\n\n",
+          "  mt=%d  cmp=%p  opts=%d  lcnum=%d  ncnum=%d  lsmax=%d  capnum=%d  omode=%d\n\n",
           path, rnum, lmemb, nmemb, bnum, apow, fpow, mt, (void *)(intptr_t)cmp,
-          opts, lcnum, ncnum, lsmax, omode);
+          opts, lcnum, ncnum, lsmax, capnum, omode);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -930,6 +965,10 @@ static int procqueue(const char *path, int rnum, int lmemb, int nmemb, int bnum,
   }
   if(!tcbdbsetlsmax(bdb, lsmax)){
     eprint(bdb, "tcbdbsetlsmax");
+    err = true;
+  }
+  if(!tcbdbsetcapnum(bdb, capnum)){
+    eprint(bdb, "tcbdbsetcapnum");
     err = true;
   }
   if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
@@ -1064,10 +1103,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(vsiz != ksiz || memcmp(vbuf, kbuf, vsiz)){
       eprint(bdb, "(validation)");
       err = true;
-      free(vbuf);
+      tcfree(vbuf);
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -1100,7 +1139,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
       eprint(bdb, "(validation)");
       err = true;
-      free(rbuf);
+      tcfree(rbuf);
       break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
@@ -1108,7 +1147,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       fflush(stdout);
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
-    free(rbuf);
+    tcfree(rbuf);
   }
   iprintf("word writing:\n");
   const char *words[] = {
@@ -1244,8 +1283,8 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
         }
         break;
       }
-      free(vbuf);
-      free(kbuf);
+      tcfree(vbuf);
+      tcfree(kbuf);
     } else {
       char kbuf[RECBUFSIZ];
       int ksiz = myrand(RECBUFSIZ);
@@ -1288,18 +1327,18 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       if(vsiz != i % RECBUFSIZ && vsiz != PATH_MAX){
         eprint(bdb, "(validation)");
         err = true;
-        free(vbuf);
+        tcfree(vbuf);
         break;
       }
     } else {
       if(vbuf || tcbdbecode(bdb) != TCENOREC){
         eprint(bdb, "(validation)");
         err = true;
-        free(vbuf);
+        tcfree(vbuf);
         break;
       }
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -1346,10 +1385,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(vsiz != ksiz || memcmp(vbuf, kbuf, vsiz)){
       eprint(bdb, "(validation)");
       err = true;
-      free(vbuf);
+      tcfree(vbuf);
       break;
     }
-    free(vbuf);
+    tcfree(vbuf);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
@@ -1371,10 +1410,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     } else if(rsiz != vsiz || memcmp(rbuf, vbuf, rsiz)){
       eprint(bdb, "(validation)");
       err = true;
-      free(rbuf);
+      tcfree(rbuf);
       break;
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(rnum > 250) putchar('.');
   }
   if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
@@ -1393,11 +1432,11 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     if(!vbuf){
       eprint(bdb, "tcbdbget");
       err = true;
-      free(kbuf);
+      tcfree(kbuf);
       break;
     }
-    free(vbuf);
-    free(kbuf);
+    tcfree(vbuf);
+    tcfree(kbuf);
     tcbdbcurnext(cur);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -1455,7 +1494,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
       }
       break;
     }
-    free(kbuf);
+    tcfree(kbuf);
     tcbdbcurnext(cur);
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -1476,7 +1515,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
   tcbdbcurfirst(cur);
   inum = 0;
   for(int i = 1; (kbuf = tcbdbcurkey(cur, &ksiz)) != NULL; i++, inum++){
-    free(kbuf);
+    tcfree(kbuf);
     if(!tcbdbcurout(cur) && tcbdbecode(bdb) != TCENOREC){
       eprint(bdb, "tcbdbcurout");
       err = true;
@@ -1591,7 +1630,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
           err = true;
         }
       }
-      free(kbuf);
+      tcfree(kbuf);
       if(myrand(30) == 0 && !tcbdbcurfirst(cur)){
         eprint(bdb, "tcbdbcurfirst");
         err = true;
@@ -1753,7 +1792,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         err = true;
       }
       tcmapput(map, kbuf, ksiz, rbuf, vsiz);
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 9:
       putchar('9');
@@ -1761,21 +1800,21 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         eprint(bdb, "tcbdbget");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 10:
       putchar('A');
       if(!(rbuf = tcbdbget2(bdb, kbuf)) && tcbdbecode(bdb) != TCENOREC){
-        eprint(bdb, "tcbdbget");
+        eprint(bdb, "tcbdbget2");
         err = true;
       }
-      free(rbuf);
+      tcfree(rbuf);
       break;
     case 11:
       putchar('B');
       if(myrand(1) == 0) vsiz = 1;
       if(!tcbdbget3(bdb, kbuf, ksiz, &vsiz) && tcbdbecode(bdb) != TCENOREC){
-        eprint(bdb, "tcbdbget");
+        eprint(bdb, "tcbdbget3");
         err = true;
       }
       break;
@@ -1811,7 +1850,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
           int iksiz;
           char *ikbuf = tcbdbcurkey(cur, &iksiz);
           if(ikbuf){
-            free(ikbuf);
+            tcfree(ikbuf);
           } else {
             int ecode = tcbdbecode(bdb);
             if(ecode != TCEINVALID && ecode != TCENOREC){
@@ -1855,7 +1894,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
                 err = true;
               }
               tcmapout(map, tkbuf, tksiz);
-              free(tkbuf);
+              tcfree(tkbuf);
             } else if(tcbdbecode(bdb) != TCENOREC){
               eprint(bdb, "tcbdbcurfirst");
               err = true;
@@ -1897,7 +1936,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
       }
       tcbdbdel(nbdb);
       unlink(npath);
-      free(npath);
+      tcfree(npath);
       if(!tcbdboptimize(bdb, -1, -1, -1, -1, -1, -1)){
         eprint(bdb, "tcbdboptimize");
         err = true;
@@ -1950,7 +1989,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         err = true;
       }
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
   }
   if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
@@ -1970,7 +2009,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
       eprint(bdb, "(validation)");
       err = true;
     }
-    free(rbuf);
+    tcfree(rbuf);
     if(!tcbdbout(bdb, kbuf, ksiz)){
       eprint(bdb, "tcbdbout");
       err = true;

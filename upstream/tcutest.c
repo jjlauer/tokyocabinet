@@ -340,7 +340,7 @@ static int procmisc(int rnum){
     xstr = tcxstrfrommalloc(buf, slen);
     buf = tcxstrtomalloc(xstr);
     if(strcmp(buf, str)) err = true;
-    free(buf);
+    tcfree(buf);
     if(tclmax(1, 2) != 2) err = true;
     if(tclmin(1, 2) != 1) err = true;
     tclrand();
@@ -356,7 +356,7 @@ static int procmisc(int rnum){
     if(strcmp(buf, "ABCDE")) err = true;
     tcstrtolower(buf);
     if(strcmp(buf, "abcde")) err = true;
-    free(buf);
+    tcfree(buf);
     buf = tcmemdup("  ab  cd  ", 10);
     tcstrtrim(buf);
     if(strcmp(buf, "ab  cd")) err = true;
@@ -367,7 +367,7 @@ static int procmisc(int rnum){
     if(tcstrcntutf(buf) != 4) err = true;
     tcstrcututf(buf, 2);
     if(strcmp(buf, "ab")) err = true;
-    free(buf);
+    tcfree(buf);
     if(i % 10 == 1){
       int anum = myrand(30);
       uint16_t ary[anum+1];
@@ -390,8 +390,19 @@ static int procmisc(int rnum){
       if(tclistnum(list) != 7) err = true;
       buf = tcstrjoin(list, ':');
       if(strcmp(buf, ":a:b::c:d:")) err = true;
-      free(buf);
+      tcfree(buf);
       tclistdel(list);
+      if(!tcregexmatch("ABCDEFGHI", "*(b)c[d-f]*g(h)")) err = true;
+      buf = tcregexreplace("ABCDEFGHI", "*(b)c[d-f]*g(h)", "[\\1][\\2][&]");
+      if(strcmp(buf, "A[B][H][BCDEFGH]I")) err = true;
+      tcfree(buf);
+      TCCHORD *chord = tcchordnew(5);
+      for(int i = 0; i < 10; i++){
+        char kbuf[RECBUFSIZ];
+        int ksiz = sprintf(kbuf, "%d", myrand(1000000));
+        tcchordhash(chord, kbuf, ksiz);
+      }
+      tcchorddel(chord);
     }
     buf = tcmalloc(48);
     date = myrand(INT_MAX - 1000000);
@@ -402,7 +413,7 @@ static int procmisc(int rnum){
     tcdatestrhttp(date, jl, buf);
     ddate = tcstrmktime(buf);
     if(ddate != date) err = true;
-    free(buf);
+    tcfree(buf);
     if(i % 100){
       map = tcmapnew();
       for(int j = 0; j < 10; j++){
@@ -418,8 +429,8 @@ static int procmisc(int rnum){
     if(strcmp(buf, "5%252%2B3-1%3D4%20%22Yes%2FNo%22%20%3Ca%26b%3E")) err = true;
     dec = tcurldecode(buf, &dsiz);
     if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     if(i % 10 == 1){
       map = tcurlbreak("http://mikio:oikim@estraier.net:1978/foo/bar/baz.cgi?ab=cd&ef=jkl#quux");
       const char *elem;
@@ -437,76 +448,97 @@ static int procmisc(int rnum){
       tcmapdel(map);
       buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "http://A:B@C.D:1/E/F/G.H?I=J#K");
       if(strcmp(buf, "http://A:B@c.d:1/E/F/G.H?I=J#K")) err = true;
-      free(buf);
+      tcfree(buf);
       buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "/E/F/G.H?I=J#K");
       if(strcmp(buf, "http://a:b@c.d:1/E/F/G.H?I=J#K")) err = true;
-      free(buf);
+      tcfree(buf);
       buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "G.H?I=J#K");
       if(strcmp(buf, "http://a:b@c.d:1/e/f/G.H?I=J#K")) err = true;
-      free(buf);
+      tcfree(buf);
       buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "?I=J#K");
       if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?I=J#K")) err = true;
-      free(buf);
+      tcfree(buf);
       buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "#K");
       if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?i=j#K")) err = true;
-      free(buf);
+      tcfree(buf);
     }
     buf = tcbaseencode(str, slen);
     if(strcmp(buf, "NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+")) err = true;
     dec = tcbasedecode(buf, &dsiz);
     if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     buf = tcquoteencode(str, slen);
     if(strcmp(buf, "5%2+3-1=3D4 \"Yes/No\" <a&b>")) err = true;
     dec = tcquotedecode(buf, &dsiz);
     if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     buf = tcmimeencode(str, "UTF-8", true);
     if(strcmp(buf, "=?UTF-8?B?NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+?=")) err = true;
     char encname[32];
     dec = tcmimedecode(buf, encname);
     if(strcmp(dec, str) || strcmp(encname, "UTF-8")) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
+    if(i % 10 == 1){
+      const char *mstr = "Subject: Hello\r\nContent-Type: multipart/mixed; boundary=____\r\n\r\n"
+        "\r\n--____\r\nThis is a pen.\r\n--____\r\nIs this your bag?\r\n--____--\r\n";
+      map = tcmapnew2(10);
+      char *buf = tcmimebreak(mstr, strlen(mstr), map, &bsiz);
+      const char *boundary = tcmapget2(map, "BOUNDARY");
+      if(boundary){
+        list = tcmimeparts(buf, bsiz, boundary);
+        if(tclistnum(list) == 2){
+          if(strcmp(tclistval2(list, 0), "This is a pen.")) err = true;
+          if(strcmp(tclistval2(list, 1), "Is this your bag?")) err = true;
+        } else {
+          err = true;
+        }
+        tclistdel(list);
+      } else {
+        err = true;
+      }
+      tcfree(buf);
+      tcmapdel(map);
+    }
     buf = tcpackencode(str, slen, &bsiz);
     dec = tcpackdecode(buf, bsiz, &dsiz);
     if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     buf = tcbsencode(str, slen, &bsiz);
     dec = tcbsdecode(buf, bsiz, &dsiz);
     if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     int idx;
     buf = tcbwtencode(str, slen, &idx);
     if(memcmp(buf, "4\"o 5a23s-%+=> 1b/\"<&YNe", slen) || idx != 13) err = true;
     dec = tcbwtdecode(buf, slen, idx);
     if(memcmp(dec, str, slen)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     if(_tc_deflate){
       if((buf = tcdeflate(str, slen, &bsiz)) != NULL){
         if((dec = tcinflate(buf, bsiz, &dsiz)) != NULL){
           if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
-          free(dec);
+          tcfree(dec);
         } else {
           err = true;
         }
-        free(buf);
+        tcfree(buf);
       } else {
         err = true;
       }
       if((buf = tcgzipencode(str, slen, &bsiz)) != NULL){
         if((dec = tcgzipdecode(buf, bsiz, &dsiz)) != NULL){
           if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
-          free(dec);
+          tcfree(dec);
         } else {
           err = true;
         }
-        free(buf);
+        tcfree(buf);
       } else {
         err = true;
       }
@@ -521,14 +553,14 @@ static int procmisc(int rnum){
     int dnum;
     unsigned int *dary = tcberdecode(buf, bsiz, &dnum);
     if(anum != dnum || memcmp(ary, dary, sizeof(*dary) * dnum)) err = true;
-    free(dary);
-    free(buf);
+    tcfree(dary);
+    tcfree(buf);
     buf = tcxmlescape(str);
     if(strcmp(buf, "5%2+3-1=4 &quot;Yes/No&quot; &lt;a&amp;b&gt;")) err = true;
     dec = tcxmlunescape(buf);
     if(strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
+    tcfree(dec);
+    tcfree(buf);
     if(i % 10 == 1){
       list = tcxmlbreak("<abc de=\"foo&amp;\" gh='&lt;bar&gt;'>xyz<br>\na<!--<mikio>--></abc>");
       for(int j = 0; j < tclistnum(list); j++){
@@ -549,7 +581,7 @@ static int procmisc(int rnum){
         for(int32_t num = j - 1; num <= j + 1; num++){
           int32_t nnum = TCHTOIL(num);
           if(num != TCITOHL(nnum)) err = true;
-          char buf[TCVNUMBUFSIZ];
+          char buf[TCNUMBUFSIZ];
           int step, nstep;
           TCSETVNUMBUF(step, buf, num);
           TCREADVNUMBUF(buf, nnum, nstep);
@@ -560,7 +592,7 @@ static int procmisc(int rnum){
         for(int64_t num = j - 1; num <= j + 1; num++){
           int64_t nnum = TCHTOILL(num);
           if(num != TCITOHLL(nnum)) err = true;
-          char buf[TCVNUMBUFSIZ];
+          char buf[TCNUMBUFSIZ];
           int step, nstep;
           TCSETVNUMBUF64(step, buf, num);
           TCREADVNUMBUF64(buf, nnum, nstep);
@@ -596,7 +628,7 @@ static int procmisc(int rnum){
         TCBITSTRMREAD(strm, sign);
         if(sign != (j % 3 == 0 || j % 7 == 0)) err = true;
       }
-      free(buf);
+      tcfree(buf);
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -665,11 +697,11 @@ static int procwicked(int rnum){
       break;
     case 7:
       putchar('7');
-      if(myrand(10) == 0) free(tclistpop(list, &ksiz));
+      if(myrand(10) == 0) tcfree(tclistpop(list, &ksiz));
       break;
     case 8:
       putchar('8');
-      if(myrand(10) == 0) free(tclistpop2(list));
+      if(myrand(10) == 0) tcfree(tclistpop2(list));
       break;
     case 9:
       putchar('9');
@@ -681,11 +713,11 @@ static int procwicked(int rnum){
       break;
     case 11:
       putchar('B');
-      if(myrand(10) == 0) free(tclistshift(list, &ksiz));
+      if(myrand(10) == 0) tcfree(tclistshift(list, &ksiz));
       break;
     case 12:
       putchar('C');
-      if(myrand(10) == 0) free(tclistshift2(list));
+      if(myrand(10) == 0) tcfree(tclistshift2(list));
       break;
     case 13:
       putchar('D');
@@ -697,11 +729,11 @@ static int procwicked(int rnum){
       break;
     case 15:
       putchar('F');
-      if(myrand(10) == 0) free(tclistremove(list, i / 10, &ksiz));
+      if(myrand(10) == 0) tcfree(tclistremove(list, i / 10, &ksiz));
       break;
     case 16:
       putchar('G');
-      if(myrand(10) == 0) free(tclistremove2(list, i / 10));
+      if(myrand(10) == 0) tcfree(tclistremove2(list, i / 10));
       break;
     case 17:
       putchar('H');
@@ -737,7 +769,7 @@ static int procwicked(int rnum){
         int dsiz;
         char *dbuf = tclistdump(list, &dsiz);
         tclistdel(tclistload(dbuf, dsiz));
-        free(dbuf);
+        tcfree(dbuf);
       }
       break;
     case 25:
@@ -842,9 +874,9 @@ static int procwicked(int rnum){
       if(myrand(rnum / 100 + 1) == 0){
         int dsiz;
         char *dbuf = tcmapdump(map, &dsiz);
-        free(tcmaploadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
+        tcfree(tcmaploadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
         tcmapdel(tcmapload(dbuf, dsiz));
-        free(dbuf);
+        tcfree(dbuf);
       }
       break;
     case 46:
@@ -881,11 +913,11 @@ static int procwicked(int rnum){
       break;
     case 54:
       putchar('s');
-      free(tcmdbget(mdb, kbuf, ksiz, &vsiz));
+      tcfree(tcmdbget(mdb, kbuf, ksiz, &vsiz));
       break;
     case 55:
       putchar('t');
-      free(tcmdbget3(mdb, kbuf, ksiz, &vsiz));
+      tcfree(tcmdbget3(mdb, kbuf, ksiz, &vsiz));
       break;
     case 56:
       putchar('u');
@@ -893,12 +925,12 @@ static int procwicked(int rnum){
       break;
     case 57:
       putchar('v');
-      free(tcmdbiternext(mdb, &vsiz));
+      tcfree(tcmdbiternext(mdb, &vsiz));
       break;
     case 58:
       putchar('w');
       tmp = tcmdbiternext2(mdb);
-      free(tmp);
+      tcfree(tmp);
       break;
     case 59:
       putchar('x');

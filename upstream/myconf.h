@@ -27,67 +27,67 @@
 #if defined(__linux__)
 
 #define _SYS_LINUX_
-#define ESTSYSNAME  "Linux"
+#define TCSYSNAME  "Linux"
 
 #elif defined(__FreeBSD__)
 
 #define _SYS_FREEBSD_
-#define ESTSYSNAME  "FreeBSD"
+#define TCSYSNAME  "FreeBSD"
 
 #elif defined(__NetBSD__)
 
 #define _SYS_NETBSD_
-#define ESTSYSNAME  "NetBSD"
+#define TCSYSNAME  "NetBSD"
 
 #elif defined(__OpenBSD__)
 
 #define _SYS_OPENBSD_
-#define ESTSYSNAME  "OpenBSD"
+#define TCSYSNAME  "OpenBSD"
 
 #elif defined(__sun__)
 
 #define _SYS_SUNOS_
-#define ESTSYSNAME  "SunOS"
+#define TCSYSNAME  "SunOS"
 
 #elif defined(__hpux)
 
 #define _SYS_HPUX_
-#define ESTSYSNAME  "HP-UX"
+#define TCSYSNAME  "HP-UX"
 
 #elif defined(__osf)
 
 #define _SYS_TRU64_
-#define ESTSYSNAME  "Tru64"
+#define TCSYSNAME  "Tru64"
 
 #elif defined(_AIX)
 
 #define _SYS_AIX_
-#define ESTSYSNAME  "AIX"
+#define TCSYSNAME  "AIX"
 
 #elif defined(__APPLE__) && defined(__MACH__)
 
 #define _SYS_MACOSX_
-#define ESTSYSNAME  "Mac OS X"
+#define TCSYSNAME  "Mac OS X"
 
 #elif defined(_MSC_VER)
 
 #define _SYS_MSVC_
-#define ESTSYSNAME  "Windows (VC++)"
+#define TCSYSNAME  "Windows (VC++)"
 
 #elif defined(_WIN32)
 
 #define _SYS_MINGW_
-#define ESTSYSNAME  "Windows (MinGW)"
+#define TCSYSNAME  "Windows (MinGW)"
 
 #elif defined(__CYGWIN__)
 
 #define _SYS_CYGWIN_
-#define ESTSYSNAME  "Windows (Cygwin)"
+#define TCSYSNAME  "Windows (Cygwin)"
 
 #else
 
 #define _SYS_GENERIC_
-#define ESTSYSNAME  "Generic"
+#define TCSYSNAME  "Generic"
 
 #endif
 
@@ -171,10 +171,10 @@
 #define TCMICROYIELD   0
 #endif
 
-#define sizeof(a)      ((int)sizeof(a))
-
-int _tc_dummyfunc(void);
-int _tc_dummyfuncv(int a, ...);
+#define MYMALLOC       malloc
+#define MYCALLOC       calloc
+#define MYREALLOC      realloc
+#define MYFREE         free
 
 
 
@@ -211,10 +211,24 @@ int _tc_dummyfuncv(int a, ...);
 #include <sys/times.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <regex.h>
+#include <glob.h>
 
 #if TCUSEPTHREAD
 #include <pthread.h>
 #endif
+
+
+
+/*************************************************************************************************
+ * miscellaneous hacks
+ *************************************************************************************************/
+
+
+#define sizeof(a)      ((int)sizeof(a))
+
+int _tc_dummyfunc(void);
+int _tc_dummyfuncv(int a, ...);
 
 
 
@@ -333,7 +347,6 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 
 #define TCNUMBUFSIZ    32                // size of a buffer for a number
-#define TCVNUMBUFSIZ   12                // size of a buffer for variable length number
 
 /* set a buffer for a variable length number */
 #define TCSETVNUMBUF(TC_len, TC_buf, TC_num) \

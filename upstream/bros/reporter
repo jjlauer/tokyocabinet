@@ -45,6 +45,8 @@ my @commands = (
                 "./bdbtest btread casket.bdbb " . RECNUM,
                 "./bdbtest btwrite -rnd casket.bdbb_r " . RECNUM,
                 "./bdbtest btread -rnd casket.bdbb_r " . RECNUM,
+                "./tctest flwrite casket.tcf " . RECNUM,
+                "./tctest flread casket.tcf " . RECNUM,
                 );
 
 my @names = (
@@ -62,6 +64,7 @@ my @names = (
              "casket.qdbb_r",
              "casket.bdbb",
              "casket.bdbb_r",
+             "casket.tcf",
              );
 
 foreach my $name (@names){
@@ -131,6 +134,7 @@ printf("%s,%.5f,%.5f,%d\n", "QDBM-BT-ASC", $table[20][1], $table[21][1], $sizes[
 printf("%s,%.5f,%.5f,%d\n", "QDBM-BT-RND", $table[22][1], $table[23][1], $sizes[11]);
 printf("%s,%.5f,%.5f,%d\n", "BDB-BT-ASC", $table[24][1], $table[25][1], $sizes[12]);
 printf("%s,%.5f,%.5f,%d\n", "BDB-BT-RND", $table[26][1], $table[27][1], $sizes[13]);
+printf("%s,%.5f,%.5f,%d\n", "TC-FIXED", $table[28][1], $table[29][1], $sizes[14]);
 
 
 
