@@ -707,7 +707,7 @@ static int procmisc(const char *name, int rnum){
     }
     if(rnum > 250) iputchar('.');
   }
-  if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
+  if(rnum > 250) iprintf(" (%08d)\n", (int)(sizeof(words) / sizeof(*words)));
   iprintf("random erasing:\n");
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];

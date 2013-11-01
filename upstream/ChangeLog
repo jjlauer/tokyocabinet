@@ -1,3 +1,9 @@
+2009-12-07  Mikio Hirabayashi  <hirarin@gmail.com>
+
+	* tctdb.c (tctdbidxputtoken, tctdbidxputqgram): domain overflow checking was added.
+
+	- Release: 1.4.41
+
 2009-11-24  Mikio Hirabayashi  <hirarin@gmail.com>
 
 	* tchdb.c (tchdbputimpl): efficiency of using the free block pool was improved.

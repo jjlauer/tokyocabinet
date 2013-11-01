@@ -1272,52 +1272,60 @@ static int procconf(int mode){
       printf("myconf(usezlib): %d\n", TCUSEZLIB);
       printf("myconf(usebzip): %d\n", TCUSEBZIP);
       printf("type(bool): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(bool), _alignof(bool), TCALIGNOF(bool), (unsigned long long)true);
+             (int)sizeof(bool), (int)_alignof(bool), TCALIGNOF(bool),
+             (unsigned long long)true);
       printf("type(char): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(char), _alignof(char), TCALIGNOF(char), (unsigned long long)CHAR_MAX);
+             (int)sizeof(char), (int)_alignof(char), TCALIGNOF(char),
+             (unsigned long long)CHAR_MAX);
       printf("type(short): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(short), _alignof(short), TCALIGNOF(short), (unsigned long long)SHRT_MAX);
+             (int)sizeof(short), (int)_alignof(short), TCALIGNOF(short),
+             (unsigned long long)SHRT_MAX);
       printf("type(int): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(int), _alignof(int), TCALIGNOF(int), (unsigned long long)INT_MAX);
+             (int)sizeof(int), (int)_alignof(int), TCALIGNOF(int),
+             (unsigned long long)INT_MAX);
       printf("type(long): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(long), _alignof(long), TCALIGNOF(long), (unsigned long long)LONG_MAX);
+             (int)sizeof(long), (int)_alignof(long), TCALIGNOF(long),
+             (unsigned long long)LONG_MAX);
       printf("type(long long): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(long long), _alignof(long long), TCALIGNOF(long long),
+             (int)sizeof(long long), (int)_alignof(long long), TCALIGNOF(long long),
              (unsigned long long)LLONG_MAX);
       printf("type(float): size=%d align=%d offset=%d max=%g\n",
-             sizeof(float), _alignof(float), TCALIGNOF(float), (double)FLT_MAX);
+             (int)sizeof(float), (int)_alignof(float), TCALIGNOF(float),
+             (double)FLT_MAX);
       printf("type(double): size=%d align=%d offset=%d max=%g\n",
-             sizeof(double), _alignof(double), TCALIGNOF(double), (double)DBL_MAX);
+             (int)sizeof(double), (int)_alignof(double), TCALIGNOF(double),
+             (double)DBL_MAX);
       printf("type(long double): size=%d align=%d offset=%d max=%Lg\n",
-             sizeof(long double), _alignof(long double), TCALIGNOF(long double),
+             (int)sizeof(long double), (int)_alignof(long double), TCALIGNOF(long double),
              (long double)LDBL_MAX);
       printf("type(void *): size=%d align=%d offset=%d\n",
-             sizeof(void *), _alignof(void *), TCALIGNOF(void *));
+             (int)sizeof(void *), (int)_alignof(void *), TCALIGNOF(void *));
       printf("type(intptr_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(intptr_t), _alignof(intptr_t), TCALIGNOF(intptr_t),
+             (int)sizeof(intptr_t), (int)_alignof(intptr_t), TCALIGNOF(intptr_t),
              (unsigned long long)INTPTR_MAX);
       printf("type(size_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(size_t), _alignof(size_t), TCALIGNOF(size_t), (unsigned long long)SIZE_MAX);
+             (int)sizeof(size_t), (int)_alignof(size_t), TCALIGNOF(size_t),
+             (unsigned long long)SIZE_MAX);
       printf("type(ptrdiff_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(ptrdiff_t), _alignof(ptrdiff_t), TCALIGNOF(ptrdiff_t),
+             (int)sizeof(ptrdiff_t), (int)_alignof(ptrdiff_t), TCALIGNOF(ptrdiff_t),
              (unsigned long long)PTRDIFF_MAX);
       printf("type(wchar_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(wchar_t), _alignof(wchar_t), TCALIGNOF(wchar_t),
+             (int)sizeof(wchar_t), (int)_alignof(wchar_t), TCALIGNOF(wchar_t),
              (unsigned long long)WCHAR_MAX);
       printf("type(sig_atomic_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(sig_atomic_t), _alignof(sig_atomic_t), TCALIGNOF(sig_atomic_t),
+             (int)sizeof(sig_atomic_t), (int)_alignof(sig_atomic_t), TCALIGNOF(sig_atomic_t),
              (unsigned long long)SIG_ATOMIC_MAX);
       printf("type(time_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(time_t), _alignof(time_t), TCALIGNOF(time_t),
+             (int)sizeof(time_t), (int)_alignof(time_t), TCALIGNOF(time_t),
              (unsigned long long)_maxof(time_t));
       printf("type(off_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(off_t), _alignof(off_t), TCALIGNOF(off_t),
+             (int)sizeof(off_t), (int)_alignof(off_t), TCALIGNOF(off_t),
              (unsigned long long)_maxof(off_t));
       printf("type(ino_t): size=%d align=%d offset=%d max=%llu\n",
-             sizeof(ino_t), _alignof(ino_t), TCALIGNOF(ino_t),
+             (int)sizeof(ino_t), (int)_alignof(ino_t), TCALIGNOF(ino_t),
              (unsigned long long)_maxof(ino_t));
       printf("type(tcgeneric_t): size=%d align=%d offset=%d\n",
-             sizeof(tcgeneric_t), _alignof(tcgeneric_t), TCALIGNOF(tcgeneric_t));
+             (int)sizeof(tcgeneric_t), (int)_alignof(tcgeneric_t), TCALIGNOF(tcgeneric_t));
       printf("macro(RAND_MAX): %llu\n", (unsigned long long)RAND_MAX);
       printf("macro(PATH_MAX): %llu\n", (unsigned long long)PATH_MAX);
       printf("macro(NAME_MAX): %llu\n", (unsigned long long)NAME_MAX);

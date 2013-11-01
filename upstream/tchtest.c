@@ -1084,7 +1084,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     }
     if(rnum > 250) iputchar('.');
   }
-  if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
+  if(rnum > 250) iprintf(" (%08d)\n", (int)(sizeof(words) / sizeof(*words)));
   iprintf("random erasing:\n");
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
@@ -1304,7 +1304,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     tcfree(rbuf);
     if(rnum > 250) iputchar('.');
   }
-  if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
+  if(rnum > 250) iprintf(" (%08d)\n", (int)(sizeof(words) / sizeof(*words)));
   iprintf("checking iterator:\n");
   int inum = 0;
   if(!tchdbiterinit(hdb)){

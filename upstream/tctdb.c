@@ -4694,6 +4694,10 @@ static bool tctdbidxputtoken(TCTDB *tdb, TDBIDX *idx, const char *pkbuf, int pks
     int c = pkbuf[i];
     if(c >= '0' && c <= '9'){
       pkid = pkid * 10 + c - '0';
+      if(pkid > INT64_MAX){
+        pkid = 0;
+        break;
+      }
     } else {
       pkid = 0;
       break;
@@ -4754,6 +4758,10 @@ static bool tctdbidxputqgram(TCTDB *tdb, TDBIDX *idx, const char *pkbuf, int pks
     int c = pkbuf[i];
     if(c >= '0' && c <= '9'){
       pkid = pkid * 10 + c - '0';
+      if(pkid > INT64_MAX){
+        pkid = 0;
+        break;
+      }
     } else {
       pkid = 0;
       break;
@@ -4939,6 +4947,10 @@ static bool tctdbidxouttoken(TCTDB *tdb, TDBIDX *idx, const char *pkbuf, int pks
     int c = pkbuf[i];
     if(c >= '0' && c <= '9'){
       pkid = pkid * 10 + c - '0';
+      if(pkid > INT64_MAX){
+        pkid = 0;
+        break;
+      }
     } else {
       pkid = 0;
       break;
@@ -5051,6 +5063,10 @@ static bool tctdbidxoutqgram(TCTDB *tdb, TDBIDX *idx, const char *pkbuf, int pks
     int c = pkbuf[i];
     if(c >= '0' && c <= '9'){
       pkid = pkid * 10 + c - '0';
+      if(pkid > INT64_MAX){
+        pkid = 0;
+        break;
+      }
     } else {
       pkid = 0;
       break;

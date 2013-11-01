@@ -196,8 +196,8 @@ static void mprint(TCBDB *bdb){
   if(bdb->hdb->cnt_writerec < 0) return;
   iprintf("max leaf member: %d\n", tcbdblmemb(bdb));
   iprintf("max node member: %d\n", tcbdbnmemb(bdb));
-  iprintf("leaf number: %d\n", tcbdblnum(bdb));
-  iprintf("node number: %d\n", tcbdbnnum(bdb));
+  iprintf("leaf number: %lld\n", (long long)tcbdblnum(bdb));
+  iprintf("node number: %lld\n", (long long)tcbdbnnum(bdb));
   iprintf("bucket number: %lld\n", (long long)tcbdbbnum(bdb));
   iprintf("used bucket number: %lld\n", (long long)tcbdbbnumused(bdb));
   iprintf("cnt_saveleaf: %lld\n", (long long)bdb->cnt_saveleaf);

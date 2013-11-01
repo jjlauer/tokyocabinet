@@ -2800,7 +2800,7 @@ static bool tchdbreadrec(TCHDB *hdb, TCHREC *rec, char *rbuf){
     rsiz = hdb->fsiz - rec->off;
     if(rsiz > hdb->runit){
       rsiz = hdb->runit;
-    } else if(rsiz < (sizeof(uint8_t) + sizeof(uint32_t))){
+    } else if(rsiz < (int)(sizeof(uint8_t) + sizeof(uint32_t))){
       tchdbsetecode(hdb, TCERHEAD, __FILE__, __LINE__, __func__);
       HDBUNLOCKDB(hdb);
       return false;

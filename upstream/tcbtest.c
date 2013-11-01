@@ -159,8 +159,8 @@ static void mprint(TCBDB *bdb){
   if(bdb->hdb->cnt_writerec < 0) return;
   iprintf("max leaf member: %d\n", tcbdblmemb(bdb));
   iprintf("max node member: %d\n", tcbdbnmemb(bdb));
-  iprintf("leaf number: %d\n", tcbdblnum(bdb));
-  iprintf("node number: %d\n", tcbdbnnum(bdb));
+  iprintf("leaf number: %lld\n", (long long)tcbdblnum(bdb));
+  iprintf("node number: %lld\n", (long long)tcbdbnnum(bdb));
   iprintf("bucket number: %lld\n", (long long)tcbdbbnum(bdb));
   iprintf("used bucket number: %lld\n", (long long)tcbdbbnumused(bdb));
   iprintf("cnt_saveleaf: %lld\n", (long long)bdb->cnt_saveleaf);
@@ -1494,7 +1494,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     }
     if(rnum > 250) iputchar('.');
   }
-  if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
+  if(rnum > 250) iprintf(" (%08d)\n", (int)(sizeof(words) / sizeof(*words)));
   iprintf("random erasing:\n");
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
@@ -1734,7 +1734,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     tcfree(rbuf);
     if(rnum > 250) iputchar('.');
   }
-  if(rnum > 250) iprintf(" (%08d)\n", sizeof(words) / sizeof(*words));
+  if(rnum > 250) iprintf(" (%08d)\n", (int)(sizeof(words) / sizeof(*words)));
   iprintf("checking cursor:\n");
   BDBCUR *cur = tcbdbcurnew(bdb);
   int inum = 0;
