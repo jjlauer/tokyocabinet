@@ -1,6 +1,6 @@
 /*************************************************************************************************
- * The test cases of the hash database API
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ * The test cases of the B+ tree database API
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -15,7 +15,6 @@
 
 
 #include <tcutil.h>
-#include <tchdb.h>
 #include <tcbdb.h>
 #include "myconf.h"
 
@@ -24,6 +23,7 @@
 typedef struct {                         // type of structure for write thread
   TCBDB *bdb;
   int rnum;
+  bool rnd;
   int id;
 } TARGWRITE;
 
@@ -31,12 +31,14 @@ typedef struct {                         // type of structure for read thread
   TCBDB *bdb;
   int rnum;
   bool wb;
+  bool rnd;
   int id;
 } TARGREAD;
 
 typedef struct {                         // type of structure for remove thread
   TCBDB *bdb;
   int rnum;
+  bool rnd;
   int id;
 } TARGREMOVE;
 
@@ -52,6 +54,7 @@ typedef struct {                         // type of structure for typical thread
   TCBDB *bdb;
   int rnum;
   bool nc;
+  int rratio;
   int id;
 } TARGTYPICAL;
 
@@ -68,18 +71,19 @@ static void iprintf(const char *format, ...);
 static void eprint(TCBDB *bdb, const char *func);
 static void mprint(TCBDB *bdb);
 static int myrand(int range);
+static int myrandnd(int range);
 static int runwrite(int argc, char **argv);
 static int runread(int argc, char **argv);
 static int runremove(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int runtypical(int argc, char **argv);
 static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
-                     int bnum, int apow, int fpow, int opts, int omode);
-static int procread(const char *path, int tnum, int omode, bool wb);
-static int procremove(const char *path, int tnum, int omode);
+                     int bnum, int apow, int fpow, int opts, int omode, bool rnd);
+static int procread(const char *path, int tnum, int omode, bool wb, bool rnd);
+static int procremove(const char *path, int tnum, int omode, bool rnd);
 static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc);
 static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmemb,
-                       int bnum, int apow, int fpow, int opts, int omode, bool nc);
+                       int bnum, int apow, int fpow, int opts, int omode, bool nc, int rratio);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
 static void *threadremove(void *targ);
@@ -93,7 +97,7 @@ int main(int argc, char **argv){
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
   if(ebuf) g_dbgfd = atoi(ebuf);
-  srand((unsigned int)(tctime() * 100) % UINT_MAX);
+  srand((unsigned int)(tctime() * 1000) % UINT_MAX);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "write")){
@@ -118,13 +122,13 @@ static void usage(void){
   fprintf(stderr, "%s: test cases of the B+ tree database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s write [-tl] [-td|-tb] [-nl|-nb] path tnum rnum"
+  fprintf(stderr, "  %s write [-tl] [-td|-tb] [-nl|-nb] [-rnd] path tnum rnum"
           " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
-  fprintf(stderr, "  %s read [-nl|-nb] [-wb] path tnum\n", g_progname);
-  fprintf(stderr, "  %s remove [-nl|-nb] path tnum\n", g_progname);
+  fprintf(stderr, "  %s read [-nl|-nb] [-wb] [-rnd] path tnum\n", g_progname);
+  fprintf(stderr, "  %s remove [-nl|-nb] [-rnd] path tnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum\n",
           g_progname);
-  fprintf(stderr, "  %s typical [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum"
+  fprintf(stderr, "  %s typical [-tl] [-td|-tb] [-nl|-nb] [-nc] [-rr] path tnum rnum"
           " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -161,6 +165,7 @@ static void mprint(TCBDB *bdb){
   iprintf("used bucket number: %lld\n", (long long)tcbdbbnumused(bdb));
   iprintf("cnt_saveleaf: %lld\n", (long long)bdb->cnt_saveleaf);
   iprintf("cnt_loadleaf: %lld\n", (long long)bdb->cnt_loadleaf);
+  iprintf("cnt_killleaf: %lld\n", (long long)bdb->cnt_killleaf);
   iprintf("cnt_adjleafc: %lld\n", (long long)bdb->cnt_adjleafc);
   iprintf("cnt_savenode: %lld\n", (long long)bdb->cnt_savenode);
   iprintf("cnt_loadnode: %lld\n", (long long)bdb->cnt_loadnode);
@@ -178,12 +183,20 @@ static void mprint(TCBDB *bdb){
   iprintf("cnt_appenddrp: %lld\n", (long long)bdb->hdb->cnt_appenddrp);
   iprintf("cnt_deferdrp: %lld\n", (long long)bdb->hdb->cnt_deferdrp);
   iprintf("cnt_flushdrp: %lld\n", (long long)bdb->hdb->cnt_flushdrp);
+  iprintf("cnt_adjrecc: %lld\n", (long long)bdb->hdb->cnt_adjrecc);
 }
 
 
 /* get a random number */
 static int myrand(int range){
   return (int)((double)range * rand() / (RAND_MAX + 1.0));
+}
+
+
+/* get a random number based on normal distribution */
+static int myrandnd(int range){
+  int num = (int)tcdrandnd(range >> 1, range / 10);
+  return (num < 0 || num >= range) ? 0 : num;
 }
 
 
@@ -199,6 +212,7 @@ static int runwrite(int argc, char **argv){
   char *fstr = NULL;
   int opts = 0;
   int omode = 0;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
@@ -211,6 +225,8 @@ static int runwrite(int argc, char **argv){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -243,7 +259,7 @@ static int runwrite(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procwrite(path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode);
+  int rv = procwrite(path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, rnd);
   return rv;
 }
 
@@ -253,6 +269,7 @@ static int runread(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
   int omode = 0;
+  bool rnd = false;
   bool wb = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
@@ -262,6 +279,8 @@ static int runread(int argc, char **argv){
         omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-wb")){
         wb = true;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -276,7 +295,7 @@ static int runread(int argc, char **argv){
   if(!path || !tstr) usage();
   int tnum = atoi(tstr);
   if(tnum < 1) usage();
-  int rv = procread(path, tnum, omode, wb);
+  int rv = procread(path, tnum, omode, wb, rnd);
   return rv;
 }
 
@@ -286,12 +305,15 @@ static int runremove(int argc, char **argv){
   char *path = NULL;
   char *tstr = NULL;
   int omode = 0;
+  bool rnd = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-rnd")){
+        rnd = true;
       } else {
         usage();
       }
@@ -306,7 +328,7 @@ static int runremove(int argc, char **argv){
   if(!path || !tstr) usage();
   int tnum = atoi(tstr);
   if(tnum < 1) usage();
-  int rv = procremove(path, tnum, omode);
+  int rv = procremove(path, tnum, omode, rnd);
   return rv;
 }
 
@@ -367,6 +389,7 @@ static int runtypical(int argc, char **argv){
   char *fstr = NULL;
   int opts = 0;
   int omode = 0;
+  int rratio = -1;
   bool nc = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
@@ -382,6 +405,9 @@ static int runtypical(int argc, char **argv){
         omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-nc")){
         nc = true;
+      } else if(!strcmp(argv[i], "-rr")){
+        if(++i >= argc) usage();
+        rratio = atoi(argv[i]);
       } else {
         usage();
       }
@@ -414,17 +440,17 @@ static int runtypical(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = proctypical(path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc);
+  int rv = proctypical(path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc, rratio);
   return rv;
 }
 
 
 /* perform write command */
 static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
-                     int bnum, int apow, int fpow, int opts, int omode){
+                     int bnum, int apow, int fpow, int opts, int omode, bool rnd){
   iprintf("<Writing Test>\n  path=%s  tnum=%d  rnum=%d  lmemb=%d  nmemb=%d"
-          "  bnum=%d  apow=%d  fpow=%d  opts=%d  omode=%d\n\n",
-          path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode);
+          "  bnum=%d  apow=%d  fpow=%d  opts=%d  omode=%d  rnd=%d\n\n",
+          path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -446,12 +472,14 @@ static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
   if(tnum == 1){
     targs[0].bdb = bdb;
     targs[0].rnum = rnum;
+    targs[0].rnd = rnd;
     targs[0].id = 0;
     if(threadwrite(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].bdb = bdb;
       targs[i].rnum = rnum;
+      targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadwrite, targs + i) != 0){
         eprint(bdb, "pthread_create");
@@ -478,15 +506,16 @@ static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
     err = true;
   }
   tcbdbdel(bdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
 
 
 /* perform read command */
-static int procread(const char *path, int tnum, int omode, bool wb){
-  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d  wb=%d\n\n", path, tnum, omode, wb);
+static int procread(const char *path, int tnum, int omode, bool wb, bool rnd){
+  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d  wb=%d  rnd=%d\n\n",
+          path, tnum, omode, wb, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -506,6 +535,7 @@ static int procread(const char *path, int tnum, int omode, bool wb){
     targs[0].bdb = bdb;
     targs[0].rnum = rnum;
     targs[0].wb = wb;
+    targs[0].rnd = rnd;
     targs[0].id = 0;
     if(threadread(targs) != NULL) err = true;
   } else {
@@ -513,6 +543,7 @@ static int procread(const char *path, int tnum, int omode, bool wb){
       targs[i].bdb = bdb;
       targs[i].rnum = rnum;
       targs[i].wb = wb;
+      targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadread, targs + i) != 0){
         eprint(bdb, "pthread_create");
@@ -539,15 +570,15 @@ static int procread(const char *path, int tnum, int omode, bool wb){
     err = true;
   }
   tcbdbdel(bdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
 
 
 /* perform remove command */
-static int procremove(const char *path, int tnum, int omode){
-  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d\n\n", path, tnum, omode);
+static int procremove(const char *path, int tnum, int omode, bool rnd){
+  iprintf("<Removing Test>\n  path=%s  tnum=%d  omode=%d  rnd=%d\n\n", path, tnum, omode, rnd);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -566,12 +597,14 @@ static int procremove(const char *path, int tnum, int omode){
   if(tnum == 1){
     targs[0].bdb = bdb;
     targs[0].rnum = rnum;
+    targs[0].rnd = rnd;
     targs[0].id = 0;
     if(threadremove(targs) != NULL) err = true;
   } else {
     for(int i = 0; i < tnum; i++){
       targs[i].bdb = bdb;
       targs[i].rnum = rnum;
+      targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadremove, targs + i) != 0){
         eprint(bdb, "pthread_create");
@@ -598,7 +631,7 @@ static int procremove(const char *path, int tnum, int omode){
     err = true;
   }
   tcbdbdel(bdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -706,7 +739,7 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
     err = true;
   }
   tcbdbdel(bdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -714,10 +747,10 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
 
 /* perform typical command */
 static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmemb,
-                       int bnum, int apow, int fpow, int opts, int omode, bool nc){
+                       int bnum, int apow, int fpow, int opts, int omode, bool nc, int rratio){
   iprintf("<Typical Access Test>\n  path=%s  tnum=%d  rnum=%d  lmemb=%d  nmemb=%d"
-          "  bnum=%d  apow=%d  fpow=%d  opts=%d  omode=%d  nc=%d\n\n",
-          path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc);
+          "  bnum=%d  apow=%d  fpow=%d  opts=%d  omode=%d  nc=%d  rratio=%d\n\n",
+          path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc, rratio);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -740,6 +773,7 @@ static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmem
     targs[0].bdb = bdb;
     targs[0].rnum = rnum;
     targs[0].nc = nc;
+    targs[0].rratio = rratio;
     targs[0].id = 0;
     if(threadtypical(targs) != NULL) err = true;
   } else {
@@ -747,6 +781,7 @@ static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmem
       targs[i].bdb = bdb;
       targs[i].rnum = rnum;
       targs[i].nc = nc;
+      targs[i].rratio = rratio;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadtypical, targs + i) != 0){
         eprint(bdb, "pthread_create");
@@ -773,7 +808,7 @@ static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmem
     err = true;
   }
   tcbdbdel(bdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -783,12 +818,13 @@ static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmem
 static void *threadwrite(void *targ){
   TCBDB *bdb = ((TARGWRITE *)targ)->bdb;
   int rnum = ((TARGWRITE *)targ)->rnum;
+  bool rnd = ((TARGWRITE *)targ)->rnd;
   int id = ((TARGWRITE *)targ)->id;
   bool err = false;
   int base = id * rnum;
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
-    int len = sprintf(buf, "%08d", base + i);
+    int len = sprintf(buf, "%08d", base + (rnd ? myrand(i) : i));
     if(!tcbdbput(bdb, buf, len, buf, len)){
       eprint(bdb, "tcbdbput");
       err = true;
@@ -809,27 +845,26 @@ static void *threadread(void *targ){
   TCBDB *bdb = ((TARGREAD *)targ)->bdb;
   int rnum = ((TARGREAD *)targ)->rnum;
   bool wb = ((TARGREAD *)targ)->wb;
+  bool rnd = ((TARGREAD *)targ)->rnd;
   int id = ((TARGREAD *)targ)->id;
   bool err = false;
   int base = id * rnum;
-  for(int i = 1; i <= rnum; i++){
+  for(int i = 1; i <= rnum && !err; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", base + i);
+    int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrandnd(i) : i));
     int vsiz;
     if(wb){
       int vsiz;
       const char *vbuf = tcbdbget3(bdb, kbuf, ksiz, &vsiz);
-      if(!vbuf){
+      if(!vbuf && (!rnd || tcbdbecode(bdb) != TCENOREC)){
         eprint(bdb, "tcbdbget3");
         err = true;
-        break;
       }
     } else {
       char *vbuf = tcbdbget(bdb, kbuf, ksiz, &vsiz);
-      if(!vbuf){
+      if(!vbuf && (!rnd || tcbdbecode(bdb) != TCENOREC)){
         eprint(bdb, "tcbdbget");
         err = true;
-        break;
       }
       free(vbuf);
     }
@@ -847,13 +882,14 @@ static void *threadread(void *targ){
 static void *threadremove(void *targ){
   TCBDB *bdb = ((TARGREMOVE *)targ)->bdb;
   int rnum = ((TARGREMOVE *)targ)->rnum;
+  bool rnd = ((TARGREMOVE *)targ)->rnd;
   int id = ((TARGREMOVE *)targ)->id;
   bool err = false;
   int base = id * rnum;
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
-    int ksiz = sprintf(kbuf, "%08d", base + i);
-    if(!tcbdbout(bdb, kbuf, ksiz)){
+    int ksiz = sprintf(kbuf, "%08d", base + (rnd ? myrand(i + 1) : i));
+    if(!tcbdbout(bdb, kbuf, ksiz) && (!rnd || tcbdbecode(bdb) != TCENOREC)){
       eprint(bdb, "tcbdbout");
       err = true;
       break;
@@ -1087,7 +1123,7 @@ static void *threadwicked(void *targ){
       break;
     default:
       if(id == 0) putchar('@');
-      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 100) % UINT_MAX);
+      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
       break;
     }
     if(!nc) tcglobalmutexunlock();
@@ -1115,15 +1151,17 @@ static void *threadtypical(void *targ){
   TCBDB *bdb = ((TARGTYPICAL *)targ)->bdb;
   int rnum = ((TARGTYPICAL *)targ)->rnum;
   bool nc = ((TARGTYPICAL *)targ)->nc;
+  int rratio = ((TARGTYPICAL *)targ)->rratio;
   int id = ((TARGTYPICAL *)targ)->id;
   bool err = false;
   TCMAP *map = (!nc && id == 0) ? tcmapnew2(rnum + 1) : NULL;
   int base = id * rnum;
+  int mrange = tclmax(50 + rratio, 100);
   BDBCUR *cur = tcbdbcurnew(bdb);
   for(int i = 1; !err && i <= rnum; i++){
     char buf[RECBUFSIZ];
-    int len = sprintf(buf, "%08d", base + myrand(i));
-    int rnd = myrand(100);
+    int len = sprintf(buf, "%08d", base + myrandnd(i));
+    int rnd = myrand(mrange);
     if(rnd < 10){
       if(!tcbdbput(bdb, buf, len, buf, len)){
         eprint(bdb, "tcbdbput");

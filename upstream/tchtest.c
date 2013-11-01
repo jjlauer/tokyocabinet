@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the hash database API
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -40,11 +40,11 @@ static int runrcat(int argc, char **argv);
 static int runmisc(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
-                     bool mt, int opts, int omode, bool as);
-static int procread(const char *path, bool mt, int omode, bool wb);
-static int procremove(const char *path, bool mt, int omode);
+                     bool mt, int opts, int rcnum, int omode, bool as);
+static int procread(const char *path, bool mt, int rcnum, int omode, bool wb);
+static int procremove(const char *path, bool mt, int rcnum, int omode);
 static int procrcat(const char *path, int rnum, int bnum, int apow, int fpow,
-                    bool mt, int opts, int omode, int pnum, bool rl);
+                    bool mt, int opts, int rcnum, int omode, int pnum, bool rl);
 static int procmisc(const char *path, int rnum, bool mt, int opts, int omode);
 static int procwicked(const char *path, int rnum, bool mt, int opts, int omode);
 
@@ -55,7 +55,7 @@ int main(int argc, char **argv){
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
   if(ebuf) g_dbgfd = atoi(ebuf);
-  srand((unsigned int)(tctime() * 100) % UINT_MAX);
+  srand((unsigned int)(tctime() * 1000) % UINT_MAX);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "write")){
@@ -82,11 +82,11 @@ static void usage(void){
   fprintf(stderr, "%s: test cases of the hash database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s write [-mt] [-tl] [-td|-tb] [-nl|-nb] [-as] path rnum"
+  fprintf(stderr, "  %s write [-mt] [-tl] [-td|-tb] [-rc num] [-nl|-nb] [-as] path rnum"
           " [bnum [apow [fpow]]]\n", g_progname);
-  fprintf(stderr, "  %s read [-mt] [-nl|-nb] [-wb] path\n", g_progname);
-  fprintf(stderr, "  %s remove [-mt] [-nl|-nb] path\n", g_progname);
-  fprintf(stderr, "  %s rcat [-mt] [-tl] [-td|-tb] [-nl|-nb] [-pn num] [-rl]"
+  fprintf(stderr, "  %s read [-mt] [-rc num] [-nl|-nb] [-wb] path\n", g_progname);
+  fprintf(stderr, "  %s remove [-mt] [-rc num] [-nl|-nb] path\n", g_progname);
+  fprintf(stderr, "  %s rcat [-mt] [-rc num] [-tl] [-td|-tb] [-nl|-nb] [-pn num] [-rl]"
           " path rnum [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s misc [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
@@ -132,6 +132,7 @@ static void mprint(TCHDB *hdb){
   iprintf("cnt_appenddrp: %lld\n", (long long)hdb->cnt_appenddrp);
   iprintf("cnt_deferdrp: %lld\n", (long long)hdb->cnt_deferdrp);
   iprintf("cnt_flushdrp: %lld\n", (long long)hdb->cnt_flushdrp);
+  iprintf("cnt_adjrecc: %lld\n", (long long)hdb->cnt_adjrecc);
 }
 
 
@@ -150,6 +151,7 @@ static int runwrite(int argc, char **argv){
   char *fstr = NULL;
   bool mt = false;
   int opts = 0;
+  int rcnum = 0;
   int omode = 0;
   bool as = false;
   for(int i = 2; i < argc; i++){
@@ -162,6 +164,9 @@ static int runwrite(int argc, char **argv){
         opts |= HDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
         opts |= HDBTTCBS;
+      } else if(!strcmp(argv[i], "-rc")){
+        if(++i >= argc) usage();
+        rcnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -191,7 +196,7 @@ static int runwrite(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procwrite(path, rnum, bnum, apow, fpow, mt, opts, omode, as);
+  int rv = procwrite(path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as);
   return rv;
 }
 
@@ -200,12 +205,16 @@ static int runwrite(int argc, char **argv){
 static int runread(int argc, char **argv){
   char *path = NULL;
   bool mt = false;
+  int rcnum = 0;
   int omode = 0;
   bool wb = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
+      } else if(!strcmp(argv[i], "-rc")){
+        if(++i >= argc) usage();
+        rcnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -222,7 +231,7 @@ static int runread(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procread(path, mt, omode, wb);
+  int rv = procread(path, mt, rcnum, omode, wb);
   return rv;
 }
 
@@ -231,11 +240,15 @@ static int runread(int argc, char **argv){
 static int runremove(int argc, char **argv){
   char *path = NULL;
   bool mt = false;
+  int rcnum = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
+      } else if(!strcmp(argv[i], "-rc")){
+        if(++i >= argc) usage();
+        rcnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -250,7 +263,7 @@ static int runremove(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = procremove(path, mt, omode);
+  int rv = procremove(path, mt, rcnum, omode);
   return rv;
 }
 
@@ -264,6 +277,7 @@ static int runrcat(int argc, char **argv){
   char *fstr = NULL;
   bool mt = false;
   int opts = 0;
+  int rcnum = 0;
   int omode = 0;
   int pnum = 0;
   bool rl = false;
@@ -277,6 +291,9 @@ static int runrcat(int argc, char **argv){
         opts |= HDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
         opts |= HDBTTCBS;
+      } else if(!strcmp(argv[i], "-rc")){
+        if(++i >= argc) usage();
+        rcnum = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -309,7 +326,7 @@ static int runrcat(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procrcat(path, rnum, bnum, apow, fpow, mt, opts, omode, pnum, rl);
+  int rv = procrcat(path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, pnum, rl);
   return rv;
 }
 
@@ -396,9 +413,10 @@ static int runwicked(int argc, char **argv){
 
 /* perform write command */
 static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
-                     bool mt, int opts, int omode, bool as){
+                     bool mt, int opts, int rcnum, int omode, bool as){
   iprintf("<Writing Test>\n  path=%s  rnum=%d  bnum=%d  apow=%d  fpow=%d  mt=%d"
-          "  opts=%d  omode=%d  as=%d\n\n", path, rnum, bnum, apow, fpow, mt, opts, omode, as);
+          "  opts=%d  rcnum=%d  omode=%d  as=%d\n\n",
+          path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, as);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
@@ -409,6 +427,10 @@ static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
   }
   if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
     eprint(hdb, "tchdbtune");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rcnum)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
@@ -445,21 +467,26 @@ static int procwrite(const char *path, int rnum, int bnum, int apow, int fpow,
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
 
 
 /* perform read command */
-static int procread(const char *path, bool mt, int omode, bool wb){
-  iprintf("<Reading Test>\n  path=%s  omode=%d  wb=%d\n", path, omode, wb);
+static int procread(const char *path, bool mt, int rcnum, int omode, bool wb){
+  iprintf("<Reading Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d  wb=%d\n",
+          path, mt, rcnum, omode, wb);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
   if(mt && !tchdbsetmutex(hdb)){
     eprint(hdb, "tchdbsetmutex");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rcnum)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOREADER | omode)){
@@ -502,21 +529,25 @@ static int procread(const char *path, bool mt, int omode, bool wb){
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
 
 
 /* perform remove command */
-static int procremove(const char *path, bool mt, int omode){
-  iprintf("<Removing Test>\n  path=%s  mt=%d  omode=%d\n", path, mt, omode);
+static int procremove(const char *path, bool mt, int rcnum, int omode){
+  iprintf("<Removing Test>\n  path=%s  mt=%d  rcnum=%d  omode=%d\n", path, mt, rcnum, omode);
   bool err = false;
   double stime = tctime();
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
   if(mt && !tchdbsetmutex(hdb)){
     eprint(hdb, "tchdbsetmutex");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rcnum)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
@@ -546,7 +577,7 @@ static int procremove(const char *path, bool mt, int omode){
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -554,10 +585,11 @@ static int procremove(const char *path, bool mt, int omode){
 
 /* perform rcat command */
 static int procrcat(const char *path, int rnum, int bnum, int apow, int fpow,
-                    bool mt, int opts, int omode, int pnum, bool rl){
+                    bool mt, int opts, int rcnum, int omode, int pnum, bool rl){
   iprintf("<Random Concatenating Test>\n"
-          "  path=%s  rnum=%d  bnum=%d  apow=%d  fpow=%d  mt=%d  opts=%d  omode=%d  pnum=%d"
-          "  rl=%d\n\n", path, rnum, bnum, apow, fpow, mt, opts, omode, pnum, rl);
+          "  path=%s  rnum=%d  bnum=%d  apow=%d  fpow=%d  mt=%d  opts=%d  rcnum=%d"
+          "  omode=%d  pnum=%d  rl=%d\n\n",
+          path, rnum, bnum, apow, fpow, mt, opts, rcnum, omode, pnum, rl);
   if(pnum < 1) pnum = rnum;
   bool err = false;
   double stime = tctime();
@@ -569,6 +601,10 @@ static int procrcat(const char *path, int rnum, int bnum, int apow, int fpow,
   }
   if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
     eprint(hdb, "tchdbtune");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rcnum)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
@@ -610,7 +646,7 @@ static int procrcat(const char *path, int rnum, int bnum, int apow, int fpow,
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -630,6 +666,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
   }
   if(!tchdbtune(hdb, rnum / 50, 2, -1, opts)){
     eprint(hdb, "tchdbtune");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rnum / 10)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
@@ -1046,7 +1086,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }
@@ -1066,6 +1106,10 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
   }
   if(!tchdbtune(hdb, rnum / 50, 2, -1, opts)){
     eprint(hdb, "tchdbtune");
+    err = true;
+  }
+  if(!tchdbsetcache(hdb, rnum / 10)){
+    eprint(hdb, "tchdbsetcache");
     err = true;
   }
   if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
@@ -1260,7 +1304,21 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
       break;
     default:
       putchar('@');
-      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 100) % UINT_MAX);
+      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
+      if(myrand(rnum / 16 + 1) == 0){
+        int cnt = myrand(30);
+        for(int j = 0; j < rnum && !err; j++){
+          ksiz = sprintf(kbuf, "%d", i + j);
+          if(tchdbout(hdb, kbuf, ksiz)){
+            cnt--;
+          } else if(tchdbecode(hdb) != TCENOREC){
+            eprint(hdb, "tcbdbout");
+            err = true;
+          }
+          tcmapout(map, kbuf, ksiz);
+          if(cnt < 0) break;
+        }
+      }
       break;
     }
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
@@ -1371,7 +1429,7 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
     err = true;
   }
   tchdbdel(hdb);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }

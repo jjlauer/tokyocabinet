@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * Popular encoders and decoders of the utility API
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -34,6 +34,8 @@ static int runpack(int argc, char **argv);
 static int runtcbs(int argc, char **argv);
 static int runzlib(int argc, char **argv);
 static int runxml(int argc, char **argv);
+static int runucs(int argc, char **argv);
+static int rundate(int argc, char **argv);
 static int runconf(int argc, char **argv);
 static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *base);
 static int procbase(const char *ibuf, int isiz, bool dec);
@@ -43,6 +45,8 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt);
 static int proctcbs(const char *ibuf, int isiz, bool dec);
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz);
 static int procxml(const char *ibuf, int isiz, bool dec, bool br);
+static int procucs(const char *ibuf, int isiz, bool dec);
+static int procdate(const char *str, int jl, bool wf, bool rf);
 static int procconf(int mode);
 
 
@@ -67,6 +71,10 @@ int main(int argc, char **argv){
     rv = runzlib(argc, argv);
   } else if(!strcmp(argv[1], "xml")){
     rv = runxml(argc, argv);
+  } else if(!strcmp(argv[1], "ucs")){
+    rv = runucs(argc, argv);
+  } else if(!strcmp(argv[1], "date")){
+    rv = rundate(argc, argv);
   } else if(!strcmp(argv[1], "conf")){
     rv = runconf(argc, argv);
   } else {
@@ -89,6 +97,8 @@ static void usage(void){
   fprintf(stderr, "  %s tcbs [-d] [file]\n", g_progname);
   fprintf(stderr, "  %s zlib [-d] [-gz] [file]\n", g_progname);
   fprintf(stderr, "  %s xml [-d] [-br] [file]\n", g_progname);
+  fprintf(stderr, "  %s ucs [-d] [file]\n", g_progname);
+  fprintf(stderr, "  %s date [-ds str] [-jl num] [-wf] [-rf]\n", g_progname);
   fprintf(stderr, "  %s conf [-v|-i|-l|-p]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -421,6 +431,72 @@ static int runxml(int argc, char **argv){
 }
 
 
+/* parse arguments of ucs command */
+static int runucs(int argc, char **argv){
+  char *path = NULL;
+  bool dec = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-d")){
+        dec = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = procucs(ibuf, isiz, dec);
+  if(path && path[0] == '@') printf("\n");
+  free(ibuf);
+  return rv;
+}
+
+
+/* parse arguments of date command */
+static int rundate(int argc, char **argv){
+  char *str = NULL;
+  int jl = INT_MAX;
+  bool wf = false;
+  bool rf = false;
+  for(int i = 2; i < argc; i++){
+    if(argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-ds")){
+        if(++i >= argc) usage();
+        str = argv[i];
+      } else if(!strcmp(argv[i], "-jl")){
+        if(++i >= argc) usage();
+        jl = atoi(argv[i]);
+      } else if(!strcmp(argv[i], "-wf")){
+        wf = true;
+      } else if(!strcmp(argv[i], "-rf")){
+        rf = true;
+      } else {
+        usage();
+      }
+    } else {
+      usage();
+    }
+  }
+  int rv = procdate(str, jl, wf, rf);
+  return rv;
+}
+
+
 /* parse arguments of conf command */
 static int runconf(int argc, char **argv){
   int mode = 0;
@@ -670,6 +746,52 @@ static int procxml(const char *ibuf, int isiz, bool dec, bool br){
     char *obuf = tcxmlescape(ibuf);
     fwrite(obuf, strlen(obuf), 1, stdout);
     free(obuf);
+  }
+  return 0;
+}
+
+
+/* perform ucs command */
+static int procucs(const char *ibuf, int isiz, bool dec){
+  if(dec){
+    uint16_t *ary = tcmalloc(isiz + 1);
+    int anum = 0;
+    for(int i = 0; i < isiz; i += 2){
+      ary[anum++] = (((unsigned char *)ibuf)[i] << 8) + ((unsigned char *)ibuf)[i+1];
+    }
+    char *str = tcmalloc(isiz * 3 + 1);
+    tcstrucstoutf(ary, anum, str);
+    printf("%s", str);
+    free(str);
+    free(ary);
+  } else {
+    uint16_t *ary = tcmalloc(isiz * sizeof(uint16_t) + 1);
+    int anum;
+    tcstrutftoucs(ibuf, ary, &anum);
+    for(int i = 0; i < anum; i++){
+      int c = ary[i];
+      putchar(c >> 8);
+      putchar(c & 0xff);
+    }
+    free(ary);
+  }
+  return 0;
+}
+
+
+/* perform date command */
+static int procdate(const char *str, int jl, bool wf, bool rf){
+  int64_t t = str ? tcstrmktime(str) : time(NULL);
+  if(wf){
+    char buf[48];
+    tcdatestrwww(t, jl, buf);
+    printf("%s\n", buf);
+  } else if(rf){
+    char buf[48];
+    tcdatestrhttp(t, jl, buf);
+    printf("%s\n", buf);
+  } else {
+    printf("%lld\n", (long long int)t);
   }
   return 0;
 }

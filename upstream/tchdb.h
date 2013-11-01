@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The hash database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -28,9 +28,9 @@ __TCHDB_CLINKAGEBEGIN
 
 
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 #include <tcutil.h>
 
 
@@ -42,7 +42,7 @@ __TCHDB_CLINKAGEBEGIN
 
 typedef struct {                         /* type of structure for a hash database */
   void *mmtx;                            /* mutex for method */
-  void *fmtx;                            /* mutex for file I/O */
+  void *dmtx;                            /* mutex for DRP */
   void *eckey;                           /* key for thread specific error code */
   uint8_t type;                          /* database type */
   uint8_t flags;                         /* additional flags */
@@ -70,9 +70,12 @@ typedef struct {                         /* type of structure for a hash databas
   void *fbpool;                          /* free block pool */
   int32_t fbpnum;                        /* number of the free block pool */
   int32_t fbpmis;                        /* number of missing retrieval of the free block pool */
+  bool async;                            /* whether asynchronous storing is called */
   TCXSTR *drpool;                        /* delayed record pool */
   TCXSTR *drpdef;                        /* deferred records of the delayed record pool */
   uint64_t drpoff;                       /* offset of the delayed record pool */
+  TCMDB *recc;                           /* cache for records */
+  uint32_t rcnum;                        /* max number of cached records */
   int ecode;                             /* last happened error code */
   bool fatal;                            /* whether a fatal error occured */
   uint64_t inode;                        /* inode number */
@@ -91,6 +94,7 @@ typedef struct {                         /* type of structure for a hash databas
   int64_t cnt_appenddrp;                 /* tesing counter for DRP append times */
   int64_t cnt_deferdrp;                  /* tesing counter for DRP defer times */
   int64_t cnt_flushdrp;                  /* tesing counter for DRP flush times */
+  int64_t cnt_adjrecc;                   /* tesing counter for record cache adjust times */
 } TCHDB;
 
 enum {                                   /* enumeration for error codes */
@@ -201,8 +205,17 @@ bool tchdbsetmutex(TCHDB *hdb);
    is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with
    TCBS encoding.
    If successful, the return value is true, else, it is false.
-   Note that the tuning parameters of the database should be set before the database is opened. */
+   Note that the tuning parameters should be set before the database is opened. */
 bool tchdbtune(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
+
+
+/* Set the caching parameters of a hash database object.
+   `hdb' specifies the hash database object which is not opened.
+   `rcnum' specifies the maximum number of records to be cached.  If it is not more than 0, the
+   record cache is disabled.  It is disabled by default.
+   If successful, the return value is true, else, it is false.
+   Note that the caching parameters should be set before the database is opened. */
+bool tchdbsetcache(TCHDB *hdb, int32_t rcnum);
 
 
 /* Open a database file and connect a hash database object.
@@ -342,9 +355,9 @@ void *tchdbget(TCHDB *hdb, const void *kbuf, int ksiz, int *sp);
    `hdb' specifies the hash database object.
    `kstr' specifies the string of the key.
    If successful, the return value is the string of the value of the corresponding record.
-   `NULL' is returned if no record corresponds.  Because the region of the return value is
-   allocated with the `malloc' call, it should be released with the `free' call when it is no
-   longer in use. */
+   `NULL' is returned if no record corresponds.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
 char *tchdbget2(TCHDB *hdb, const char *kstr);
 
 

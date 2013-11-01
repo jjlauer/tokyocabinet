@@ -1,7 +1,7 @@
-.TH "TCUTIL" 3 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCUTIL" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tcutil \- the utility API of Tokyo Cabinet
+tcutil \- the utility API
 
 .SH DESCRIPTION
 .PP
@@ -856,7 +856,7 @@ The function `tcmapnew2' is used in order to create a map object with specifying
 .PP
 .RS
 .br
-\fBTCMAP *tcmapnew2(int \fIbnum\fB);\fR
+\fBTCMAP *tcmapnew2(uint32_t \fIbnum\fB);\fR
 .RS
 `\fIbnum\fR' specifies the number of the buckets.
 .RE
@@ -884,7 +884,7 @@ The function `tcmapdel' is used in order to delete a map object.
 .br
 \fBvoid tcmapdel(TCMAP *\fImap\fB);\fR
 .RS
-`\fImap\fR' specifies the list object.
+`\fImap\fR' specifies the map object.
 .RE
 .RS
 Note that the deleted object and its derivatives can not be used anymore.
@@ -912,7 +912,7 @@ The function `tcmapput' is used in order to store a record into a map object.
 `\fIvsiz\fR' specifies the size of the region of the value.
 .RE
 .RS
-If a record with the same key exists in the database, it is overwritten.
+If a record with the same key exists in the map, it is overwritten.
 .RE
 .RE
 .PP
@@ -931,7 +931,38 @@ The function `tcmapput2' is used in order to store a string record into a map ob
 `\fIvstr\fR' specifies the string of the value.
 .RE
 .RS
-If a record with the same key exists in the database, it is overwritten.
+If a record with the same key exists in the map, it is overwritten.
+.RE
+.RE
+.PP
+The function `tcmapput3' is used in order to store a record of the value of two regions into a map object.
+.PP
+.RS
+.br
+\fBvoid tcmapput3(TCMAP *\fImap\fB, const char *\fIkbuf\fB, int \fIksiz\fB, const void *\fIfvbuf\fB, int \fIfvsiz\fB, const char *\fIlvbuf\fB, int \fIlvsiz\fB);\fR
+.RS
+`\fImap\fR' specifies the map object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIfvbuf\fR' specifies the pointer to the former region of the value.
+.RE
+.RS
+`\fIfvsiz\fR' specifies the size of the former region of the value.
+.RE
+.RS
+`\fIlvbuf\fR' specifies the pointer to the latter region of the value.
+.RE
+.RS
+`\fIlvsiz\fR' specifies the size of the latter region of the value.
+.RE
+.RS
+If a record with the same key exists in the map, it is overwritten.
 .RE
 .RE
 .PP
@@ -959,7 +990,7 @@ The function `tcmapputkeep' is used in order to store a new record into a map ob
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-If a record with the same key exists in the database, this function has no effect.
+If a record with the same key exists in the map, this function has no effect.
 .RE
 .RE
 .PP
@@ -981,7 +1012,7 @@ The function `tcmapputkeep2' is used in order to store a new string record into 
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-If a record with the same key exists in the database, this function has no effect.
+If a record with the same key exists in the map, this function has no effect.
 .RE
 .RE
 .PP
@@ -1102,6 +1133,31 @@ The function `tcmapget2' is used in order to retrieve a string record in a map o
 .RE
 .RS
 If successful, the return value is the string of the value of the corresponding record.  `NULL' is returned when no record corresponds.
+.RE
+.RE
+.PP
+The function `tcmapget3' is used in order to retrieve a semivolatile record in a map object.
+.PP
+.RS
+.br
+\fBconst void *tcmapget3(TCMAP *\fImap\fB, const void *\fIkbuf\fB, int \fIksiz\fB, int *\fIsp\fB);\fR
+.RS
+`\fImap\fR' specifies the map object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to the variable into which the size of the region of the return value is assigned.
+.RE
+.RS
+If successful, the return value is the pointer to the region of the value of the corresponding record.  `NULL' is returned when no record corresponds.
+.RE
+.RS
+Because an additional zero code is appended at the end of the region of the return value, the return value can be treated as a character string.  The internal region of the returned record is moved to the tail so that the record will survive for a time under LRU cache algorithm removing records from the head.
 .RE
 .RE
 .PP
@@ -1230,12 +1286,25 @@ The function `tcmaprnum' is used in order to get the number of records stored in
 .PP
 .RS
 .br
-\fBint tcmaprnum(const TCMAP *\fImap\fB);\fR
+\fBuint64_t tcmaprnum(const TCMAP *\fImap\fB);\fR
 .RS
 `\fImap\fR' specifies the map object.
 .RE
 .RS
 The return value is the number of the records stored in the map object.
+.RE
+.RE
+.PP
+The function `tcmapmsiz' is used in order to get the total size of memory used in a map object.
+.PP
+.RS
+.br
+\fBuint64_t tcmapmsiz(const TCMAP *\fImap\fB);\fR
+.RS
+`\fImap\fR' specifies the map object.
+.RE
+.RS
+The return value is the total size of memory used in a map object.
 .RE
 .RE
 .PP
@@ -1271,7 +1340,29 @@ Because the object of the return value is created with the function `tclistnew',
 .RE
 .RE
 .PP
-The function `tcmapclear' is used in order to clear a list object.
+The function `tcmapaddint' is used in order to add an integer to a record in a map object.
+.PP
+.RS
+.br
+\fBvoid tcmapaddint(TCMAP *\fImap\fB, const char *\fIkbuf\fB, int \fIksiz\fB, int \fInum\fB);\fR
+.RS
+`\fImap\fR' specifies the map object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fInum\fR' specifies the additional value.
+.RE
+.RS
+If the corresponding record exists, the value is treated as a integer and is added to.  If no record corresponds, a new record of the additional value is stored.
+.RE
+.RE
+.PP
+The function `tcmapclear' is used in order to clear a map object.
 .PP
 .RS
 .br
@@ -1284,7 +1375,23 @@ All records are removed.
 .RE
 .RE
 .PP
-The function `tcmapdump' is used in order to serialize map list object into a byte array.
+The function `tcmapcutfront' is used in order to remove front records of a map object.
+.PP
+.RS
+.br
+\fBvoid tcmapcutfront(TCMAP *\fImap\fB, int \fInum\fB);\fR
+.RS
+`\fImap\fR' specifies the map object.
+.RE
+.RS
+`\fInum\fR' specifies the number of records to be removed.
+.RE
+.RS
+If successful, the return value is true.  False is returned when no record corresponds to the specified key.
+.RE
+.RE
+.PP
+The function `tcmapdump' is used in order to serialize a map object into a byte array.
 .PP
 .RS
 .br
@@ -1347,6 +1454,461 @@ If successful, the return value is the pointer to the region of the value of the
 .RE
 .RS
 Because an additional zero code is appended at the end of the region of the return value, the return value can be treated as a character string.
+.RE
+.RE
+
+.SH API OF ON\-MEMORY DATABASE
+.PP
+The function `tcmdbnew' is used in order to create an on\-memory database object.
+.PP
+.RS
+.br
+\fBTCMDB *tcmdbnew(void);\fR
+.RS
+The return value is the new on\-memory database object.
+.RE
+.RS
+The object can be shared by plural threads because of the internal mutex.
+.RE
+.RE
+.PP
+The function `tcmdbnew2' is used in order to create an on\-memory database object with specifying the number of the buckets.
+.PP
+.RS
+.br
+\fBTCMDB *tcmdbnew2(uint32_t \fIbnum\fB);\fR
+.RS
+`\fIbnum\fR' specifies the number of the buckets.
+.RE
+.RS
+The return value is the new on\-memory database object.
+.RE
+.RS
+The object can be shared by plural threads because of the internal mutex.
+.RE
+.RE
+.PP
+The function `tcmdbdel' is used in order to delete an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbdel(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RE
+.PP
+The function `tcmdbput' is used in order to store a record into an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbput(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, const void *\fIvbuf\fB, int \fIvsiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIvbuf\fR' specifies the pointer to the region of the value.
+.RE
+.RS
+`\fIvsiz\fR' specifies the size of the region of the value.
+.RE
+.RS
+If a record with the same key exists in the database, it is overwritten.
+.RE
+.RE
+.PP
+The function `tcmdbput2' is used in order to store a string record into an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbput2(TCMDB *\fImdb\fB, const char *\fIkstr\fB, const char *\fIvstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+`\fIvstr\fR' specifies the string of the value.
+.RE
+.RS
+If a record with the same key exists in the database, it is overwritten.
+.RE
+.RE
+.PP
+The function `tcmdbput3' is used in order to store a record of the value of two regions into an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbput3(TCMDB *\fImdb\fB, const char *\fIkbuf\fB, int \fIksiz\fB, const void *\fIfvbuf\fB, int \fIfvsiz\fB, const char *\fIlvbuf\fB, int \fIlvsiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIfvbuf\fR' specifies the pointer to the former region of the value.
+.RE
+.RS
+`\fIfvsiz\fR' specifies the size of the former region of the value.
+.RE
+.RS
+`\fIlvbuf\fR' specifies the pointer to the latter region of the value.
+.RE
+.RS
+`\fIlvsiz\fR' specifies the size of the latter region of the value.
+.RE
+.RS
+If a record with the same key exists in the database, it is overwritten.
+.RE
+.RE
+.PP
+The function `tcmdbputkeep' is used in order to store a new record into an on\-memory database object.
+.PP
+.RS
+.br
+\fBbool tcmdbputkeep(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, const void *\fIvbuf\fB, int \fIvsiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIvbuf\fR' specifies the pointer to the region of the value.
+.RE
+.RS
+`\fIvsiz\fR' specifies the size of the region of the value.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+If a record with the same key exists in the database, this function has no effect.
+.RE
+.RE
+.PP
+The function `tcmdbputkeep2' is used in order to store a new string record into an on\-memory database object.
+.PP
+.RS
+.br
+\fBbool tcmdbputkeep2(TCMDB *\fImdb\fB, const char *\fIkstr\fB, const char *\fIvstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+`\fIvstr\fR' specifies the string of the value.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+If a record with the same key exists in the database, this function has no effect.
+.RE
+.RE
+.PP
+The function `tcmdbputcat' is used in order to concatenate a value at the end of the value of the existing record in an on\-memory database.
+.PP
+.RS
+.br
+\fBvoid tcmdbputcat(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, const void *\fIvbuf\fB, int \fIvsiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIvbuf\fR' specifies the pointer to the region of the value.
+.RE
+.RS
+`\fIvsiz\fR' specifies the size of the region of the value.
+.RE
+.RS
+If there is no corresponding record, a new record is created.
+.RE
+.RE
+.PP
+The function `tcmdbputcat2' is used in order to concatenate a string at the end of the value of the existing record in an on\-memory database.
+.PP
+.RS
+.br
+\fBvoid tcmdbputcat2(TCMDB *\fImdb\fB, const char *\fIkstr\fB, const char *\fIvstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+`\fIvstr\fR' specifies the string of the value.
+.RE
+.RS
+If there is no corresponding record, a new record is created.
+.RE
+.RE
+.PP
+The function `tcmdbout' is used in order to remove a record of an on\-memory database object.
+.PP
+.RS
+.br
+\fBbool tcmdbout(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+If successful, the return value is true.  False is returned when no record corresponds to the specified key.
+.RE
+.RE
+.PP
+The function `tcmdbout2' is used in order to remove a string record of an on\-memory database object.
+.PP
+.RS
+.br
+\fBbool tcmdbout2(TCMDB *\fImdb\fB, const char *\fIkstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+If successful, the return value is true.  False is returned when no record corresponds to the specified key.
+.RE
+.RE
+.PP
+The function `tcmdbget' is used in order to retrieve a record in an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid *tcmdbget(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, int *\fIsp\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to the variable into which the size of the region of the return value is assigned.
+.RE
+.RS
+If successful, the return value is the pointer to the region of the value of the corresponding record.  `NULL' is returned when no record corresponds.
+.RE
+.RS
+Because an additional zero code is appended at the end of the region of the return value, the return value can be treated as a character string.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcmdbget2' is used in order to retrieve a string record in an on\-memory database object.
+.PP
+.RS
+.br
+\fBchar *tcmdbget2(TCMDB *\fImdb\fB, const char *\fIkstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+If successful, the return value is the string of the value of the corresponding record.  `NULL' is returned when no record corresponds.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcmdbget3' is used in order to retrieve a record and move it astern in an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid *tcmdbget3(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB, int *\fIsp\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to the variable into which the size of the region of the return value is assigned.
+.RE
+.RS
+If successful, the return value is the pointer to the region of the value of the corresponding record.  `NULL' is returned when no record corresponds.
+.RE
+.RS
+Because an additional zero code is appended at the end of the region of the return value, the return value can be treated as a character string.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.  The internal region of the returned record is moved to the tail so that the record will survive for a time under LRU cache algorithm removing records from the head.
+.RE
+.RE
+.PP
+The function `tcmdbvsiz' is used in order to get the size of the value of a record in an on\-memory database object.
+.PP
+.RS
+.br
+\fBint tcmdbvsiz(TCMDB *\fImdb\fB, const void *\fIkbuf\fB, int \fIksiz\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkbuf\fR' specifies the pointer to the region of the key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the key.
+.RE
+.RS
+If successful, the return value is the size of the value of the corresponding record, else, it is \-1.
+.RE
+.RE
+.PP
+The function `tcmdbvsiz2' is used in order to get the size of the value of a string record in an on\-memory database object.
+.PP
+.RS
+.br
+\fBint tcmdbvsiz2(TCMDB *\fImdb\fB, const char *\fIkstr\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIkstr\fR' specifies the string of the key.
+.RE
+.RS
+If successful, the return value is the size of the value of the corresponding record, else, it is \-1.
+.RE
+.RE
+.PP
+The function `tcmdbiterinit' is used in order to initialize the iterator of an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbiterinit(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+The iterator is used in order to access the key of every record stored in the on\-memory database.
+.RE
+.RE
+.PP
+The function `tcmdbiternext' is used in order to get the next key of the iterator of an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid *tcmdbiternext(TCMDB *\fImdb\fB, int *\fIsp\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to the variable into which the size of the region of the return
+.RE
+.RS
+value is assigned.
+.RE
+.RS
+If successful, the return value is the pointer to the region of the next key, else, it is `NULL'.  `NULL' is returned when no record can be fetched from the iterator.
+.RE
+.RS
+Because an additional zero code is appended at the end of the region of the return value, the return value can be treated as a character string.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.  The order of iteration is assured to be the same as the stored order.
+.RE
+.RE
+.PP
+The function `tcmdbiternext2' is used in order to get the next key string of the iterator of an on\-memory database object.
+.PP
+.RS
+.br
+\fBchar *tcmdbiternext2(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+If successful, the return value is the pointer to the region of the next key, else, it is `NULL'.  `NULL' is returned when no record can be fetched from the iterator.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.  The order of iteration is assured to be the same as the stored order.
+.RE
+.RE
+.PP
+The function `tcmdbrnum' is used in order to get the number of records stored in an on\-memory database object.
+.PP
+.RS
+.br
+\fBuint64_t tcmdbrnum(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+The return value is the number of the records stored in the database.
+.RE
+.RE
+.PP
+The function `tcmdbmsiz' is used in order to get the total size of memory used in an on\-memory database object.
+.PP
+.RS
+.br
+\fBuint64_t tcmdbmsiz(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+The return value is the total size of memory used in the database.
+.RE
+.RE
+.PP
+The function `tcmdbvanish' is used in order to clear an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbvanish(TCMDB *\fImdb\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+All records are removed.
+.RE
+.RE
+.PP
+The function `tcmdbcutfront' is used in order to remove front records of an on\-memory database object.
+.PP
+.RS
+.br
+\fBvoid tcmdbcutfront(TCMDB *\fImdb\fB, int \fInum\fB);\fR
+.RS
+`\fImdb\fR' specifies the on\-memory database object.
+.RE
+.RS
+`\fInum\fR' specifies the number of records to be removed.
+.RE
+.RS
+If successful, the return value is true.  False is returned when no record corresponds to the specified key.
 .RE
 .RE
 
@@ -1545,6 +2107,51 @@ The return value is the lesser value of the two.
 .RE
 .RE
 .PP
+The function `tclrand' is used in order to get a random number as long integer based on uniform distribution.
+.PP
+.RS
+.br
+\fBunsigned long tclrand(void);\fR
+.RS
+The return value is the random number between 0 and `ULONG_MAX'.
+.RE
+.RS
+This function uses the random number source device and generates a real random number if possible.
+.RE
+.RE
+.PP
+The function `tcdrand' is used in order to get a random number as double decimal based on uniform distribution.
+.PP
+.RS
+.br
+\fBdouble tcdrand(void);\fR
+.RS
+The return value is the random number equal to or greater than 0, and less than 1.0.
+.RE
+.RS
+This function uses the random number source device and generates a real random number if possible.
+.RE
+.RE
+.PP
+The function `tcdrandnd' is used in order to get a random number as double decimal based on normal distribution.
+.PP
+.RS
+.br
+\fBdouble tcdrandnd(double \fIavg\fB, double \fIsd\fB);\fR
+.RS
+`\fIavg\fR' specifies the average.
+.RE
+.RS
+`\fIsd\fR' specifies the standard deviation.
+.RE
+.RS
+The return value is the random number.
+.RE
+.RS
+This function uses the random number source device and generates a real random number if possible.
+.RE
+.RE
+.PP
 The function `tcstricmp' is used in order to compare two strings with case insensitive evaluation.
 .PP
 .RS
@@ -1622,6 +2229,38 @@ The function `tcstribwm' is used in order to check whether a string ends with a 
 .RE
 .RS
 The return value is true if the target string ends with the key, else, it is false.
+.RE
+.RE
+.PP
+The function `tcstrdist' is used in order to calculate the edit distance of two strings.
+.PP
+.RS
+.br
+\fBint tcstrdist(const char *\fIastr\fB, const char *\fIbstr\fB);\fR
+.RS
+`\fIastr\fR' specifies a string.
+.RE
+.RS
+`\fIbstr\fR' specifies of the other string.
+.RE
+.RS
+The return value is the edit distance which is known as the Levenshtein distance.  The cost is calculated by byte.
+.RE
+.RE
+.PP
+The function `tcstrdistutf' is used in order to calculate the edit distance of two UTF\-8 strings.
+.PP
+.RS
+.br
+\fBint tcstrdistutf(const char *\fIastr\fB, const char *\fIbstr\fB);\fR
+.RS
+`\fIastr\fR' specifies a string.
+.RE
+.RS
+`\fIbstr\fR' specifies of the other string.
+.RE
+.RS
+The return value is the edit distance which is known as the Levenshtein distance.  The cost is calculated by Unicode character.
 .RE
 .RE
 .PP
@@ -1725,16 +2364,48 @@ The return value is the string itself.
 .RE
 .RE
 .PP
+The function `tcstrutftoucs' is used in order to convert a UTF\-8 string into a UCS\-2 array.
+.PP
+.RS
+.br
+\fBvoid tcstrutftoucs(const char *\fIstr\fB, uint16_t *\fIary\fB, int *\fInp\fB);\fR
+.RS
+`\fIstr\fR' specifies the UTF\-8 string.
+.RE
+.RS
+`\fIary\fR' specifies the pointer to the region into which the result UCS\-2 codes are written.  The size of the buffer should be sufficient.
+.RE
+.RS
+`\fInp\fR' specifies the pointer to a variable into which the number of elements of the result array is assigned.
+.RE
+.RE
+.PP
+The function `tcstrucstoutf' is used in order to convert a UCS\-2 array into a UTF\-8 string.
+.PP
+.RS
+.br
+\fBvoid tcstrucstoutf(const uint16_t *\fIary\fB, int \fInum\fB, char *\fIstr\fB);\fR
+.RS
+`\fIary\fR' specifies the array of UCS\-2 code codes.
+.RE
+.RS
+`\fInum\fR' specifies the number of the array.
+.RE
+.RS
+`\fIstr\fR' specifies the pointer to the region into which the result UTF\-8 string is written.  The size of the buffer should be sufficient.
+.RE
+.RE
+.PP
 The function `tcstrsplit' is used in order to create a list object by splitting a string.
 .PP
 .RS
 .br
-\fBTCLIST *tcstrsplit(const char *\fIstr\fB, const char *\fIdelim\fB);\fR
+\fBTCLIST *tcstrsplit(const char *\fIstr\fB, const char *\fIdelims\fB);\fR
 .RS
 `\fIstr\fR' specifies the source string.
 .RE
 .RS
-`\fIdelim\fR' specifies a string containing delimiting characters.
+`\fIdelims\fR' specifies a string containing delimiting characters.
 .RE
 .RS
 The return value is a list object of the split elements.
@@ -1744,13 +2415,133 @@ If two delimiters are successive, it is assumed that an empty element is between
 .RE
 .RE
 .PP
-The function `tctime' is used in order to get the time of day in milliseconds.
+The function `tcstrjoin' is used in order to create a string by joining all elements of a list object.
+.PP
+.RS
+.br
+\fBchar *tcstrjoin(TCLIST *\fIlist\fB, char \fIdelim\fB);\fR
+.RS
+`\fIlist\fR' specifies a list object.
+.RE
+.RS
+`\fIdelim\fR' specifies a delimiting character.
+.RE
+.RS
+The return value is the result string.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tctime' is used in order to get the time of day in seconds.
 .PP
 .RS
 .br
 \fBdouble tctime(void);\fR
 .RS
-The return value is the time of day in milliseconds.
+The return value is the time of day in seconds.  The accuracy is in microseconds.
+.RE
+.RE
+.PP
+The function `tccalendar' is used in order to get the Gregorian calendar of a time.
+.PP
+.RS
+.br
+\fBvoid tccalendar(int64_t \fIt\fB, int \fIjl\fB, int *\fIyearp\fB, int *\fImonp\fB, int *\fIdayp\fB, int *\fIhourp\fB, int *\fIminp\fB, int *\fIsecp\fB);\fR
+.RS
+`\fIt\fR' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current time is specified.
+.RE
+.RS
+`\fIjl\fR' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is specified.
+.RE
+.RS
+`\fIyearp\fR' specifies the pointer to a variable to which the year is assigned.  If it is `NULL', it is not used.
+.RE
+.RS
+`\fImonp\fR' specifies the pointer to a variable to which the month is assigned.  If it is `NULL', it is not used.  1 means January and 12 means December.
+.RE
+.RS
+`\fIdayp\fR' specifies the pointer to a variable to which the day of the month is assigned.  If it is `NULL', it is not used.
+.RE
+.RS
+`\fIhourp\fR' specifies the pointer to a variable to which the hours is assigned.  If it is `NULL', it is not used.
+.RE
+.RS
+`\fIminp\fR' specifies the pointer to a variable to which the minutes is assigned.  If it is `NULL', it is not used.
+.RE
+.RS
+`\fIsecp\fR' specifies the pointer to a variable to which the seconds is assigned.  If it is `NULL', it is not used.
+.RE
+.RE
+.PP
+The function `tcdatestrwww' is used in order to format a date as a string in W3CDTF.
+.PP
+.RS
+.br
+\fBvoid tcdatestrwww(int64_t \fIt\fB, int \fIjl\fB, char *\fIbuf\fB);\fR
+.RS
+`\fIt\fR' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current time is specified.
+.RE
+.RS
+`\fIjl\fR' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is specified.
+.RE
+.RS
+`\fIbuf\fR' specifies the pointer to the region into which the result string is written.  The size of the buffer should be equal to or more than 48 bytes.
+.RE
+.RS
+W3CDTF represents a date as "YYYY\-MM\-DDThh:mm:ddTZD".
+.RE
+.RE
+.PP
+The function `tcdatestrhttp' is used in order to format a date as a string in RFC 1123 format.
+.PP
+.RS
+.br
+\fBvoid tcdatestrhttp(int64_t \fIt\fB, int \fIjl\fB, char *\fIbuf\fB);\fR
+.RS
+`\fIt\fR' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current time is specified.
+.RE
+.RS
+`\fIjl\fR' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is specified.
+.RE
+.RS
+`\fIbuf\fR' specifies the pointer to the region into which the result string is written.  The size of the buffer should be equal to or more than 48 bytes.
+.RE
+.RS
+RFC 1123 format represents a date as "Wdy, DD\-Mon\-YYYY hh:mm:dd TZD".
+.RE
+.RE
+.PP
+The function `tcstrmktime' is used in order to get the time value of a date string.
+.PP
+.RS
+.br
+\fBint64_t tcstrmktime(const char *\fIstr\fB);\fR
+.RS
+`\fIstr\fR' specifies the date string in decimal, hexadecimal, W3CDTF, or RFC 822 (1123).  Decimal can be trailed by "s" for in seconds, "m" for in minutes, "h" for in hours, and "d" for in days.
+.RE
+.RS
+The return value is the time value of the date or `INT64_MAX' if the format is invalid.
+.RE
+.RE
+.PP
+The function `tcdayofweek' is used in order to get the day of week of a date.
+.PP
+.RS
+.br
+\fBint tcdayofweek(int \fIyear\fB, int \fImon\fB, int \fIday\fB);\fR
+.RS
+`\fIyear\fR' specifies the year of a date.
+.RE
+.RS
+`\fImon\fR' specifies the month of the date.
+.RE
+.RS
+`\fIday\fR' specifies the day of the date.
+.RE
+.RS
+The return value is the day of week of the date.  0 means Sunday and 6 means Saturday.
 .RE
 .RE
 
@@ -2318,6 +3109,50 @@ The function `tcgetcrc' is used in order to get the CRC32 checksum of a serial o
 .RE
 .RS
 The return value is the CRC32 checksum of the object.
+.RE
+.RE
+.PP
+The function `tcberencode' is used in order to encode an array of nonnegative integers with BER encoding.
+.PP
+.RS
+.br
+\fBchar *tcberencode(const unsigned int *\fIary\fB, int \fIanum\fB, int *\fIsp\fB);\fR
+.RS
+`\fIary\fR' specifies the pointer to the array of nonnegative integers.
+.RE
+.RS
+`\fIanum\fR' specifies the size of the array.
+.RE
+.RS
+`\fIsp\fR' specifies the pointer to a variable into which the size of the region of the return value is assigned.
+.RE
+.RS
+The return value is the pointer to the region of the result.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call if when is no longer in use.
+.RE
+.RE
+.PP
+The function `tcberdecode' is used in order to decode a serial object encoded with BER encoding.
+.PP
+.RS
+.br
+\fBunsigned int *tcberdecode(const char *\fIptr\fB, int \fIsize\fB, int *\fInp\fB);\fR
+.RS
+`\fIptr\fR' specifies the pointer to the region.
+.RE
+.RS
+`\fIsize\fR' specifies the size of the region.
+.RE
+.RS
+`\fInp\fR' specifies the pointer to a variable into which the number of elements of the return value is assigned.
+.RE
+.RS
+The return value is the pointer to the array of the result.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call if when is no longer in use.
 .RE
 .RE
 .PP

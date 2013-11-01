@@ -11,7 +11,7 @@
 SHELL = /bin/sh
 
 # Targets
-MYBINS = tcutilex tchdbex tcbdbex
+MYBINS = tcutilex tchdbex tcbdbex tcadbex
 
 # Building binaries
 CC = gcc
@@ -57,15 +57,19 @@ clean :
 
 
 tcutilex : tcutilex.o
-	 $(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
 
 
 tchdbex : tchdbex.o
-	 $(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
 
 
 tcbdbex : tcbdbex.o
-	 $(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
+
+
+tcadbex : tcadbex.o
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
 
 
 

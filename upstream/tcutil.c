@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The utility API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -289,7 +289,13 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
         tcxstrcat2(xstr, tmp);
         break;
       case 'd':
-        tlen = sprintf(tbuf, cbuf, va_arg(ap, int));
+        if(lnum >= 2){
+          tlen = sprintf(tbuf, cbuf, va_arg(ap, long long));
+        } else if(lnum >= 1){
+          tlen = sprintf(tbuf, cbuf, va_arg(ap, long));
+        } else {
+          tlen = sprintf(tbuf, cbuf, va_arg(ap, int));
+        }
         TCXSTRCAT(xstr, tbuf, tlen);
         break;
       case 'o': case 'u': case 'x': case 'X': case 'c':
@@ -577,7 +583,12 @@ void *tclistshift(TCLIST *list, int *sp){
   list->start++;
   list->num--;
   *sp = list->array[index].size;
-  return list->array[index].ptr;
+  void *rv = list->array[index].ptr;
+  if((list->start & 0xff) == 0 && list->start > (list->num >> 1)){
+    memmove(list->array, list->array + list->start, list->num * sizeof(list->array[0]));
+    list->start = 0;
+  }
+  return rv;
 }
 
 
@@ -588,7 +599,12 @@ char *tclistshift2(TCLIST *list){
   int index = list->start;
   list->start++;
   list->num--;
-  return list->array[index].ptr;
+  void *rv = list->array[index].ptr;
+  if((list->start & 0xff) == 0 && list->start > (list->num >> 1)){
+    memmove(list->array, list->array + list->start, list->num * sizeof(list->array[0]));
+    list->start = 0;
+  }
+  return rv;
 }
 
 
@@ -852,7 +868,7 @@ static int tclistelemcmpci(const void *a, const void *b){
  *************************************************************************************************/
 
 
-#define TCMAPBNUM      4093              // allocation unit number of a list handle
+#define TCMAPBNUM      4093              // allocation unit number of a map
 #define TCMAPCSUNIT    52                // small allocation unit size of map concatenation
 #define TCMAPCBUNIT    252               // big allocation unit size of map concatenation
 
@@ -892,7 +908,7 @@ TCMAP *tcmapnew(void){
 
 
 /* Create a map object with specifying the number of the buckets. */
-TCMAP *tcmapnew2(int bnum){
+TCMAP *tcmapnew2(uint32_t bnum){
   if(bnum < 1) bnum = 1;
   TCMAP *map;
   TCMALLOC(map, sizeof(*map));
@@ -907,6 +923,7 @@ TCMAP *tcmapnew2(int bnum){
   map->cur = NULL;
   map->bnum = bnum;
   map->rnum = 0;
+  map->msiz = 0;
   return map;
 }
 
@@ -969,6 +986,7 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
         entp = &(rec->right);
         rec = rec->right;
       } else {
+        map->msiz += vsiz - rec->vsiz;
         int psiz = TCALIGNPAD(ksiz);
         if(vsiz > rec->vsiz){
           TCMAPREC *old = rec;
@@ -991,6 +1009,7 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
     }
   }
   int psiz = TCALIGNPAD(ksiz);
+  map->msiz += ksiz + vsiz;
   TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
@@ -1016,6 +1035,84 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
 void tcmapput2(TCMAP *map, const char *kstr, const char *vstr){
   assert(map && kstr && vstr);
   tcmapput(map, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Store a record of the value of two regions into a map object. */
+void tcmapput3(TCMAP *map, const char *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz){
+  assert(map && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        int vsiz = fvsiz + lvsiz;
+        map->msiz += vsiz - rec->vsiz;
+        int psiz = TCALIGNPAD(ksiz);
+        ksiz += psiz;
+        if(vsiz > rec->vsiz){
+          TCMAPREC *old = rec;
+          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + vsiz + 1);
+          if(rec != old){
+            if(map->first == old) map->first = rec;
+            if(map->last == old) map->last = rec;
+            if(map->cur == old) map->cur = rec;
+            if(*entp == old) *entp = rec;
+            if(rec->prev) rec->prev->next = rec;
+            if(rec->next) rec->next->prev = rec;
+            dbuf = (char *)rec + sizeof(*rec);
+          }
+        }
+        memcpy(dbuf + ksiz, fvbuf, fvsiz);
+        memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
+        dbuf[ksiz+vsiz] = '\0';
+        rec->vsiz = vsiz;
+        return;
+      }
+    }
+  }
+  int vsiz = fvsiz + lvsiz;
+  int psiz = TCALIGNPAD(ksiz);
+  map->msiz += ksiz + vsiz;
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  ksiz += psiz;
+  memcpy(dbuf + ksiz, fvbuf, fvsiz);
+  memcpy(dbuf + ksiz + fvsiz, lvbuf, lvsiz);
+  dbuf[ksiz+vsiz] = '\0';
+  rec->vsiz = vsiz;
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
 }
 
 
@@ -1050,6 +1147,7 @@ bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int 
     }
   }
   int psiz = TCALIGNPAD(ksiz);
+  map->msiz += ksiz + vsiz;
   TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
@@ -1110,6 +1208,7 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
         entp = &(rec->right);
         rec = rec->right;
       } else {
+        map->msiz += vsiz;
         int psiz = TCALIGNPAD(ksiz);
         int asiz = sizeof(*rec) + ksiz + psiz + rec->vsiz + vsiz + 1;
         int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
@@ -1136,6 +1235,7 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
   int asiz = sizeof(*rec) + ksiz + psiz + vsiz + 1;
   int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
   asiz = (asiz - 1) + unit - (asiz - 1) % unit;
+  map->msiz += ksiz + vsiz;
   TCMALLOC(rec, asiz);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
@@ -1190,6 +1290,8 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
         entp = &(rec->right);
         rec = rec->right;
       } else {
+        map->rnum--;
+        map->msiz -= rec->ksiz + rec->vsiz;
         if(rec->prev) rec->prev->next = rec->next;
         if(rec->next) rec->next->prev = rec->prev;
         if(rec == map->first) map->first = rec->next;
@@ -1210,7 +1312,6 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
           tmp->right = rec->right;
         }
         free(rec);
-        map->rnum--;
         return true;
       }
     }
@@ -1276,6 +1377,44 @@ const char *tcmapget2(const TCMAP *map, const char *kstr){
       } else if(kcmp > 0){
         rec = rec->right;
       } else {
+        return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
+      }
+    }
+  }
+  return NULL;
+}
+
+
+/* Retrieve a semivolatile record in a map object. */
+const void *tcmapget3(TCMAP *map, const void *kbuf, int ksiz, int *sp){
+  assert(map && kbuf && ksiz >= 0 && sp);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  TCMAPREC *rec = map->buckets[hash%map->bnum];
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        rec = rec->left;
+      } else if(kcmp > 0){
+        rec = rec->right;
+      } else {
+        if(map->last != rec){
+          if(map->first == rec) map->first = rec->next;
+          if(rec->prev) rec->prev->next = rec->next;
+          if(rec->next) rec->next->prev = rec->prev;
+          rec->prev = map->last;
+          rec->next = NULL;
+          map->last->next = rec;
+          map->last = rec;
+        }
+        *sp = rec->vsiz;
         return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
       }
     }
@@ -1386,9 +1525,17 @@ const char *tcmapiterval2(const char *kstr){
 
 
 /* Get the number of records stored in a map object. */
-int tcmaprnum(const TCMAP *map){
+uint64_t tcmaprnum(const TCMAP *map){
   assert(map);
   return map->rnum;
+}
+
+
+/* Get the total size of memory used in a map object. */
+uint64_t tcmapmsiz(const TCMAP *map){
+  assert(map);
+  return map->msiz + map->rnum * (sizeof(*map->first) + sizeof(void *)) +
+    map->bnum * sizeof(void *);
 }
 
 
@@ -1426,7 +1573,61 @@ TCLIST *tcmapvals(const TCMAP *map){
 }
 
 
-/* Clear a list object. */
+/* Add an integer to a record in a map object. */
+void tcmapaddint(TCMAP *map, const char *kbuf, int ksiz, int num){
+  assert(map && kbuf && ksiz >= 0);
+  unsigned int hash;
+  TCMAPHASH1(hash, kbuf, ksiz);
+  int bidx = hash % map->bnum;
+  TCMAPREC *rec = map->buckets[bidx];
+  TCMAPREC **entp = map->buckets + bidx;
+  TCMAPHASH2(hash, kbuf, ksiz);
+  while(rec){
+    if(hash > rec->hash){
+      entp = &(rec->left);
+      rec = rec->left;
+    } else if(hash < rec->hash){
+      entp = &(rec->right);
+      rec = rec->right;
+    } else {
+      char *dbuf = (char *)rec + sizeof(*rec);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      if(kcmp < 0){
+        entp = &(rec->left);
+        rec = rec->left;
+      } else if(kcmp > 0){
+        entp = &(rec->right);
+        rec = rec->right;
+      } else {
+        int psiz = TCALIGNPAD(ksiz);
+        *(int *)(dbuf + ksiz + psiz) += num;
+        return;
+      }
+    }
+  }
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + sizeof(num) + 1);
+  char *dbuf = (char *)rec + sizeof(*rec);
+  memcpy(dbuf, kbuf, ksiz);
+  dbuf[ksiz] = '\0';
+  rec->ksiz = ksiz;
+  memcpy(dbuf + ksiz + psiz, &num, sizeof(num));
+  dbuf[ksiz+psiz+sizeof(num)] = '\0';
+  rec->vsiz = sizeof(num);
+  rec->hash = hash;
+  rec->left = NULL;
+  rec->right = NULL;
+  rec->prev = map->last;
+  rec->next = NULL;
+  *entp = rec;
+  if(!map->first) map->first = rec;
+  if(map->last) map->last->next = rec;
+  map->last = rec;
+  map->rnum++;
+}
+
+
+/* Clear a map object. */
 void tcmapclear(TCMAP *map){
   assert(map);
   TCMAPREC *rec = map->first;
@@ -1444,10 +1645,24 @@ void tcmapclear(TCMAP *map){
   map->last = NULL;
   map->cur = NULL;
   map->rnum = 0;
+  map->msiz = 0;
 }
 
 
-/* Serialize map list object into a byte array. */
+/* Remove front records of a map object. */
+void tcmapcutfront(TCMAP *map, int num){
+  assert(map && num >= 0);
+  tcmapiterinit(map);
+  while(num-- > 0){
+    int ksiz;
+    const char *kbuf = tcmapiternext(map, &ksiz);
+    if(!kbuf) break;
+    tcmapout(map, kbuf, ksiz);
+  }
+}
+
+
+/* Serialize a map object into a byte array. */
 void *tcmapdump(const TCMAP *map, int *sp){
   assert(map && sp);
   TCMAPREC *cur = map->cur;
@@ -1531,6 +1746,326 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
 
 
 /*************************************************************************************************
+ * on-memory database
+ *************************************************************************************************/
+
+
+#define TCMDBMNUM      8                 // number of internal maps
+#define TCMDBBNUM      65536             // allocation unit number of a map
+
+/* get the first hash value */
+#define TCMDBHASH(TC_res, TC_kbuf, TC_ksiz) \
+  do { \
+    const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf) + TC_ksiz - 1; \
+    int _TC_ksiz = TC_ksiz; \
+    for((TC_res) = 0x20071123; _TC_ksiz--;){ \
+      (TC_res) = ((TC_res) << 5) + (TC_res) + *(_TC_p)--; \
+    } \
+    (TC_res) &= TCMDBMNUM - 1; \
+  } while(false)
+
+
+/* Create an on-memory database object. */
+TCMDB *tcmdbnew(void){
+  return tcmdbnew2(TCMDBBNUM);
+}
+
+
+/* Create an on-memory database with specifying the number of the buckets. */
+TCMDB *tcmdbnew2(uint32_t bnum){
+  TCMDB *mdb;
+  if(bnum < 1) bnum = TCMDBBNUM;
+  bnum = bnum / TCMDBMNUM + 17;
+  TCMALLOC(mdb, sizeof(*mdb));
+  TCMALLOC(mdb->mmtxs, sizeof(pthread_rwlock_t) * TCMDBMNUM);
+  TCMALLOC(mdb->imtx, sizeof(pthread_mutex_t));
+  TCMALLOC(mdb->maps, sizeof(TCMAP *) * TCMDBMNUM);
+  if(pthread_mutex_init(mdb->imtx, NULL) != 0) tcmyfatal("mutex error");
+  for(int i = 0; i < TCMDBMNUM; i++){
+    if(pthread_rwlock_init((pthread_rwlock_t *)mdb->mmtxs + i, NULL) != 0)
+      tcmyfatal("rwlock error");
+    mdb->maps[i] = tcmapnew2(bnum);
+  }
+  mdb->iter = -1;
+  return mdb;
+}
+
+
+/* Delete an on-memory database object. */
+void tcmdbdel(TCMDB *mdb){
+  assert(mdb);
+  for(int i = TCMDBMNUM - 1; i >= 0; i--){
+    tcmapdel(mdb->maps[i]);
+    pthread_rwlock_destroy((pthread_rwlock_t *)mdb->mmtxs + i);
+  }
+  pthread_mutex_destroy(mdb->imtx);
+  free(mdb->maps);
+  free(mdb->imtx);
+  free(mdb->mmtxs);
+  free(mdb);
+}
+
+
+/* Store a record into an on-memory database. */
+void tcmdbput(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapput(mdb->maps[mi], kbuf, ksiz, vbuf, vsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Store a string record into an on-memory database. */
+void tcmdbput2(TCMDB *mdb, const char *kstr, const char *vstr){
+  assert(mdb && kstr && vstr);
+  tcmdbput(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Store a record of the value of two regions into an on-memory database object. */
+void tcmdbput3(TCMDB *mdb, const char *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz){
+  assert(mdb && kbuf && ksiz >= 0 && fvbuf && fvsiz >= 0 && lvbuf && lvsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapput3(mdb->maps[mi], kbuf, ksiz, fvbuf, fvsiz, lvbuf, lvsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Store a new record into an on-memory database. */
+bool tcmdbputkeep(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return false;
+  bool rv = tcmapputkeep(mdb->maps[mi], kbuf, ksiz, vbuf, vsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Store a new string record into an on-memory database. */
+bool tcmdbputkeep2(TCMDB *mdb, const char *kstr, const char *vstr){
+  assert(mdb && kstr && vstr);
+  return tcmdbputkeep(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Concatenate a value at the end of the value of the existing record in an on-memory database. */
+void tcmdbputcat(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
+  assert(mdb && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return;
+  tcmapputcat(mdb->maps[mi], kbuf, ksiz, vbuf, vsiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+}
+
+
+/* Concatenate a string at the end of the value of the existing record in an on-memory database. */
+void tcmdbputcat2(TCMDB *mdb, const char *kstr, const char *vstr){
+  assert(mdb && kstr && vstr);
+  tcmdbputcat(mdb, kstr, strlen(kstr), vstr, strlen(vstr));
+}
+
+
+/* Remove a record of an on-memory database. */
+bool tcmdbout(TCMDB *mdb, const void *kbuf, int ksiz){
+  assert(mdb && kbuf && ksiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return false;
+  bool rv = tcmapout(mdb->maps[mi], kbuf, ksiz);
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Remove a string record of an on-memory database. */
+bool tcmdbout2(TCMDB *mdb, const char *kstr){
+  assert(mdb && kstr);
+  return tcmdbout(mdb, kstr, strlen(kstr));
+}
+
+
+/* Retrieve a record in an on-memory database. */
+void *tcmdbget(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
+  assert(mdb && kbuf && ksiz >= 0 && sp);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_rdlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return NULL;
+  int vsiz;
+  const char *vbuf = tcmapget(mdb->maps[mi], kbuf, ksiz, &vsiz);
+  char *rv;
+  if(vbuf){
+    TCMEMDUP(rv, vbuf, vsiz);
+    *sp = vsiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Retrieve a string record in an on-memory database. */
+char *tcmdbget2(TCMDB *mdb, const char *kstr){
+  assert(mdb && kstr);
+  int vsiz;
+  return tcmdbget(mdb, kstr, strlen(kstr), &vsiz);
+}
+
+
+/* Retrieve a record and move it astern in an on-memory database. */
+void *tcmdbget3(TCMDB *mdb, const void *kbuf, int ksiz, int *sp){
+  assert(mdb && kbuf && ksiz >= 0 && sp);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return NULL;
+  int vsiz;
+  const char *vbuf = tcmapget3(mdb->maps[mi], kbuf, ksiz, &vsiz);
+  char *rv;
+  if(vbuf){
+    TCMEMDUP(rv, vbuf, vsiz);
+    *sp = vsiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return rv;
+}
+
+
+/* Get the size of the value of a record in an on-memory database object. */
+int tcmdbvsiz(TCMDB *mdb, const void *kbuf, int ksiz){
+  assert(mdb && kbuf && ksiz >= 0);
+  unsigned int mi;
+  TCMDBHASH(mi, kbuf, ksiz);
+  if(pthread_rwlock_rdlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0) return -1;
+  int vsiz;
+  const char *vbuf = tcmapget(mdb->maps[mi], kbuf, ksiz, &vsiz);
+  if(!vbuf) vsiz = -1;
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  return vsiz;
+}
+
+
+/* Get the size of the value of a string record in an on-memory database object. */
+int tcmdbvsiz2(TCMDB *mdb, const char *kstr){
+  assert(mdb && kstr);
+  return tcmdbvsiz(mdb, kstr, strlen(kstr));
+}
+
+
+/* Initialize the iterator of an on-memory database. */
+void tcmdbiterinit(TCMDB *mdb){
+  assert(mdb);
+  if(pthread_mutex_lock(mdb->imtx) != 0) return;
+  for(int i = 0; i < TCMDBMNUM; i++){
+    tcmapiterinit(mdb->maps[i]);
+  }
+  mdb->iter = 0;
+  pthread_mutex_unlock(mdb->imtx);
+}
+
+
+/* Get the next key of the iterator of an on-memory database. */
+void *tcmdbiternext(TCMDB *mdb, int *sp){
+  assert(mdb && sp);
+  if(pthread_mutex_lock(mdb->imtx) != 0) return NULL;
+  if(mdb->iter < 0 || mdb->iter >= TCMDBMNUM){
+    pthread_mutex_unlock(mdb->imtx);
+    return NULL;
+  }
+  int mi = mdb->iter;
+  if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0){
+    pthread_mutex_unlock(mdb->imtx);
+    return NULL;
+  }
+  int ksiz;
+  const char *kbuf;
+  while(!(kbuf = tcmapiternext(mdb->maps[mi], &ksiz)) && mi < TCMDBMNUM - 1){
+    pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+    mi = ++mdb->iter;
+    if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + mi) != 0){
+      pthread_mutex_unlock(mdb->imtx);
+      return NULL;
+    }
+  }
+  char *rv;
+  if(kbuf){
+    TCMEMDUP(rv, kbuf, ksiz);
+    *sp = ksiz;
+  } else {
+    rv = NULL;
+  }
+  pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + mi);
+  pthread_mutex_unlock(mdb->imtx);
+  return rv;
+}
+
+
+/* Get the next key string of the iterator of an on-memory database. */
+char *tcmdbiternext2(TCMDB *mdb){
+  assert(mdb);
+  int ksiz;
+  return tcmdbiternext(mdb, &ksiz);
+}
+
+
+/* Get the number of records stored in an on-memory database. */
+uint64_t tcmdbrnum(TCMDB *mdb){
+  assert(mdb);
+  uint64_t rnum = 0;
+  for(int i = 0; i < TCMDBMNUM; i++){
+    rnum += tcmaprnum(mdb->maps[i]);
+  }
+  return rnum;
+}
+
+
+/* Get the total size of memory used in an on-memory database object. */
+uint64_t tcmdbmsiz(TCMDB *mdb){
+  assert(mdb);
+  uint64_t msiz = 0;
+  for(int i = 0; i < TCMDBMNUM; i++){
+    msiz += tcmapmsiz(mdb->maps[i]);
+  }
+  return msiz;
+}
+
+
+/* Clear an on-memory database object. */
+void tcmdbvanish(TCMDB *mdb){
+  assert(mdb);
+  for(int i = 0; i < TCMDBMNUM; i++){
+    if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + i) == 0){
+      tcmapclear(mdb->maps[i]);
+      pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
+    }
+  }
+}
+
+
+/* Remove front records of a map object. */
+void tcmdbcutfront(TCMDB *mdb, int num){
+  assert(mdb && num >= 0);
+  num = num / TCMDBMNUM + 1;
+  for(int i = 0; i < TCMDBMNUM; i++){
+    if(pthread_rwlock_wrlock((pthread_rwlock_t *)mdb->mmtxs + i) == 0){
+      tcmapcutfront(mdb->maps[i], num);
+      pthread_rwlock_unlock((pthread_rwlock_t *)mdb->mmtxs + i);
+    }
+  }
+}
+
+
+
+/*************************************************************************************************
  * memory pool
  *************************************************************************************************/
 
@@ -1538,7 +2073,7 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
 #define TCMPOOLUNIT    128               // allocation unit size of memory pool elements
 
 
-/* Global memory pool object */
+/* Global memory pool object. */
 TCMPOOL *tcglobalmemorypool = NULL;
 
 
@@ -1550,6 +2085,8 @@ static void tcmpooldelglobal(void);
 TCMPOOL *tcmpoolnew(void){
   TCMPOOL *mpool;
   TCMALLOC(mpool, sizeof(*mpool));
+  TCMALLOC(mpool->mutex, sizeof(pthread_mutex_t));
+  if(pthread_mutex_init(mpool->mutex, NULL) != 0) tcmyfatal("locking failed");
   mpool->anum = TCMPOOLUNIT;
   TCMALLOC(mpool->elems, sizeof(mpool->elems[0]) * mpool->anum);
   mpool->num = 0;
@@ -1565,6 +2102,8 @@ void tcmpooldel(TCMPOOL *mpool){
     elems[i].del(elems[i].ptr);
   }
   free(elems);
+  pthread_mutex_destroy(mpool->mutex);
+  free(mpool->mutex);
   free(mpool);
 }
 
@@ -1572,6 +2111,7 @@ void tcmpooldel(TCMPOOL *mpool){
 /* Relegate an arbitrary object to a memory pool object. */
 void tcmpoolput(TCMPOOL *mpool, void *ptr, void (*del)(void *)){
   assert(mpool && ptr && del);
+  if(pthread_mutex_lock(mpool->mutex) != 0) tcmyfatal("locking failed");
   int num = mpool->num;
   if(num >= mpool->anum){
     mpool->anum *= 2;
@@ -1580,6 +2120,7 @@ void tcmpoolput(TCMPOOL *mpool, void *ptr, void (*del)(void *)){
   mpool->elems[num].ptr = ptr;
   mpool->elems[num].del = del;
   mpool->num++;
+  pthread_mutex_unlock(mpool->mutex);
 }
 
 
@@ -1669,6 +2210,19 @@ static void tcmpooldelglobal(void){
  *************************************************************************************************/
 
 
+#define TCRANDDEV      "/dev/urandom"    // path of the random device file
+#define TCDISTBUFSIZ   16384             // size of an distance buffer
+
+
+/* File descriptor of random number generator. */
+int tcrandomdevfd = -1;
+
+
+/* private function prototypes */
+static void tcrandomfdclose(void);
+static time_t tcmkgmtime(struct tm *tm);
+
+
 /* Get the larger value of two integers. */
 long tclmax(long a, long b){
   return (a > b) ? a : b;
@@ -1678,6 +2232,36 @@ long tclmax(long a, long b){
 /* Get the lesser value of two integers. */
 long tclmin(long a, long b){
   return (a < b) ? a : b;
+}
+
+
+/* Get a random number as long integer based on uniform distribution. */
+unsigned long tclrand(void){
+  static unsigned int cnt = 0;
+  static unsigned int seed = 0;
+  static unsigned long mask = 0;
+  static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+  if((cnt & 0xff) == 0 && pthread_mutex_lock(&mutex) == 0){
+    if(cnt++ == 0) seed = time(NULL);
+    if(tcrandomdevfd == -1 && (tcrandomdevfd = open(TCRANDDEV, O_RDONLY, 00644)) != -1)
+      atexit(tcrandomfdclose);
+    if(tcrandomdevfd != -1) read(tcrandomdevfd, &mask, sizeof(mask));
+    pthread_mutex_unlock(&mutex);
+  }
+  return (mask ^ cnt++) ^ (unsigned long)rand_r(&seed);
+}
+
+
+/* Get a random number as double decimal based on uniform distribution. */
+double tcdrand(void){
+  return tclrand() / (ULONG_MAX + 0.01);
+}
+
+
+/* Get a random number as double decimal based on normal distribution. */
+double tcdrandnd(double avg, double sd){
+  assert(sd >= 0.0);
+  return sqrt(-2.0 * log(tcdrand())) * cos(2 * 3.141592653589793 * tcdrand()) * sd + avg;
 }
 
 
@@ -1751,6 +2335,98 @@ bool tcstribwm(const char *str, const char *key){
     if(sc != kc) return false;
   }
   return true;
+}
+
+
+/* Calculate the edit distance of two strings. */
+int tcstrdist(const char *astr, const char *bstr){
+  assert(astr && bstr);
+  int alen = strlen(astr);
+  int blen = strlen(bstr);
+  int dsiz = blen + 1;
+  int tbuf[TCDISTBUFSIZ];
+  int *tbl;
+  if((alen + 1) * dsiz < TCDISTBUFSIZ){
+    tbl = tbuf;
+  } else {
+    TCMALLOC(tbl, (alen + 1) * dsiz * sizeof(*tbl));
+  }
+  for(int i = 0; i <= alen; i++){
+    tbl[i*dsiz] = i;
+  }
+  for(int i = 1; i <= blen; i++){
+    tbl[i] = i;
+  }
+  astr--;
+  bstr--;
+  for(int i = 1; i <= alen; i++){
+    for(int j = 1; j <= blen; j++){
+      int ac = tbl[(i-1)*dsiz+j] + 1;
+      int bc = tbl[i*dsiz+j-1] + 1;
+      int cc = tbl[(i-1)*dsiz+j-1] + (astr[i] != bstr[j]);
+      ac = ac < bc ? ac : bc;
+      tbl[i*dsiz+j] = ac < cc ? ac : cc;
+    }
+  }
+  int rv = tbl[alen*dsiz+blen];
+  if(tbl != tbuf) free(tbl);
+  return rv;
+}
+
+
+/* Calculate the edit distance of two UTF-8 strings. */
+int tcstrdistutf(const char *astr, const char *bstr){
+  assert(astr && bstr);
+  int alen = strlen(astr);
+  uint16_t abuf[TCDISTBUFSIZ];
+  uint16_t *aary;
+  if(alen < TCDISTBUFSIZ){
+    aary = abuf;
+  } else {
+    TCMALLOC(aary, alen * sizeof(*aary));
+  }
+  tcstrutftoucs(astr, aary, &alen);
+  int blen = strlen(bstr);
+  uint16_t bbuf[TCDISTBUFSIZ];
+  uint16_t *bary;
+  if(blen < TCDISTBUFSIZ){
+    bary = bbuf;
+  } else {
+    TCMALLOC(bary, blen * sizeof(*bary));
+  }
+  tcstrutftoucs(bstr, bary, &blen);
+  int dsiz = blen + 1;
+  int tbuf[TCDISTBUFSIZ];
+  int *tbl;
+  if((alen + 1) * dsiz < TCDISTBUFSIZ){
+    tbl = tbuf;
+  } else {
+    TCMALLOC(tbl, (alen + 1) * dsiz * sizeof(*tbl));
+  }
+  for(int i = 0; i <= alen; i++){
+    tbl[i*dsiz] = i;
+  }
+  for(int i = 1; i <= blen; i++){
+    tbl[i] = i;
+  }
+  aary--;
+  bary--;
+  for(int i = 1; i <= alen; i++){
+    for(int j = 1; j <= blen; j++){
+      int ac = tbl[(i-1)*dsiz+j] + 1;
+      int bc = tbl[i*dsiz+j-1] + 1;
+      int cc = tbl[(i-1)*dsiz+j-1] + (aary[i] != bary[j]);
+      ac = ac < bc ? ac : bc;
+      tbl[i*dsiz+j] = ac < cc ? ac : cc;
+    }
+  }
+  aary++;
+  bary++;
+  int rv = tbl[alen*dsiz+blen];
+  if(tbl != tbuf) free(tbl);
+  if(bary != bbuf) free(bary);
+  if(aary != abuf) free(aary);
+  return rv;
 }
 
 
@@ -1882,16 +2558,63 @@ char *tcstrcututf(char *str, int num){
 }
 
 
+/* Convert a UTF-8 string into a UCS-2 array. */
+void tcstrutftoucs(const char *str, uint16_t *ary, int *np){
+  assert(str && ary && np);
+  const unsigned char *rp = (unsigned char *)str;
+  unsigned int wi = 0;
+  while(*rp != '\0'){
+    int c = *(unsigned char *)rp;
+    if(c < 0x80){
+      ary[wi++] = c;
+    } else if(c < 0xe0){
+      if(rp[1] >= 0x80){
+        ary[wi++] = ((rp[0] & 0x1f) << 6) | (rp[1] & 0x3f);
+        rp++;
+      }
+    } else if(c < 0xf0){
+      if(rp[1] >= 0x80 && rp[2] >= 0x80){
+        ary[wi++] = ((rp[0] & 0xf) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f);
+        rp += 2;
+      }
+    }
+    rp++;
+  }
+  *np = wi;
+}
+
+
+/* Convert a UCS-2 array into a UTF-8 string. */
+void tcstrucstoutf(const uint16_t *ary, int num, char *str){
+  assert(ary && num >= 0 && str);
+  unsigned char *wp = (unsigned char *)str;
+  for(int i = 0; i < num; i++){
+    unsigned int c = ary[i];
+    if(c < 0x80){
+      *(wp++) = c;
+    } else if(c < 0x800){
+      *(wp++) = 0xc0 | (c >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    } else {
+      *(wp++) = 0xe0 | (c >> 12);
+      *(wp++) = 0x80 | ((c & 0xfff) >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    }
+  }
+  *wp = '\0';
+}
+
+
 /* Create a list object by splitting a string. */
-TCLIST *tcstrsplit(const char *str, const char *delim){
-  assert(str && delim);
+TCLIST *tcstrsplit(const char *str, const char *delims){
+  assert(str && delims);
   TCLIST *list = tclistnew();
   while(true){
     const char *sp = str;
-    while(*str != '\0' && !strchr(delim, *str)){
+    while(*str != '\0' && !strchr(delims, *str)){
       str++;
     }
-    tclistpush(list, sp, str - sp);
+    TCLISTPUSH(list, sp, str - sp);
     if(*str == '\0') break;
     str++;
   }
@@ -1899,12 +2622,387 @@ TCLIST *tcstrsplit(const char *str, const char *delim){
 }
 
 
-/* Get the time of day in milliseconds. */
+/* Create a string by joining all elements of a list object. */
+char *tcstrjoin(TCLIST *list, char delim){
+  assert(list);
+  int num = TCLISTNUM(list);
+  int size = num + 1;
+  for(int i = 0; i < num; i++){
+    size += TCLISTVALNUM(list, i);
+  }
+  char *buf;
+  TCMALLOC(buf, size);
+  char *wp = buf;
+  for(int i = 0; i < num; i++){
+    if(i > 0) *(wp++) = delim;
+    int vsiz;
+    const char *vbuf = tclistval(list, i, &vsiz);
+    memcpy(wp, vbuf, vsiz);
+    wp += vsiz;
+  }
+  *wp = '\0';
+  return buf;
+}
+
+
+/* Get the time of day in seconds. */
 double tctime(void){
   struct timeval tv;
-  struct timezone tz;
-  if(gettimeofday(&tv, &tz) == -1) return 0.0;
-  return (double)tv.tv_sec * 1000 + (double)tv.tv_usec / 1000;
+  if(gettimeofday(&tv, NULL) == -1) return 0.0;
+  return (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
+}
+
+
+/* Get the Gregorian calendar of a time. */
+void tccalendar(int64_t t, int jl, int *yearp, int *monp, int *dayp,
+                int *hourp, int *minp, int *secp){
+  if(t == INT64_MAX || jl == INT_MAX){
+    struct timeval tv;
+    struct timezone tz;
+    if(gettimeofday(&tv, &tz) == 0){
+      if(t == INT64_MAX) t = tv.tv_sec;
+      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
+    } else {
+      if(yearp) *yearp = 0;
+      if(monp) *monp = 0;
+      if(dayp) *dayp = 0;
+      if(hourp) *hourp = 0;
+      if(minp) *minp = 0;
+      if(secp) *secp = 0;
+    }
+  }
+  time_t tt = (time_t)t + jl;
+  struct tm ts;
+  if(!gmtime_r(&tt, &ts)){
+    if(yearp) *yearp = 0;
+    if(monp) *monp = 0;
+    if(dayp) *dayp = 0;
+    if(hourp) *hourp = 0;
+    if(minp) *minp = 0;
+    if(secp) *secp = 0;
+  }
+  if(yearp) *yearp = ts.tm_year + 1900;
+  if(monp) *monp = ts.tm_mon + 1;
+  if(dayp) *dayp = ts.tm_mday;
+  if(hourp) *hourp = ts.tm_hour;
+  if(minp) *minp = ts.tm_min;
+  if(secp) *secp = ts.tm_sec;
+}
+
+
+/* Format a date as a string in W3CDTF. */
+void tcdatestrwww(int64_t t, int jl, char *buf){
+  assert(buf);
+  if(t == INT64_MAX || jl == INT_MAX){
+    struct timeval tv;
+    struct timezone tz;
+    if(gettimeofday(&tv, &tz) == 0){
+      if(t == INT64_MAX) t = tv.tv_sec;
+      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
+    } else {
+      if(t == INT64_MAX) t = time(NULL);
+      if(jl == INT_MAX) jl = 0;
+    }
+  }
+  time_t tt = (time_t)t + jl;
+  struct tm ts;
+  if(!gmtime_r(&tt, &ts)) memset(&ts, 0, sizeof(ts));
+  ts.tm_year += 1900;
+  ts.tm_mon += 1;
+  jl /= 60;
+  char tzone[16];
+  if(jl == 0){
+    sprintf(tzone, "Z");
+  } else if(jl < 0){
+    jl *= -1;
+    sprintf(tzone, "-%02d:%02d", jl / 60, jl % 60);
+  } else {
+    sprintf(tzone, "+%02d:%02d", jl / 60, jl % 60);
+  }
+  sprintf(buf, "%04d-%02d-%02dT%02d:%02d:%02d%s",
+          ts.tm_year, ts.tm_mon, ts.tm_mday, ts.tm_hour, ts.tm_min, ts.tm_sec, tzone);
+}
+
+
+/* Format a date as a string in RFC 1123 format. */
+void tcdatestrhttp(int64_t t, int jl, char *buf){
+  assert(buf);
+  if(t == INT64_MAX || jl == INT_MAX){
+    struct timeval tv;
+    struct timezone tz;
+    if(gettimeofday(&tv, &tz) == 0){
+      if(t == INT64_MAX) t = tv.tv_sec;
+      if(jl == INT_MAX) jl = tz.tz_minuteswest * -60;
+    } else {
+      if(t == INT64_MAX) t = time(NULL);
+      if(jl == INT_MAX) jl = 0;
+    }
+  }
+  time_t tt = (time_t)t + jl;
+  struct tm ts;
+  if(!gmtime_r(&tt, &ts)) memset(&ts, 0, sizeof(ts));
+  ts.tm_year += 1900;
+  ts.tm_mon += 1;
+  jl /= 60;
+  char *wp = buf;
+  switch(tcdayofweek(ts.tm_year, ts.tm_mon, ts.tm_mday)){
+  case 0: wp += sprintf(wp, "Sun, "); break;
+  case 1: wp += sprintf(wp, "Mon, "); break;
+  case 2: wp += sprintf(wp, "Tue, "); break;
+  case 3: wp += sprintf(wp, "Wed, "); break;
+  case 4: wp += sprintf(wp, "Thu, "); break;
+  case 5: wp += sprintf(wp, "Fri, "); break;
+  case 6: wp += sprintf(wp, "Sat, "); break;
+  }
+  wp += sprintf(wp, "%02d ", ts.tm_mday);
+  switch(ts.tm_mon){
+  case 1: wp += sprintf(wp, "Jan "); break;
+  case 2: wp += sprintf(wp, "Feb "); break;
+  case 3: wp += sprintf(wp, "Mar "); break;
+  case 4: wp += sprintf(wp, "Apr "); break;
+  case 5: wp += sprintf(wp, "May "); break;
+  case 6: wp += sprintf(wp, "Jun "); break;
+  case 7: wp += sprintf(wp, "Jul "); break;
+  case 8: wp += sprintf(wp, "Aug "); break;
+  case 9: wp += sprintf(wp, "Sep "); break;
+  case 10: wp += sprintf(wp, "Oct "); break;
+  case 11: wp += sprintf(wp, "Nov "); break;
+  case 12: wp += sprintf(wp, "Dec "); break;
+  }
+  wp += sprintf(wp, "%04d %02d:%02d:%02d ", ts.tm_year, ts.tm_hour, ts.tm_min, ts.tm_sec);
+  if(jl == 0){
+    sprintf(wp, "GMT");
+  } else if(jl < 0){
+    jl *= -1;
+    sprintf(wp, "-%02d%02d", jl / 60, jl % 60);
+  } else {
+    sprintf(wp, "+%02d%02d", jl / 60, jl % 60);
+  }
+}
+
+
+/* Get the time value of a date string. */
+int64_t tcstrmktime(const char *str){
+  assert(str);
+  while(*str > '\0' && *str <= ' '){
+    str++;
+  }
+  if(*str == '\0') return 0;
+  if(str[0] == '0' && (str[1] == 'x' || str[1] == 'X'))
+    return (int64_t)strtoll(str + 2, NULL, 16);
+  struct tm ts;
+  memset(&ts, 0, sizeof(ts));
+  ts.tm_year = 70;
+  ts.tm_mon = 0;
+  ts.tm_mday = 1;
+  ts.tm_hour = 0;
+  ts.tm_min = 0;
+  ts.tm_sec = 0;
+  ts.tm_isdst = 0;
+  int len = strlen(str);
+  char *pv;
+  time_t t = (time_t)strtoll(str, &pv, 10);
+  if(*(signed char *)pv >= '\0' && *pv <= ' '){
+    while(*pv > '\0' && *pv <= ' '){
+      pv++;
+    }
+    if(*pv == '\0') return (int64_t)t;
+  }
+  if((pv[0] == 's' || pv[0] == 'S') && ((signed char *)pv)[1] >= '\0' && pv[1] <= ' ')
+    return (int64_t)t;
+  if((pv[0] == 'm' || pv[0] == 'M') && ((signed char *)pv)[1] >= '\0' && pv[1] <= ' ')
+    return (int64_t)t * 60;
+  if((pv[0] == 'h' || pv[0] == 'H') && ((signed char *)pv)[1] >= '\0' && pv[1] <= ' ')
+    return (int64_t)t * 60 * 60;
+  if((pv[0] == 'd' || pv[0] == 'D') && ((signed char *)pv)[1] >= '\0' && pv[1] <= ' ')
+    return (int64_t)t * 60 * 60 * 24;
+  if(len > 4 && str[4] == '-'){
+    ts.tm_year = atoi(str) - 1900;
+    if((pv = strchr(str, '-')) != NULL && pv - str == 4){
+      char *rp = pv + 1;
+      ts.tm_mon = atoi(rp) - 1;
+      if((pv = strchr(rp, '-')) != NULL && pv - str == 7){
+        rp = pv + 1;
+        ts.tm_mday = atoi(rp);
+        if((pv = strchr(rp, 'T')) != NULL && pv - str == 10){
+          rp = pv + 1;
+          ts.tm_hour = atoi(rp);
+          if((pv = strchr(rp, ':')) != NULL && pv - str == 13){
+            rp = pv + 1;
+            ts.tm_min = atoi(rp);
+          }
+          if((pv = strchr(rp, ':')) != NULL && pv - str == 16){
+            rp = pv + 1;
+            ts.tm_sec = atoi(rp);
+          }
+          if((pv = strchr(rp, '.')) != NULL && pv - str >= 19) rp = pv + 1;
+          strtol(rp, &pv, 10);
+          if((*pv == '+' || *pv == '-') && strlen(pv) >= 6 && pv[3] == ':')
+            ts.tm_sec -= (atoi(pv + 1) * 3600 + atoi(pv + 4) * 60) * (pv[0] == '+' ? 1 : -1);
+        }
+      }
+    }
+    return (int64_t)tcmkgmtime(&ts);
+  }
+  if(len > 4 && str[4] == '/'){
+    ts.tm_year = atoi(str) - 1900;
+    if((pv = strchr(str, '/')) != NULL && pv - str == 4){
+      char *rp = pv + 1;
+      ts.tm_mon = atoi(rp) - 1;
+      if((pv = strchr(rp, '/')) != NULL && pv - str == 7){
+        rp = pv + 1;
+        ts.tm_mday = atoi(rp);
+        if((pv = strchr(rp, ' ')) != NULL && pv - str == 10){
+          rp = pv + 1;
+          ts.tm_hour = atoi(rp);
+          if((pv = strchr(rp, ':')) != NULL && pv - str == 13){
+            rp = pv + 1;
+            ts.tm_min = atoi(rp);
+          }
+          if((pv = strchr(rp, ':')) != NULL && pv - str == 16){
+            rp = pv + 1;
+            ts.tm_sec = atoi(rp);
+          }
+          if((pv = strchr(rp, '.')) != NULL && pv - str >= 19) rp = pv + 1;
+          strtol(rp, &pv, 10);
+          if((*pv == '+' || *pv == '-') && strlen(pv) >= 6 && pv[3] == ':')
+            ts.tm_sec -= (atoi(pv + 1) * 3600 + atoi(pv + 4) * 60) * (pv[0] == '+' ? 1 : -1);
+        }
+      }
+    }
+    return (int64_t)tcmkgmtime(&ts);
+  }
+  const char *crp = str;
+  if(len >= 4 && str[3] == ',') crp = str + 4;
+  while(*crp == ' '){
+    crp++;
+  }
+  ts.tm_mday = atoi(crp);
+  while((*crp >= '0' && *crp <= '9') || *crp == ' '){
+    crp++;
+  }
+  if(tcstrifwm(crp, "Jan")){
+    ts.tm_mon = 0;
+  } else if(tcstrifwm(crp, "Feb")){
+    ts.tm_mon = 1;
+  } else if(tcstrifwm(crp, "Mar")){
+    ts.tm_mon = 2;
+  } else if(tcstrifwm(crp, "Apr")){
+    ts.tm_mon = 3;
+  } else if(tcstrifwm(crp, "May")){
+    ts.tm_mon = 4;
+  } else if(tcstrifwm(crp, "Jun")){
+    ts.tm_mon = 5;
+  } else if(tcstrifwm(crp, "Jul")){
+    ts.tm_mon = 6;
+  } else if(tcstrifwm(crp, "Aug")){
+    ts.tm_mon = 7;
+  } else if(tcstrifwm(crp, "Sep")){
+    ts.tm_mon = 8;
+  } else if(tcstrifwm(crp, "Oct")){
+    ts.tm_mon = 9;
+  } else if(tcstrifwm(crp, "Nov")){
+    ts.tm_mon = 10;
+  } else if(tcstrifwm(crp, "Dec")){
+    ts.tm_mon = 11;
+  } else {
+    ts.tm_mon = -1;
+  }
+  if(ts.tm_mon >= 0) crp += 3;
+  while(*crp == ' '){
+    crp++;
+  }
+  ts.tm_year = atoi(crp);
+  if(ts.tm_year >= 1969) ts.tm_year -= 1900;
+  while(*crp >= '0' && *crp <= '9'){
+    crp++;
+  }
+  while(*crp == ' '){
+    crp++;
+  }
+  if(ts.tm_mday > 0 && ts.tm_mon >= 0 && ts.tm_year >= 0){
+    int clen = strlen(crp);
+    if(clen >= 8 && crp[2] == ':' && crp[5] == ':'){
+      ts.tm_hour = atoi(crp + 0);
+      ts.tm_min = atoi(crp + 3);
+      ts.tm_sec = atoi(crp + 6);
+      if(clen >= 14 && crp[8] == ' ' && (crp[9] == '+' || crp[9] == '-')){
+        ts.tm_sec -= ((crp[10] - '0') * 36000 + (crp[11] - '0') * 3600 +
+                      (crp[12] - '0') * 600 + (crp[13] - '0') * 60) * (crp[9] == '+' ? 1 : -1);
+      } else if(clen > 9){
+        if(!strcmp(crp + 9, "JST")){
+          ts.tm_sec -= 9 * 3600;
+        } else if(!strcmp(crp + 9, "CCT")){
+          ts.tm_sec -= 8 * 3600;
+        } else if(!strcmp(crp + 9, "KST")){
+          ts.tm_sec -= 9 * 3600;
+        } else if(!strcmp(crp + 9, "EDT")){
+          ts.tm_sec -= -4 * 3600;
+        } else if(!strcmp(crp + 9, "EST")){
+          ts.tm_sec -= -5 * 3600;
+        } else if(!strcmp(crp + 9, "CDT")){
+          ts.tm_sec -= -5 * 3600;
+        } else if(!strcmp(crp + 9, "CST")){
+          ts.tm_sec -= -6 * 3600;
+        } else if(!strcmp(crp + 9, "MDT")){
+          ts.tm_sec -= -6 * 3600;
+        } else if(!strcmp(crp + 9, "MST")){
+          ts.tm_sec -= -7 * 3600;
+        } else if(!strcmp(crp + 9, "PDT")){
+          ts.tm_sec -= -7 * 3600;
+        } else if(!strcmp(crp + 9, "PST")){
+          ts.tm_sec -= -8 * 3600;
+        } else if(!strcmp(crp + 9, "HDT")){
+          ts.tm_sec -= -9 * 3600;
+        } else if(!strcmp(crp + 9, "HST")){
+          ts.tm_sec -= -10 * 3600;
+        }
+      }
+    }
+    return (int64_t)tcmkgmtime(&ts);
+  }
+  return 0;
+}
+
+
+/* Get the day of week of a date. */
+int tcdayofweek(int year, int mon, int day){
+  if(mon < 3){
+    year--;
+    mon += 12;
+  }
+  return (day + ((8 + (13 * mon)) / 5) + (year + (year / 4) - (year / 100) + (year / 400))) % 7;
+}
+
+
+/* Close the random number generator. */
+static void tcrandomfdclose(void){
+  close(tcrandomdevfd);
+}
+
+
+/* Make the GMT from a time structure.
+   `tm' specifies the pointer to the time structure.
+   The return value is the GMT. */
+static time_t tcmkgmtime(struct tm *tm){
+#if defined(_SYS_LINUX_)
+  assert(tm);
+  return timegm(tm);
+#else
+  assert(tm);
+  static int jl = INT_MAX;
+  if(jl == INT_MAX){
+    struct timeval tv;
+    struct timezone tz;
+    if(gettimeofday(&tv, &tz) == 0){
+      jl = tz.tz_minuteswest * -60;
+    } else {
+      jl = 0;
+    }
+  }
+  tm->tm_sec += jl;
+  return mktime(tm);
+#endif
 }
 
 
@@ -1940,7 +3038,7 @@ void *tcreadfile(const char *path, int limit, int *sp){
       TCXSTRCAT(xstr, buf, rsiz);
       limit -= rsiz;
     }
-    *sp = tcxstrsize(xstr);
+    if(sp) *sp = TCXSTRSIZE(xstr);
     return tcxstrtomalloc(xstr);
   }
   struct stat sbuf;
@@ -1958,7 +3056,7 @@ void *tcreadfile(const char *path, int limit, int *sp){
   }
   *wp = '\0';
   close(fd);
-  *sp = wp - buf;
+  if(sp) *sp = wp - buf;
   return buf;
 }
 
@@ -1977,7 +3075,7 @@ TCLIST *tcreadfilelines(const char *path){
       case '\r':
         break;
       case '\n':
-        tclistpush(list, tcxstrptr(xstr), tcxstrsize(xstr));
+        TCLISTPUSH(list, TCXSTRPTR(xstr), TCXSTRSIZE(xstr));
         tcxstrclear(xstr);
         break;
       default:
@@ -1986,7 +3084,7 @@ TCLIST *tcreadfilelines(const char *path){
       }
     }
   }
-  tclistpush(list, tcxstrptr(xstr), tcxstrsize(xstr));
+  TCLISTPUSH(list, TCXSTRPTR(xstr), TCXSTRSIZE(xstr));
   tcxstrdel(xstr);
   if(path) close(fd);
   return list;
@@ -2001,7 +3099,7 @@ bool tcwritefile(const char *path, const void *ptr, int size){
   bool err = false;
   if(!tcwrite(fd, ptr, size)) err = true;
   if(close(fd) == -1) err = true;
-  return err ? false : true;
+  return !err;
 }
 
 
@@ -2034,7 +3132,7 @@ bool tccopyfile(const char *src, const char *dest){
   }
   if(close(ofd) == -1) err = true;
   if(close(ifd) == -1) err = true;
-  return err ? false : true;
+  return !err;
 }
 
 
@@ -2047,7 +3145,7 @@ TCLIST *tcreaddir(const char *path){
   TCLIST *list = tclistnew();
   while((dp = readdir(DD)) != NULL){
     if(!strcmp(dp->d_name, MYCDIRSTR) || !strcmp(dp->d_name, MYPDIRSTR)) continue;
-    tclistpush(list, dp->d_name, strlen(dp->d_name));
+    TCLISTPUSH(list, dp->d_name, strlen(dp->d_name));
   }
   closedir(DD);
   return list;
@@ -2800,6 +3898,63 @@ unsigned int tcgetcrc(const char *ptr, int size){
 }
 
 
+/* Encode an array of nonnegative integers with BER encoding. */
+char *tcberencode(const unsigned int *ary, int anum, int *sp){
+  assert(ary && anum >= 0 && sp);
+  char *buf;
+  TCMALLOC(buf, anum * (sizeof(int) + 1) + 1);
+  char *wp = buf;
+  for(int i = 0; i < anum; i++){
+    unsigned int num = ary[i];
+    if(num < (1 << 7)){
+      *(wp++) = num;
+    } else if(num < (1 << 14)){
+      *(wp++) = (num >> 7) | 0x80;
+      *(wp++) = num & 0x7f;
+    } else if(num < (1 << 21)){
+      *(wp++) = (num >> 14) | 0x80;
+      *(wp++) = ((num >> 7) & 0x7f) | 0x80;
+      *(wp++) = num & 0x7f;
+    } else if(num < (1 << 28)){
+      *(wp++) = (num >> 21) | 0x80;
+      *(wp++) = ((num >> 14) & 0x7f) | 0x80;
+      *(wp++) = ((num >> 7) & 0x7f) | 0x80;
+      *(wp++) = num & 0x7f;
+    } else {
+      *(wp++) = (num >> 28) | 0x80;
+      *(wp++) = ((num >> 21) & 0x7f) | 0x80;
+      *(wp++) = ((num >> 14) & 0x7f) | 0x80;
+      *(wp++) = ((num >> 7) & 0x7f) | 0x80;
+      *(wp++) = num & 0x7f;
+    }
+  }
+  *sp = wp - buf;
+  return buf;
+}
+
+
+/* Decode a serial object encoded with BER encoding. */
+unsigned int *tcberdecode(const char *ptr, int size, int *np){
+  assert(ptr && size >= 0 && np);
+  unsigned int *buf;
+  TCMALLOC(buf, size * sizeof(*buf) + 1);
+  unsigned int *wp = buf;
+  while(size > 0){
+    unsigned int num = 0;
+    int c;
+    do {
+      c = *(unsigned char *)ptr;
+      num = num * 0x80 + (c & 0x7f);
+      ptr++;
+      size--;
+    } while(c >= 0x80 && size > 0);
+    *(wp++) = num;
+  }
+  *np = wp - buf;
+  return buf;
+}
+
+
 /* Escape meta characters in a string with the entity references of XML. */
 char *tcxmlescape(const char *str){
   assert(str);
@@ -2899,18 +4054,18 @@ TCLIST *tcxmlbreak(const char *str){
   char *ep;
   while(true){
     if(str[i] == '\0'){
-      if(i > pv) tclistpush(list, str + pv, i - pv);
+      if(i > pv) TCLISTPUSH(list, str + pv, i - pv);
       break;
     } else if(!tag && str[i] == '<'){
       if(str[i+1] == '!' && str[i+2] == '-' && str[i+3] == '-'){
-        if(i > pv) tclistpush(list, str + pv, i - pv);
+        if(i > pv) TCLISTPUSH(list, str + pv, i - pv);
         if((ep = strstr(str + i, "-->")) != NULL){
-          tclistpush(list, str + i, ep - str - i + 3);
+          TCLISTPUSH(list, str + i, ep - str - i + 3);
           i = ep - str + 2;
           pv = i + 1;
         }
       } else if(str[i+1] == '!' && str[i+2] == '[' && tcstrifwm(str + i, "<![CDATA[")){
-        if(i > pv) tclistpush(list, str + pv, i - pv);
+        if(i > pv) TCLISTPUSH(list, str + pv, i - pv);
         if((ep = strstr(str + i, "]]>")) != NULL){
           i += 9;
           TCXSTR *xstr = tcxstrnew();
@@ -2926,18 +4081,18 @@ TCLIST *tcxmlbreak(const char *str){
             }
             i++;
           }
-          if(tcxstrsize(xstr) > 0) tclistpush(list, tcxstrptr(xstr), tcxstrsize(xstr));
+          if(TCXSTRSIZE(xstr) > 0) TCLISTPUSH(list, TCXSTRPTR(xstr), TCXSTRSIZE(xstr));
           tcxstrdel(xstr);
           i = ep - str + 2;
           pv = i + 1;
         }
       } else {
-        if(i > pv) tclistpush(list, str + pv, i - pv);
+        if(i > pv) TCLISTPUSH(list, str + pv, i - pv);
         tag = true;
         pv = i;
       }
     } else if(tag && str[i] == '>'){
-      if(i > pv) tclistpush(list, str + pv, i - pv + 1);
+      if(i > pv) TCLISTPUSH(list, str + pv, i - pv + 1);
       tag = false;
       pv = i + 1;
     }
@@ -3027,6 +4182,8 @@ typedef struct {                         // type of structure for a BWT characte
 
 
 /* private function prototypes */
+static void tcglobalmutexinit(void);
+static void tcglobalmutexdestroy(void);
 static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level);
 static void tcbwtsortstrinsert(const char **arrays, int anum, int len, int skip);
 static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip);
@@ -3055,19 +4212,27 @@ void *tcmyfatal(const char *message){
 
 
 /* Global mutex object. */
-static pthread_mutex_t tcglobalmutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_rwlock_t tcglobalmutex;
+static pthread_once_t tcglobalmutexonce = PTHREAD_ONCE_INIT;
 
 
 /* Lock the global mutex object. */
 bool tcglobalmutexlock(void){
-  if(!TCUSEPTHREAD) memset(&tcglobalmutex, 0, sizeof(tcglobalmutex));
-  return pthread_mutex_lock(&tcglobalmutex) == 0;
+  pthread_once(&tcglobalmutexonce, tcglobalmutexinit);
+  return pthread_rwlock_wrlock(&tcglobalmutex) == 0;
+}
+
+
+/* Lock the global mutex object by shared locking. */
+bool tcglobalmutexlockshared(void){
+  pthread_once(&tcglobalmutexonce, tcglobalmutexinit);
+  return pthread_rwlock_rdlock(&tcglobalmutex) == 0;
 }
 
 
 /* Unlock the global mutex object. */
 bool tcglobalmutexunlock(void){
-  return pthread_mutex_unlock(&tcglobalmutex) == 0;
+  return pthread_rwlock_unlock(&tcglobalmutex) == 0;
 }
 
 
@@ -3274,6 +4439,20 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
 }
 
 
+/* Initialize the global mutex object */
+static void tcglobalmutexinit(void){
+  if(!TCUSEPTHREAD) memset(&tcglobalmutex, 0, sizeof(tcglobalmutex));
+  if(pthread_rwlock_init(&tcglobalmutex, NULL) != 0) tcmyfatal("rwlock error");
+  atexit(tcglobalmutexdestroy);
+}
+
+
+/* Destroy the global mutex object */
+static void tcglobalmutexdestroy(void){
+  pthread_rwlock_destroy(&tcglobalmutex);
+}
+
+
 /* Sort BWT string arrays by dicrionary order by counting sort.
    `array' specifies an array of string arrays.
    `anum' specifies the number of the array.
@@ -3456,26 +4635,16 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
    `len' specifies the length of the string. */
 static void tcbwtsortchrcount(unsigned char *str, int len){
   assert(str && len >= 0);
-  unsigned char nbuf[TCBWTBUFNUM];
-  unsigned char *nstr = nbuf;
-  if(len > TCBWTBUFNUM) TCMALLOC(nstr, sizeof(*nstr) * len);
-  int count[0x100], accum[0x100];
-  memset(count, 0, sizeof(count));
+  int cnt[0x100];
+  memset(cnt, 0, sizeof(cnt));
   for(int i = 0; i < len; i++){
-    count[str[i]]++;
+    cnt[str[i]]++;
   }
-  memcpy(accum, count, sizeof(count));
-  for(int i = 1; i < 0x100; i++){
-    accum[i] = accum[i-1] + accum[i];
-  }
+  int pos = 0;
   for(int i = 0; i < 0x100; i++){
-    accum[i] -= count[i];
+    memset(str + pos, i, cnt[i]);
+    pos += cnt[i];
   }
-  for(int i = 0; i < len; i++){
-    nstr[accum[str[i]]++] = str[i];
-  }
-  memcpy(str, nstr, len * sizeof(*nstr));
-  if(nstr != nbuf) free(nstr);
 }
 
 

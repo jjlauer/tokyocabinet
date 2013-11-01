@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The B+ tree database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -28,9 +28,9 @@ __TCBDB_CLINKAGEBEGIN
 
 
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 #include <tcutil.h>
 #include <tchdb.h>
 
@@ -83,6 +83,7 @@ typedef struct {                         /* type of structure for a B+ tree data
   char *rbopaque;                        /* opaque for rollback */
   int64_t cnt_saveleaf;                  /* tesing counter for leaf save times */
   int64_t cnt_loadleaf;                  /* tesing counter for leaf load times */
+  int64_t cnt_killleaf;                  /* tesing counter for leaf kill times */
   int64_t cnt_adjleafc;                  /* tesing counter for node cache adjust times */
   int64_t cnt_savenode;                  /* tesing counter for node save times */
   int64_t cnt_loadnode;                  /* tesing counter for node load times */
@@ -196,7 +197,7 @@ bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
    is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with
    TCBS encoding.
    If successful, the return value is true, else, it is false.
-   Note that the tuning parameters of the database should be set before the database is opened. */
+   Note that the tuning parameters should be set before the database is opened. */
 bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
                int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
 
@@ -208,7 +209,7 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
    `ncnum' specifies the maximum number of non-leaf nodes to be cached.  If it is not more than 0,
    the default value is specified.  The default value is 512.
    If successful, the return value is true, else, it is false.
-   Note that the tuning parameters of the database should be set before the database is opened. */
+   Note that the caching parameters should be set before the database is opened. */
 bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum);
 
 
@@ -452,7 +453,7 @@ int tcbdbvsiz2(TCBDB *bdb, const char *kstr);
    `einc' specifies whether the ending border is inclusive or not.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the values of the corresponding records.  This function
+   The return value is a list object of the keys of the corresponding records.  This function
    does never fail and return an empty list even if no record corresponds.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
@@ -470,7 +471,7 @@ TCLIST *tcbdbrange(TCBDB *bdb, const void *bkbuf, int bksiz, bool binc,
    `einc' specifies whether the ending border is inclusive or not.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the values of the corresponding records.  This function
+   The return value is a list object of the keys of the corresponding records.  This function
    does never fail and return an empty list even if no record corresponds.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
@@ -483,7 +484,7 @@ TCLIST *tcbdbrange2(TCBDB *bdb, const char *bkstr, bool binc,
    `prefix' specifies the prefix of the corresponding keys.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the values of the corresponding records.  This function
+   The return value is a list object of the keys of the corresponding records.  This function
    does never fail and return an empty list even if no record corresponds.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */

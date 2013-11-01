@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * IDL for bindings of scripting languages
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -69,6 +69,7 @@ module TokyoCabinet {
     const long OLCKNB = 1 << 5;
     long ecode();
     boolean tune(in long long bnum, in long apow, in long fpow, in long opts);
+    boolean setcache(in long rcnum);
     boolean open(in string path, in long omode);
     boolean close();
     boolean put(in string key, in string value);
@@ -118,8 +119,8 @@ module TokyoCabinet {
     List getlist(in string key);
     long vnum(in string key);
     long vsiz(in string key);
-    List range(in string bkey, in boolean binc,
-               in string ekey, in boolean einc, in long long max);
+    List range(in string bkey, in boolean binc, in string ekey, in boolean einc, in long max);
+    List rangefwm(in string prefix, in long max);
     boolean sync();
     boolean optimize(in long lmemb, in long nmemb,
                      in long long bnum, in long apow, in long fpow, in long opts);

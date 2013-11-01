@@ -1,7 +1,7 @@
-.TH "TCUTEST" 1 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCUTEST" 1 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tcutest \- test cases of the utility API of Tokyo Cabinet
+tcutest \- test cases of the utility API
 
 .SH DESCRIPTION
 .PP
@@ -24,6 +24,11 @@ Perform test of array list.
 Perform test of hash map.
 .RE
 .br
+\fBtcutest mdb \fIrnum\fB \fR[\fB\fIbnum\fB\fR]\fB\fR
+.RS
+Perform test of on-memory database.
+.RE
+.br
 \fBtcutest misc \fIrnum\fB\fR
 .RS
 Perform test of miscellaneous routines.
@@ -39,6 +44,7 @@ This command returns 0 on success, another on failure.
 
 .SH SEE ALSO
 .PP
+.BR tcumttest (1),
 .BR tcucodec (1),
 .BR tcutil (3),
 .BR tokyocabinet (3)

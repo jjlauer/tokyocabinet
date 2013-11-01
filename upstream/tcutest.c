@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the utility API
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -32,11 +32,13 @@ static int myrand(int range);
 static int runxstr(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runmap(int argc, char **argv);
+static int runmdb(int argc, char **argv);
 static int runmisc(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int procxstr(int rnum);
 static int proclist(int rnum, int anum);
 static int procmap(int rnum, int bnum);
+static int procmdb(int rnum, int bnum);
 static int procmisc(int rnum);
 static int procwicked(int rnum);
 
@@ -44,7 +46,7 @@ static int procwicked(int rnum);
 /* main routine */
 int main(int argc, char **argv){
   g_progname = argv[0];
-  srand((unsigned int)(tctime() * 100) % UINT_MAX);
+  srand((unsigned int)(tctime() * 1000) % UINT_MAX);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "xstr")){
@@ -53,6 +55,8 @@ int main(int argc, char **argv){
     rv = runlist(argc, argv);
   } else if(!strcmp(argv[1], "map")){
     rv = runmap(argc, argv);
+  } else if(!strcmp(argv[1], "mdb")){
+    rv = runmdb(argc, argv);
   } else if(!strcmp(argv[1], "misc")){
     rv = runmisc(argc, argv);
   } else if(!strcmp(argv[1], "wicked")){
@@ -72,6 +76,7 @@ static void usage(void){
   fprintf(stderr, "  %s xstr rnum\n", g_progname);
   fprintf(stderr, "  %s list rnum [anum]\n", g_progname);
   fprintf(stderr, "  %s map rnum [bnum]\n", g_progname);
+  fprintf(stderr, "  %s mdb rnum [bnum]\n", g_progname);
   fprintf(stderr, "  %s misc rnum\n", g_progname);
   fprintf(stderr, "  %s wicked rnum\n", g_progname);
   fprintf(stderr, "\n");
@@ -163,6 +168,30 @@ static int runmap(int argc, char **argv){
 }
 
 
+/* parse arguments of mdb command */
+static int runmdb(int argc, char **argv){
+  char *rstr = NULL;
+  char *bstr = NULL;
+  for(int i = 2; i < argc; i++){
+    if(!rstr && argv[i][0] == '-'){
+      usage();
+    } else if(!rstr){
+      rstr = argv[i];
+    } else if(!bstr){
+      bstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!rstr) usage();
+  int rnum = atoi(rstr);
+  if(rnum < 1) usage();
+  int bnum = bstr ? atoi(bstr) : -1;
+  int rv = procmdb(rnum, bnum);
+  return rv;
+}
+
+
 /* parse arguments of misc command */
 static int runmisc(int argc, char **argv){
   char *rstr = NULL;
@@ -219,7 +248,7 @@ static int procxstr(int rnum){
     }
   }
   tcxstrdel(xstr);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
   return 0;
 }
@@ -241,7 +270,7 @@ static int proclist(int rnum, int anum){
     }
   }
   tclistdel(list);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
   return 0;
 }
@@ -263,7 +292,31 @@ static int procmap(int rnum, int bnum){
     }
   }
   tcmapdel(map);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
+  iprintf("ok\n\n");
+  return 0;
+}
+
+
+/* perform mdb command */
+static int procmdb(int rnum, int bnum){
+  iprintf("<On-memory Database Writing Test>\n  rnum=%d\n\n", rnum);
+  double stime = tctime();
+  TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
+  for(int i = 1; i <= rnum; i++){
+    char buf[RECBUFSIZ];
+    int len = sprintf(buf, "%08d", i);
+    tcmdbput(mdb, buf, len, buf, len);
+    if(rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
+    }
+  }
+  iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
+  iprintf("size: %llu\n", (unsigned long long)tcmdbmsiz(mdb));
+  tcmdbdel(mdb);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
   return 0;
 }
@@ -278,7 +331,8 @@ static int procmisc(int rnum){
     const char *str = "5%2+3-1=4 \"Yes/No\" <a&b>";
     int slen = strlen(str);
     char *buf, *dec;
-    int bsiz, dsiz;
+    int bsiz, dsiz, jl;
+    time_t date, ddate;
     TCXSTR *xstr;
     TCLIST *list;
     TCMAP *map;
@@ -289,11 +343,14 @@ static int procmisc(int rnum){
     free(buf);
     if(tclmax(1, 2) != 2) err = true;
     if(tclmin(1, 2) != 1) err = true;
+    tclrand();
+    if(tcdrand() >= 1.0) err = true;
+    tcdrandnd(50, 10);
     if(tcstricmp("abc", "ABC") != 0) err = true;
-    if(!tcstrfwm("abc", "ab")) err = true;
-    if(!tcstrifwm("abc", "AB")) err = true;
-    if(!tcstrbwm("abc", "bc")) err = true;
-    if(!tcstribwm("abc", "BC")) err = true;
+    if(!tcstrfwm("abc", "ab") || !tcstrifwm("abc", "AB")) err = true;
+    if(!tcstrbwm("abc", "bc") || !tcstribwm("abc", "BC")) err = true;
+    if(tcstrdist("abcde", "abdfgh") != 4 || tcstrdist("abdfgh", "abcde") != 4) err = true;
+    if(tcstrdistutf("abcde", "abdfgh") != 4 || tcstrdistutf("abdfgh", "abcde") != 4) err = true;
     buf = tcmemdup("abcde", 5);
     tcstrtoupper(buf);
     if(strcmp(buf, "ABCDE")) err = true;
@@ -312,9 +369,50 @@ static int procmisc(int rnum){
     if(strcmp(buf, "ab")) err = true;
     free(buf);
     if(i % 10 == 1){
+      int anum = myrand(30);
+      uint16_t ary[anum+1];
+      for(int j = 0; j < anum; j++){
+        ary[j] = myrand(65535) + 1;
+      }
+      char ustr[anum*3+1];
+      tcstrucstoutf(ary, anum, ustr);
+      uint16_t dary[anum+1];
+      int danum;
+      tcstrutftoucs(ustr, dary, &danum);
+      if(danum != anum){
+        err = true;
+      } else {
+        for(int j = 0; j < danum; j++){
+          if(dary[j] != dary[j]) err = true;
+        }
+      }
       list = tcstrsplit(",a,b..c,d,", ",.");
       if(tclistnum(list) != 7) err = true;
+      buf = tcstrjoin(list, ':');
+      if(strcmp(buf, ":a:b::c:d:")) err = true;
+      free(buf);
       tclistdel(list);
+    }
+    buf = tcmalloc(48);
+    date = myrand(INT_MAX - 1000000);
+    jl = 3600 * (myrand(23) - 11);
+    tcdatestrwww(date, jl, buf);
+    ddate = tcstrmktime(buf);
+    if(ddate != date) err = true;
+    tcdatestrhttp(date, jl, buf);
+    ddate = tcstrmktime(buf);
+    if(ddate != date) err = true;
+    free(buf);
+    if(i % 100){
+      map = tcmapnew();
+      for(int j = 0; j < 10; j++){
+        char kbuf[RECBUFSIZ];
+        int ksiz = sprintf(kbuf, "%d", myrand(10));
+        tcmapaddint(map, kbuf, ksiz, 1);
+        const char *vbuf = tcmapget2(map, kbuf);
+        if(*(int *)vbuf < 1) err = true;
+      }
+      tcmapdel(map);
     }
     buf = tcurlencode(str, slen);
     if(strcmp(buf, "5%252%2B3-1%3D4%20%22Yes%2FNo%22%20%3Ca%26b%3E")) err = true;
@@ -414,6 +512,17 @@ static int procmisc(int rnum){
       }
       if(tcgetcrc("hoge", 4) % 10000 != 7034) err = true;
     }
+    int anum = myrand(50)+1;
+    unsigned int ary[anum];
+    for(int j = 0; j < anum; j++){
+      ary[j] = myrand(INT_MAX);
+    }
+    buf = tcberencode(ary, anum, &bsiz);
+    int dnum;
+    unsigned int *dary = tcberdecode(buf, bsiz, &dnum);
+    if(anum != dnum || memcmp(ary, dary, sizeof(*dary) * dnum)) err = true;
+    free(dary);
+    free(buf);
     buf = tcxmlescape(str);
     if(strcmp(buf, "5%2+3-1=4 &quot;Yes/No&quot; &lt;a&amp;b&gt;")) err = true;
     dec = tcxmlunescape(buf);
@@ -495,7 +604,7 @@ static int procmisc(int rnum){
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
     }
   }
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   if(err){
     iprintf("error\n\n");
     return 1;
@@ -516,13 +625,15 @@ static int procwicked(int rnum){
   tcmpoolputlist(mpool, list);
   TCMAP *map = myrand(2) > 0 ? tcmapnew() : tcmapnew2(myrand(rnum) + rnum / 2);
   tcmpoolputmap(mpool, map);
+  TCMDB *mdb = myrand(2) > 0 ? tcmdbnew() : tcmdbnew2(myrand(rnum) + rnum / 2);
+  tcmpoolput(mpool, mdb, (void (*)(void*))tcmdbdel);
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
     int ksiz = sprintf(kbuf, "%d", myrand(i));
     char vbuf[RECBUFSIZ];
     int vsiz = sprintf(vbuf, "%d", myrand(i));
     char *tmp;
-    switch(myrand(48)){
+    switch(myrand(69)){
     case 0:
       putchar('0');
       tcxstrcat(xstr, kbuf, ksiz);
@@ -654,54 +765,62 @@ static int procwicked(int rnum){
       break;
     case 28:
       putchar('S');
-      tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
+      tcmapput3(map, kbuf, ksiz, vbuf, vsiz, vbuf, vsiz);
       break;
     case 29:
       putchar('T');
-      tcmapputkeep2(map, kbuf, vbuf);
+      tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 30:
       putchar('U');
-      tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
+      tcmapputkeep2(map, kbuf, vbuf);
       break;
     case 31:
       putchar('V');
-      tcmapputcat2(map, kbuf, vbuf);
+      tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
       break;
     case 32:
       putchar('W');
-      if(myrand(10) == 0) tcmapout(map, kbuf, ksiz);
+      tcmapputcat2(map, kbuf, vbuf);
       break;
     case 33:
       putchar('X');
-      if(myrand(10) == 0) tcmapout2(map, kbuf);
+      if(myrand(10) == 0) tcmapout(map, kbuf, ksiz);
       break;
     case 34:
       putchar('Y');
-      tcmapmove(map, kbuf, ksiz, true);
+      if(myrand(10) == 0) tcmapout2(map, kbuf);
       break;
     case 35:
       putchar('Z');
-      tcmapmove(map, kbuf, ksiz, false);
+      tcmapget3(map, kbuf, ksiz, &vsiz);
       break;
     case 36:
       putchar('a');
-      tcmapmove2(map, kbuf, true);
+      tcmapmove(map, kbuf, ksiz, true);
       break;
     case 37:
       putchar('b');
-      if(myrand(100) == 0) tcmapiterinit(map);
+      tcmapmove(map, kbuf, ksiz, false);
       break;
     case 38:
       putchar('c');
-      tcmapiternext(map, &vsiz);
+      tcmapmove2(map, kbuf, true);
       break;
     case 39:
       putchar('d');
-      tcmapiternext2(map);
+      if(myrand(100) == 0) tcmapiterinit(map);
       break;
     case 40:
       putchar('e');
+      tcmapiternext(map, &vsiz);
+      break;
+    case 41:
+      putchar('f');
+      tcmapiternext2(map);
+      break;
+    case 42:
+      putchar('g');
       if(myrand(100) == 0){
         if(myrand(2) == 0){
           tclistdel(tcmapkeys(map));
@@ -710,12 +829,16 @@ static int procwicked(int rnum){
         }
       }
       break;
-    case 41:
-      putchar('f');
+    case 43:
+      putchar('h');
       if(myrand(rnum / 100 + 1) == 0) tcmapclear(map);
       break;
-    case 42:
-      putchar('g');
+    case 44:
+      putchar('i');
+      if(myrand(20) == 0) tcmapcutfront(map, myrand(10));
+      break;
+    case 45:
+      putchar('j');
       if(myrand(rnum / 100 + 1) == 0){
         int dsiz;
         char *dbuf = tcmapdump(map, &dsiz);
@@ -724,31 +847,92 @@ static int procwicked(int rnum){
         free(dbuf);
       }
       break;
-    case 43:
-      putchar('h');
-      if(myrand(100) == 0) tcmpoolmalloc(mpool, 1);
-      break;
-    case 44:
-      putchar('i');
-      if(myrand(100) == 0) tcmpoolxstrnew(mpool);
-      break;
-    case 45:
-      putchar('j');
-      if(myrand(100) == 0) tcmpoollistnew(mpool);
-      break;
     case 46:
       putchar('k');
+      tcmdbput(mdb, kbuf, ksiz, vbuf, vsiz);
+      break;
+    case 47:
+      putchar('l');
+      tcmdbput2(mdb, kbuf, vbuf);
+      break;
+    case 48:
+      putchar('m');
+      tcmdbputkeep(mdb, kbuf, ksiz, vbuf, vsiz);
+      break;
+    case 49:
+      putchar('n');
+      tcmdbputkeep2(mdb, kbuf, vbuf);
+      break;
+    case 50:
+      putchar('o');
+      tcmdbputcat(mdb, kbuf, ksiz, vbuf, vsiz);
+      break;
+    case 51:
+      putchar('p');
+      tcmdbputcat2(mdb, kbuf, vbuf);
+      break;
+    case 52:
+      putchar('q');
+      if(myrand(10) == 0) tcmdbout(mdb, kbuf, ksiz);
+      break;
+    case 53:
+      putchar('r');
+      if(myrand(10) == 0) tcmdbout2(mdb, kbuf);
+      break;
+    case 54:
+      putchar('s');
+      free(tcmdbget(mdb, kbuf, ksiz, &vsiz));
+      break;
+    case 55:
+      putchar('t');
+      free(tcmdbget3(mdb, kbuf, ksiz, &vsiz));
+      break;
+    case 56:
+      putchar('u');
+      if(myrand(100) == 0) tcmdbiterinit(mdb);
+      break;
+    case 57:
+      putchar('v');
+      free(tcmdbiternext(mdb, &vsiz));
+      break;
+    case 58:
+      putchar('w');
+      tmp = tcmdbiternext2(mdb);
+      free(tmp);
+      break;
+    case 59:
+      putchar('x');
+      if(myrand(rnum / 100 + 1) == 0) tcmdbvanish(mdb);
+      break;
+    case 60:
+      putchar('y');
+      if(myrand(200) == 0) tcmdbcutfront(mdb, myrand(100));
+      break;
+    case 61:
+      putchar('+');
+      if(myrand(100) == 0) tcmpoolmalloc(mpool, 1);
+      break;
+    case 62:
+      putchar('+');
+      if(myrand(100) == 0) tcmpoolxstrnew(mpool);
+      break;
+    case 63:
+      putchar('+');
+      if(myrand(100) == 0) tcmpoollistnew(mpool);
+      break;
+    case 64:
+      putchar('+');
       if(myrand(100) == 0) tcmpoolmapnew(mpool);
       break;
     default:
       putchar('@');
-      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 100) % UINT_MAX);
+      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
       break;
     }
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
   }
   if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
   return 0;
 }

@@ -1,4 +1,4 @@
-.TH "TOKYOCABINET" 3 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TOKYOCABINET" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tokyocabinet \- a modern implementation of DBM
@@ -68,7 +68,9 @@ Functions of API of Tokyo cabinet are reentrant and available in multi\-thread e
 .PP
 The utility API is also provided.  Such fundamental data structure as list and map are included.  And, some useful features; memory pool, string processing, encoding, are also included.
 .PP
-Three kinds of API; the utility API, the hash database API, and the B+ tree database API, are provided for the C language.  Command line interfaces are also provided corresponding to each API.  They are usuful for prototyping, test, and debugging.  Except for C, Tokyo Cabinet provides APIs for Perl, Ruby, and Java.  The Perl API has methods calling the hash database API and the B+ tree database API with XS language.  The Java API has native methods calling the hash database API and the B+ tree API with Java Native Interface.  The Ruby API has methods calling the hash database API and the B+ tree database API as modules of Ruby.  APIs for other languages will hopefully be provided by third party.
+Four kinds of API; the utility API, the hash database API, the B+ tree database API, and the abstract database API, are provided for the C language.  Command line interfaces are also provided corresponding to each API.  They are usuful for prototyping, test, and debugging.  Except for C, Tokyo Cabinet provides APIs for Perl, Ruby, and Java.  The Perl API has methods calling the hash database API and the B+ tree database API with XS language.  The Java API has native methods calling the hash database API and the B+ tree API with Java Native Interface.  The Ruby API has methods calling the hash database API and the B+ tree database API as modules of Ruby.  APIs for other languages will hopefully be provided by third party.
+.PP
+In cases that multiple processes access a database at the same time or some processes access a database on a remote host, the remote service is useful.  The remote service is composed of a database server and its access library.  Applications can access the database server by using the remote database API.  The server implements HTTP and the memcached protocol partly so that client programs on almost all platforms can access the server easily.
 
 .SH HOW TO USE THE LIBRARY
 .PP
@@ -93,5 +95,5 @@ Tokyo Cabinet was written by Mikio Hirabayashi.  You can contact the author by e
 .BR tcbdb (3)
 .PP
 Please see
-.I http://tokyocabinet.sourceforge.net/spex-en.html
+.I http://tokyocabinet.sourceforge.net/spex\-en.html
 for detail.

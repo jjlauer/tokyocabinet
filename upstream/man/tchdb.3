@@ -1,7 +1,7 @@
-.TH "TCHDB" 3 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCHDB" 3 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tchdb \- the hash database API of Tokyo Cabinet
+tchdb \- the hash database API
 
 .SH DESCRIPTION
 .PP
@@ -122,7 +122,26 @@ The function `tchdbtune' is used in order to set the tuning parameters of a hash
 If successful, the return value is true, else, it is false.
 .RE
 .RS
-Note that the tuning parameters of the database should be set before the database is opened.
+Note that the tuning parameters should be set before the database is opened.
+.RE
+.RE
+.PP
+The function `tchdbsetcache' is used in order to set the caching parameters of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbsetcache(TCHDB *\fIhdb\fB, int32_t \fIrcnum\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object which is not opened.
+.RE
+.RS
+`\fIrcnum\fR' specifies the maximum number of records to be cached.  If it is not more than 0, the record cache is disabled.  It is disabled by default.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Note that the caching parameters should be set before the database is opened.
 .RE
 .RE
 .PP
@@ -433,7 +452,10 @@ The function `tchdbget2' is used in order to retrieve a string record in a hash 
 `\fIkstr\fR' specifies the string of the key.
 .RE
 .RS
-If successful, the return value is the string of the value of the corresponding record.  `NULL' is returned if no record corresponds.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+If successful, the return value is the string of the value of the corresponding record.  `NULL' is returned if no record corresponds.
+.RE
+.RS
+Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
 .RE
 .RE
 .PP

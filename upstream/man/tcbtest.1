@@ -1,7 +1,7 @@
-.TH "TCBTEST" 1 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCBTEST" 1 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tcbtest \- test cases of the B+ tree database API of Tokyo Cabinet
+tcbtest \- test cases of the B+ tree database API
 
 .SH DESCRIPTION
 .PP
@@ -27,6 +27,11 @@ Remove all records of the database above.
 \fBtcbtest rcat \fR[\fB\-mt\fR]\fB \fR[\fB\-cd\fR|\fB\-ci\fR|\fB\-cj\fR]\fB \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-lc \fInum\fB\fR]\fB \fR[\fB\-nc \fInum\fB\fR]\fB \fR[\fB\-ls \fInum\fB\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-pn \fInum\fB\fR]\fB \fR[\fB\-rl\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
 .RS
 Store records with partway duplicated keys using concatenate mode.
+.RE
+.br
+\fBtcbtest queue \fR[\fB\-mt\fR]\fB \fR[\fB\-cd\fR|\fB\-ci\fR|\fB\-cj\fR]\fB \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-lc \fInum\fB\fR]\fB \fR[\fB\-nc \fInum\fB\fR]\fB \fR[\fB\-ls \fInum\fB\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
+.RS
+Perform queueing and dequeueing.
 .RE
 .br
 \fBtcbtest misc \fR[\fB\-mt\fR]\fB \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fIpath\fB \fIrnum\fB\fR

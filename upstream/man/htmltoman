@@ -1,4 +1,4 @@
-#! /bin/awk -f
+#! /usr/bin/awk -f
 
 function strip(text){
   gsub("^ *<[a-zA-Z0-9]*[^>]*>", "", text)

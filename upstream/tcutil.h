@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The utility API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -28,9 +28,9 @@ __TCUTIL_CLINKAGEBEGIN
 
 
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 
 
 
@@ -500,8 +500,9 @@ typedef struct {                         /* type of structure for a map */
   TCMAPREC *first;                       /* pointer to the first element */
   TCMAPREC *last;                        /* pointer to the last element */
   TCMAPREC *cur;                         /* pointer to the current element */
-  int bnum;                              /* number of buckets */
-  int rnum;                              /* number of records */
+  uint32_t bnum;                         /* number of buckets */
+  uint64_t rnum;                         /* number of records */
+  uint64_t msiz;                         /* total size of records */
 } TCMAP;
 
 
@@ -513,7 +514,7 @@ TCMAP *tcmapnew(void);
 /* Create a map object with specifying the number of the buckets.
    `bnum' specifies the number of the buckets.
    The return value is the new map object. */
-TCMAP *tcmapnew2(int bnum);
+TCMAP *tcmapnew2(uint32_t bnum);
 
 
 /* Copy a map object.
@@ -523,7 +524,7 @@ TCMAP *tcmapdup(const TCMAP *map);
 
 
 /* Delete a map object.
-   `map' specifies the list object.
+   `map' specifies the map object.
    Note that the deleted object and its derivatives can not be used anymore. */
 void tcmapdel(TCMAP *map);
 
@@ -534,7 +535,7 @@ void tcmapdel(TCMAP *map);
    `ksiz' specifies the size of the region of the key.
    `vbuf' specifies the pointer to the region of the value.
    `vsiz' specifies the size of the region of the value.
-   If a record with the same key exists in the database, it is overwritten. */
+   If a record with the same key exists in the map, it is overwritten. */
 void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
 
 
@@ -542,8 +543,21 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
    `map' specifies the map object.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
-   If a record with the same key exists in the database, it is overwritten. */
+   If a record with the same key exists in the map, it is overwritten. */
 void tcmapput2(TCMAP *map, const char *kstr, const char *vstr);
+
+
+/* Store a record of the value of two regions into a map object.
+   `map' specifies the map object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `fvbuf' specifies the pointer to the former region of the value.
+   `fvsiz' specifies the size of the former region of the value.
+   `lvbuf' specifies the pointer to the latter region of the value.
+   `lvsiz' specifies the size of the latter region of the value.
+   If a record with the same key exists in the map, it is overwritten. */
+void tcmapput3(TCMAP *map, const char *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz);
 
 
 /* Store a new record into a map object.
@@ -553,7 +567,7 @@ void tcmapput2(TCMAP *map, const char *kstr, const char *vstr);
    `vbuf' specifies the pointer to the region of the value.
    `vsiz' specifies the size of the region of the value.
    If successful, the return value is true, else, it is false.
-   If a record with the same key exists in the database, this function has no effect. */
+   If a record with the same key exists in the map, this function has no effect. */
 bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
 
 
@@ -562,7 +576,7 @@ bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int 
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
    If successful, the return value is true, else, it is false.
-   If a record with the same key exists in the database, this function has no effect. */
+   If a record with the same key exists in the map, this function has no effect. */
 bool tcmapputkeep2(TCMAP *map, const char *kstr, const char *vstr);
 
 
@@ -620,6 +634,21 @@ const void *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp);
    If successful, the return value is the string of the value of the corresponding record.
    `NULL' is returned when no record corresponds. */
 const char *tcmapget2(const TCMAP *map, const char *kstr);
+
+
+/* Retrieve a semivolatile record in a map object.
+   `map' specifies the map object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the value of the
+   corresponding record.  `NULL' is returned when no record corresponds.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  The internal region of the returned
+   record is moved to the tail so that the record will survive for a time under LRU cache
+   algorithm removing records from the head. */
+const void *tcmapget3(TCMAP *map, const void *kbuf, int ksiz, int *sp);
 
 
 /* Move a record to the edge of a map object.
@@ -686,7 +715,13 @@ const char *tcmapiterval2(const char *kstr);
 /* Get the number of records stored in a map object.
    `map' specifies the map object.
    The return value is the number of the records stored in the map object. */
-int tcmaprnum(const TCMAP *map);
+uint64_t tcmaprnum(const TCMAP *map);
+
+
+/* Get the total size of memory used in a map object.
+   `map' specifies the map object.
+   The return value is the total size of memory used in a map object. */
+uint64_t tcmapmsiz(const TCMAP *map);
 
 
 /* Create a list object containing all keys in a map object.
@@ -705,13 +740,31 @@ TCLIST *tcmapkeys(const TCMAP *map);
 TCLIST *tcmapvals(const TCMAP *map);
 
 
-/* Clear a list object.
+/* Add an integer to a record in a map object.
+   `map' specifies the map object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `num' specifies the additional value.
+   If the corresponding record exists, the value is treated as a integer and is added to.  If no
+   record corresponds, a new record of the additional value is stored. */
+void tcmapaddint(TCMAP *map, const char *kbuf, int ksiz, int num);
+
+
+/* Clear a map object.
    `map' specifies the map object.
    All records are removed. */
 void tcmapclear(TCMAP *map);
 
 
-/* Serialize map list object into a byte array.
+/* Remove front records of a map object.
+   `map' specifies the map object.
+   `num' specifies the number of records to be removed.
+   If successful, the return value is true.  False is returned when no record corresponds to
+   the specified key. */
+void tcmapcutfront(TCMAP *map, int num);
+
+
+/* Serialize a map object into a byte array.
    `map' specifies the map object.
    `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
@@ -746,6 +799,239 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
 
 
 /*************************************************************************************************
+ * on-memory database
+ *************************************************************************************************/
+
+
+typedef struct {                         /* type of structure for a on-memory database */
+  void **mmtxs;                          /* mutexes for method */
+  void *imtx;                            /* mutex for iterator */
+  TCMAP **maps;                          /* internal map object */
+  int iter;                              /* index of maps for the iterator */
+} TCMDB;
+
+
+/* Create an on-memory database object.
+   The return value is the new on-memory database object.
+   The object can be shared by plural threads because of the internal mutex. */
+TCMDB *tcmdbnew(void);
+
+
+/* Create an on-memory database object with specifying the number of the buckets.
+   `bnum' specifies the number of the buckets.
+   The return value is the new on-memory database object.
+   The object can be shared by plural threads because of the internal mutex. */
+TCMDB *tcmdbnew2(uint32_t bnum);
+
+
+/* Delete an on-memory database object.
+   `mdb' specifies the on-memory database object. */
+void tcmdbdel(TCMDB *mdb);
+
+
+/* Store a record into an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   If a record with the same key exists in the database, it is overwritten. */
+void tcmdbput(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
+
+
+/* Store a string record into an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   `vstr' specifies the string of the value.
+   If a record with the same key exists in the database, it is overwritten. */
+void tcmdbput2(TCMDB *mdb, const char *kstr, const char *vstr);
+
+
+/* Store a record of the value of two regions into an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `fvbuf' specifies the pointer to the former region of the value.
+   `fvsiz' specifies the size of the former region of the value.
+   `lvbuf' specifies the pointer to the latter region of the value.
+   `lvsiz' specifies the size of the latter region of the value.
+   If a record with the same key exists in the database, it is overwritten. */
+void tcmdbput3(TCMDB *mdb, const char *kbuf, int ksiz,
+               const void *fvbuf, int fvsiz, const char *lvbuf, int lvsiz);
+
+
+/* Store a new record into an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   If successful, the return value is true, else, it is false.
+   If a record with the same key exists in the database, this function has no effect. */
+bool tcmdbputkeep(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
+
+
+/* Store a new string record into an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   `vstr' specifies the string of the value.
+   If successful, the return value is true, else, it is false.
+   If a record with the same key exists in the database, this function has no effect. */
+bool tcmdbputkeep2(TCMDB *mdb, const char *kstr, const char *vstr);
+
+
+/* Concatenate a value at the end of the value of the existing record in an on-memory database.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   If there is no corresponding record, a new record is created. */
+void tcmdbputcat(TCMDB *mdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
+
+
+/* Concatenate a string at the end of the value of the existing record in an on-memory database.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   `vstr' specifies the string of the value.
+   If there is no corresponding record, a new record is created. */
+void tcmdbputcat2(TCMDB *mdb, const char *kstr, const char *vstr);
+
+
+/* Remove a record of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   If successful, the return value is true.  False is returned when no record corresponds to
+   the specified key. */
+bool tcmdbout(TCMDB *mdb, const void *kbuf, int ksiz);
+
+
+/* Remove a string record of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is true.  False is returned when no record corresponds to
+   the specified key. */
+bool tcmdbout2(TCMDB *mdb, const char *kstr);
+
+
+/* Retrieve a record in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the value of the
+   corresponding record.  `NULL' is returned when no record corresponds.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when
+   it is no longer in use. */
+void *tcmdbget(TCMDB *mdb, const void *kbuf, int ksiz, int *sp);
+
+
+/* Retrieve a string record in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is the string of the value of the corresponding record.
+   `NULL' is returned when no record corresponds.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcmdbget2(TCMDB *mdb, const char *kstr);
+
+
+/* Retrieve a record and move it astern in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the value of the
+   corresponding record.  `NULL' is returned when no record corresponds.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return value
+   is allocated with the `malloc' call, it should be released with the `free' call when it is no
+   longer in use.  The internal region of the returned record is moved to the tail so that the
+   record will survive for a time under LRU cache algorithm removing records from the head. */
+void *tcmdbget3(TCMDB *mdb, const void *kbuf, int ksiz, int *sp);
+
+
+/* Get the size of the value of a record in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   If successful, the return value is the size of the value of the corresponding record, else,
+   it is -1. */
+int tcmdbvsiz(TCMDB *mdb, const void *kbuf, int ksiz);
+
+
+/* Get the size of the value of a string record in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is the size of the value of the corresponding record, else,
+   it is -1. */
+int tcmdbvsiz2(TCMDB *mdb, const char *kstr);
+
+
+/* Initialize the iterator of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   The iterator is used in order to access the key of every record stored in the on-memory
+   database. */
+void tcmdbiterinit(TCMDB *mdb);
+
+
+/* Get the next key of the iterator of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the next key, else, it is
+   `NULL'.  `NULL' is returned when no record can be fetched from the iterator.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when
+   it is no longer in use.  The order of iteration is assured to be the same as the stored
+   order. */
+void *tcmdbiternext(TCMDB *mdb, int *sp);
+
+
+/* Get the next key string of the iterator of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   If successful, the return value is the pointer to the region of the next key, else, it is
+   `NULL'.  `NULL' is returned when no record can be fetched from the iterator.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use.  The order of iteration is assured
+   to be the same as the stored order. */
+char *tcmdbiternext2(TCMDB *mdb);
+
+
+/* Get the number of records stored in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   The return value is the number of the records stored in the database. */
+uint64_t tcmdbrnum(TCMDB *mdb);
+
+
+/* Get the total size of memory used in an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   The return value is the total size of memory used in the database. */
+uint64_t tcmdbmsiz(TCMDB *mdb);
+
+
+/* Clear an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   All records are removed. */
+void tcmdbvanish(TCMDB *mdb);
+
+
+/* Remove front records of an on-memory database object.
+   `mdb' specifies the on-memory database object.
+   `num' specifies the number of records to be removed.
+   If successful, the return value is true.  False is returned when no record corresponds to
+   the specified key. */
+void tcmdbcutfront(TCMDB *mdb, int num);
+
+
+
+/*************************************************************************************************
  * memory pool
  *************************************************************************************************/
 
@@ -756,6 +1042,7 @@ typedef struct {                         /* type of an element of memory pool */
 } TCMPELEM;
 
 typedef struct {                         /* type of structure for a memory pool object */
+  void *mutex;                           /* mutex for operations */
   TCMPELEM *elems;                       /* array of elements */
   int anum;                              /* number of the elements of the array */
   int num;                               /* number of used elements */
@@ -861,6 +1148,29 @@ long tclmax(long a, long b);
 long tclmin(long a, long b);
 
 
+/* Get a random number as long integer based on uniform distribution.
+   The return value is the random number between 0 and `ULONG_MAX'.
+   This function uses the random number source device and generates a real random number if
+   possible. */
+unsigned long tclrand(void);
+
+
+/* Get a random number as double decimal based on uniform distribution.
+   The return value is the random number equal to or greater than 0, and less than 1.0.
+   This function uses the random number source device and generates a real random number if
+   possible. */
+double tcdrand(void);
+
+
+/* Get a random number as double decimal based on normal distribution.
+   `avg' specifies the average.
+   `sd' specifies the standard deviation.
+   The return value is the random number.
+   This function uses the random number source device and generates a real random number if
+   possible. */
+double tcdrandnd(double avg, double sd);
+
+
 /* Compare two strings with case insensitive evaluation.
    `astr' specifies a string.
    `bstr' specifies of the other string.
@@ -895,6 +1205,22 @@ bool tcstrbwm(const char *str, const char *key);
    `key' specifies the backward matching key string.
    The return value is true if the target string ends with the key, else, it is false. */
 bool tcstribwm(const char *str, const char *key);
+
+
+/* Calculate the edit distance of two strings.
+   `astr' specifies a string.
+   `bstr' specifies of the other string.
+   The return value is the edit distance which is known as the Levenshtein distance.  The cost is
+   calculated by byte. */
+int tcstrdist(const char *astr, const char *bstr);
+
+
+/* Calculate the edit distance of two UTF-8 strings.
+   `astr' specifies a string.
+   `bstr' specifies of the other string.
+   The return value is the edit distance which is known as the Levenshtein distance.  The cost is
+   calculated by Unicode character. */
+int tcstrdistutf(const char *astr, const char *bstr);
 
 
 /* Convert the letters of a string into upper case.
@@ -943,6 +1269,23 @@ int tcstrcntutf(const char *str);
 char *tcstrcututf(char *str, int num);
 
 
+/* Convert a UTF-8 string into a UCS-2 array.
+   `str' specifies the UTF-8 string.
+   `ary' specifies the pointer to the region into which the result UCS-2 codes are written.  The
+   size of the buffer should be sufficient.
+   `np' specifies the pointer to a variable into which the number of elements of the result array
+   is assigned. */
+void tcstrutftoucs(const char *str, uint16_t *ary, int *np);
+
+
+/* Convert a UCS-2 array into a UTF-8 string.
+   `ary' specifies the array of UCS-2 code codes.
+   `num' specifies the number of the array.
+   `str' specifies the pointer to the region into which the result UTF-8 string is written.  The
+   size of the buffer should be sufficient. */
+void tcstrucstoutf(const uint16_t *ary, int num, char *str);
+
+
 /* Create a list object by splitting a string.
    `str' specifies the source string.
    `delim' specifies a string containing delimiting characters.
@@ -950,12 +1293,80 @@ char *tcstrcututf(char *str, int num);
    If two delimiters are successive, it is assumed that an empty element is between the two.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
-TCLIST *tcstrsplit(const char *str, const char *delim);
+TCLIST *tcstrsplit(const char *str, const char *delims);
 
 
-/* Get the time of day in milliseconds.
-   The return value is the time of day in milliseconds. */
+/* Create a string by joining all elements of a list object.
+   `list' specifies a list object.
+   `delim' specifies a delimiting character.
+   The return value is the result string.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcstrjoin(TCLIST *list, char delim);
+
+
+/* Get the time of day in seconds.
+   The return value is the time of day in seconds.  The accuracy is in microseconds. */
 double tctime(void);
+
+
+/* Get the Gregorian calendar of a time.
+   `t' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current
+   time is specified.
+   `jl' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is
+   specified.
+   `yearp' specifies the pointer to a variable to which the year is assigned.  If it is `NULL',
+   it is not used.
+   `monp' specifies the pointer to a variable to which the month is assigned.  If it is `NULL',
+   it is not used.  1 means January and 12 means December.
+   `dayp' specifies the pointer to a variable to which the day of the month is assigned.  If it
+   is `NULL', it is not used.
+   `hourp' specifies the pointer to a variable to which the hours is assigned.  If it is `NULL',
+   it is not used.
+   `minp' specifies the pointer to a variable to which the minutes is assigned.  If it is `NULL',
+   it is not used.
+   `secp' specifies the pointer to a variable to which the seconds is assigned.  If it is `NULL',
+   it is not used. */
+void tccalendar(int64_t t, int jl, int *yearp, int *monp, int *dayp,
+                int *hourp, int *minp, int *secp);
+
+
+/* Format a date as a string in W3CDTF.
+   `t' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current
+   time is specified.
+   `jl' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is
+   specified.
+   `buf' specifies the pointer to the region into which the result string is written.  The size
+   of the buffer should be equal to or more than 48 bytes.
+   W3CDTF represents a date as "YYYY-MM-DDThh:mm:ddTZD". */
+void tcdatestrwww(int64_t t, int jl, char *buf);
+
+
+/* Format a date as a string in RFC 1123 format.
+   `t' specifies the source time in seconds from the epoch.  If it is `INT64_MAX', the current
+   time is specified.
+   `jl' specifies the jet lag of a location in seconds.  If it is `INT_MAX', the local jet lag is
+   specified.
+   `buf' specifies the pointer to the region into which the result string is written.  The size
+   of the buffer should be equal to or more than 48 bytes.
+   RFC 1123 format represents a date as "Wdy, DD-Mon-YYYY hh:mm:dd TZD". */
+void tcdatestrhttp(int64_t t, int jl, char *buf);
+
+
+/* Get the time value of a date string.
+   `str' specifies the date string in decimal, hexadecimal, W3CDTF, or RFC 822 (1123).  Decimal
+   can be trailed by "s" for in seconds, "m" for in minutes, "h" for in hours, and "d" for in
+   days.
+   The return value is the time value of the date or `INT64_MAX' if the format is invalid. */
+int64_t tcstrmktime(const char *str);
+
+
+/* Get the day of week of a date.
+   `year' specifies the year of a date.
+   `mon' specifies the month of the date.
+   `day' specifies the day of the date.
+   The return value is the day of week of the date.  0 means Sunday and 6 means Saturday. */
+int tcdayofweek(int year, int mon, int day);
 
 
 
@@ -1269,6 +1680,28 @@ char *tcgzipdecode(const char *ptr, int size, int *sp);
 unsigned int tcgetcrc(const char *ptr, int size);
 
 
+/* Encode an array of nonnegative integers with BER encoding.
+   `ary' specifies the pointer to the array of nonnegative integers.
+   `anum' specifies the size of the array.
+   `sp' specifies the pointer to a variable into which the size of the region of the return
+   value is assigned.
+   The return value is the pointer to the region of the result.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call if when is no longer in use. */
+char *tcberencode(const unsigned int *ary, int anum, int *sp);
+
+
+/* Decode a serial object encoded with BER encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `np' specifies the pointer to a variable into which the number of elements of the return value
+   is assigned.
+   The return value is the pointer to the array of the result.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call if when is no longer in use. */
+unsigned int *tcberdecode(const char *ptr, int size, int *np);
+
+
 /* Escape meta characters in a string with the entity references of XML.
    `str' specifies the string.
    The return value is the pointer to the escaped string.
@@ -1426,8 +1859,8 @@ typedef struct {                         /* type of structure for a bit stream o
 
 #include <stdio.h>
 
-#define _TC_VERSION    "1.0.9"
-#define _TC_LIBVER     118
+#define _TC_VERSION    "1.1.15"
+#define _TC_LIBVER     201
 #define _TC_FORMATVER  "1.0"
 
 
@@ -1440,6 +1873,11 @@ void *tcmyfatal(const char *message);
 /* Lock the global mutex object.
    If successful, the return value is true, else, it is false. */
 bool tcglobalmutexlock(void);
+
+
+/* Lock the global mutex object by shared locking.
+   If successful, the return value is true, else, it is false. */
+bool tcglobalmutexlockshared(void);
 
 
 /* Unlock the global mutex object.
@@ -1607,6 +2045,16 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
   } while(false)
 
 
+/* Alias of `tcxstrptr'. */
+#define TCXSTRPTR(TC_xstr) \
+  ((TC_xstr)->ptr)
+
+
+/* Alias of `tcxstrsize'. */
+#define TCXSTRSIZE(TC_xstr) \
+  ((TC_xstr)->size)
+
+
 /* Alias of `tclistnum'. */
 #define TCLISTNUM(TC_list) \
   ((TC_list)->num)
@@ -1615,6 +2063,11 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
 /* Alias of `tclistval' but not checking size and not using the third parameter. */
 #define TCLISTVALPTR(TC_list, TC_index) \
   ((void *)((TC_list)->array[(TC_index)+(TC_list)->start].ptr))
+
+
+/* Alias of `tclistval' but not checking size and returning the size of the value. */
+#define TCLISTVALNUM(TC_list, TC_index) \
+  ((TC_list)->array[(TC_index)+(TC_list)->start].size)
 
 
 /* Add an element at the end of a list object. */

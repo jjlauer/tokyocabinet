@@ -1,3 +1,155 @@
+2008-02-15  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcbwtsortchrcount): time efficiency was improved.
+
+	- The library version was bumped up for some binary packages.
+
+	- Release: 1.1.15
+
+2008-02-05  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcatest.c (runwicked, procwicked): new functions.
+
+	- Release: 1.1.14
+
+2008-01-30  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tctime): measure unit was changed to in seconds.
+
+	* tchdb.c (tchdbcopy): shared lock is now used.
+
+	* tcadb.c (tcadbsync, tcadbcopy): new functions.
+
+	- Release: 1.1.13
+
+2008-01-23  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tcbdbleafkill, tcbdbnodesubidx): new functions.
+
+	* tcbtest.c (runqueue, procqueue): new functions.
+
+	- Release: 1.1.12
+
+2008-01-20  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmapmsiz, tcmdbmsiz, tcadbsize): new functions.
+
+	* tcutil.c (tcglobalmutexshared): new function.
+
+	* tcutil.c (tcglobalmutexinit, tcglobalmutexdestroy): new functions.
+
+	* tcutil.c (tcreadfile): a bug related to the size assignment was fixed.
+
+	* tcadb.c (tcadbopen): "capsiz" parameter was added.
+
+	- Release: 1.1.11
+
+2008-01-17  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tclistshift, tclistshift2): memory alignment was improved.
+
+	* tcutil.c (tcvxstrprintf): a bug related to format of long long integer was fixed.
+
+	- Release: 1.1.10
+
+2008-01-10  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmdbvsiz, tcmdbvsiz2): new functions.
+
+	* tcutil.c (tcmdbiternext): a bug related to handling sparse map was fixed.
+
+	* tcadb.h, tcadb.c: new files.
+
+	* tcatest.c, tcadb.c: new files.
+
+	- Release: 1.1.9
+
+2008-01-03  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcstrutftoucs, tcstrucstoutf, tcstrjoin): new function.
+
+	* tcutil.c (tcstrdist, tcstrdistutf): new function.
+
+	- Release: 1.1.8
+
+2007-12-28  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* myconf.h: some header includings were removed for environments not conforming to C99.
+
+	* tcutil.c (tctccalendar, tcdatestrwww, tcdatestrhttp): new functions.
+
+	* tcutil.c (tcmapaddint): new function.
+
+	* tcucodec.c (rundate, procdate): new functions.
+
+	- Release: 1.1.7
+
+2007-12-24  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tcseekread, tcseekwrite): pread and pwrite were to be used.
+
+	- Release: 1.1.6
+
+2007-12-21  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmdbnew, tcmdbput, tcmdbget): concurrency was improved.
+
+	* tcutil.c (tcmapcutfront, tcmdbcutfront): new functions.
+
+	* tchdb.c (tchdbasyncimpl): large deferred buffer was to be flushed.
+
+	* tcumttest.c: new file.
+
+	- Release: 1.1.5
+
+2007-12-19  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tclrand, tcdrand, tcdrandnd): new functions.
+
+	* tchdb.c (tchdbcacheadjust): count checking was removed.
+
+	* tchmttest.c (myrandnd): new function.
+
+	* tcbmttest.c (myrandnd): new function.
+
+	- Release: 1.1.4
+
+2007-12-10  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcglobalmutexlock): the type of the global mutex was changed to rwlock.
+
+	* tchdb.c (tchdbsetmutex, tchdbopenimpl): multiple reading file descriptors were added.
+
+	* tchmttest.c (runtypical, proctypical): reading ratio assignment was added.
+
+	* tcbmttest.c (runtypical, proctypical): reading ratio assignment was added.
+
+	- Release: 1.1.3
+
+2007-12-08  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcmpoolput): mutex for operations was added.
+
+	- Release: 1.1.2
+
+2007-12-08  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcutil.c (tcberencode, tcberdecode): new functions.
+
+	* tcbdb.c (tcbdbleafload): speed was improved.
+
+	- Release: 1.1.1
+
+2007-12-07  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbsetcache): new function.
+
+	* tchmttest.c (procwrite, procread): random mode was added.
+
+	* tcbmttest.c (procwrite, procread): random mode was added.
+
+	- Release: 1.1.0
+
 2007-12-01  Mikio Hirabayashi  <mikio@users.sourceforge.net>
 
 	* tchmgr.c (procget): a bug related to the open omode was fixed.

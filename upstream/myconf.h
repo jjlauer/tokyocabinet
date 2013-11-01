@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * System-dependent configurations of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2008 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -16,6 +16,80 @@
 
 #ifndef _MYCONF_H                        // duplication check
 #define _MYCONF_H
+
+
+
+/*************************************************************************************************
+ * system discrimination
+ *************************************************************************************************/
+
+
+#if defined(__linux__)
+
+#define _SYS_LINUX_
+#define ESTSYSNAME  "Linux"
+
+#elif defined(__FreeBSD__)
+
+#define _SYS_FREEBSD_
+#define ESTSYSNAME  "FreeBSD"
+
+#elif defined(__NetBSD__)
+
+#define _SYS_NETBSD_
+#define ESTSYSNAME  "NetBSD"
+
+#elif defined(__OpenBSD__)
+
+#define _SYS_OPENBSD_
+#define ESTSYSNAME  "OpenBSD"
+
+#elif defined(__sun__)
+
+#define _SYS_SUNOS_
+#define ESTSYSNAME  "SunOS"
+
+#elif defined(__hpux)
+
+#define _SYS_HPUX_
+#define ESTSYSNAME  "HP-UX"
+
+#elif defined(__osf)
+
+#define _SYS_TRU64_
+#define ESTSYSNAME  "Tru64"
+
+#elif defined(_AIX)
+
+#define _SYS_AIX_
+#define ESTSYSNAME  "AIX"
+
+#elif defined(__APPLE__) && defined(__MACH__)
+
+#define _SYS_MACOSX_
+#define ESTSYSNAME  "Mac OS X"
+
+#elif defined(_MSC_VER)
+
+#define _SYS_MSVC_
+#define ESTSYSNAME  "Windows (VC++)"
+
+#elif defined(_WIN32)
+
+#define _SYS_MINGW_
+#define ESTSYSNAME  "Windows (MinGW)"
+
+#elif defined(__CYGWIN__)
+
+#define _SYS_CYGWIN_
+#define ESTSYSNAME  "Windows (Cygwin)"
+
+#else
+
+#define _SYS_GENERIC_
+#define ESTSYSNAME  "Generic"
+
+#endif
 
 
 
@@ -125,16 +199,9 @@ int _tc_dummyfuncv(int a, ...);
 #include <string.h>
 #include <time.h>
 
-#include <wchar.h>
-#include <wctype.h>
-#include <iso646.h>
-
-#include <complex.h>
-#include <fenv.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <tgmath.h>
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -148,6 +215,7 @@ int _tc_dummyfuncv(int a, ...);
 #if TCUSEPTHREAD
 #include <pthread.h>
 #endif
+
 
 
 /*************************************************************************************************
@@ -191,6 +259,11 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 #if ! TCUSEPTHREAD
 
+#define pthread_once_t                   int
+#undef PTHREAD_ONCE_INIT
+#define PTHREAD_ONCE_INIT                0
+#define pthread_once(TC_a, TC_b)         _tc_dummyfuncv((int)(TC_a), (TC_b))
+
 #define pthread_mutexattr_t              int
 #undef PTHREAD_MUTEX_RECURSIVE
 #define PTHREAD_MUTEX_RECURSIVE          0
@@ -200,13 +273,15 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 #define pthread_mutex_t                  int
 #undef PTHREAD_MUTEX_INITIALIZER
-#define PTHREAD_MUTEX_INITIALIZER     0
+#define PTHREAD_MUTEX_INITIALIZER        0
 #define pthread_mutex_init(TC_a, TC_b)   _tc_dummyfuncv((int)(TC_a), (TC_b))
 #define pthread_mutex_destroy(TC_a)      _tc_dummyfuncv((int)(TC_a))
 #define pthread_mutex_lock(TC_a)         _tc_dummyfuncv((int)(TC_a))
 #define pthread_mutex_unlock(TC_a)       _tc_dummyfuncv((int)(TC_a))
 
 #define pthread_rwlock_t                 int
+#undef PTHREAD_RWLOCK_INITIALIZER
+#define PTHREAD_RWLOCK_INITIALIZER       0
 #define pthread_rwlock_init(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a), (TC_b))
 #define pthread_rwlock_destroy(TC_a)     _tc_dummyfuncv((int)(TC_a))
 #define pthread_rwlock_rdlock(TC_a)      _tc_dummyfuncv((int)(TC_a))

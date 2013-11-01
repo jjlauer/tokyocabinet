@@ -1,7 +1,7 @@
-.TH "TCBMTTEST" 1 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCBMTTEST" 1 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tcbmttest \- test cases of the B+ tree database API of Tokyo Cabinet
+tcbmttest \- test cases of the B+ tree database API
 
 .SH DESCRIPTION
 .PP
@@ -9,17 +9,17 @@ The command `\fBtcbmttest\fR' is a utility for facility test and performance tes
 .PP
 .RS
 .br
-\fBtcbmttest write \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
+\fBtcbmttest write \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
 .RS
 Store records with keys of 8 bytes.  They change as `00000001', `00000002'...
 .RE
 .br
-\fBtcbmttest read \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-wb\fR]\fB \fIpath\fB\fR
+\fBtcbmttest read \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-wb\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB\fR
 .RS
 Retrieve all records of the database above.
 .RE
 .br
-\fBtcbmttest remove \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fIpath\fB\fR
+\fBtcbmttest remove \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB\fR
 .RS
 Remove all records of the database above.
 .RE
@@ -29,7 +29,7 @@ Remove all records of the database above.
 Perform updating operations selected at random.
 .RE
 .br
-\fBtcbmttest typical \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-nc\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
+\fBtcbmttest typical \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-nc\fR]\fB \fR[\fB\-rr \fInum\fB\fR]\fB \fIpath\fB \fIrnum\fB \fR[\fB\fIlmemb\fB \fR[\fB\fInmemb\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR]\fB\fR
 .RS
 Perform typical operations selected at random.
 .RE
@@ -48,9 +48,13 @@ Options feature the following.
 .br
 \fB\-nb\fR : enable the option `BDBLCKNB'.
 .br
+\fB\-rnd\fR : select keys at random.
+.br
 \fB\-wb\fR : use the function `tchdbget3' instead of `tchdbget'.
 .br
 \fB\-nc\fR : omit the comparison test.
+.br
+\fB\-rr\fR \fInum\fR : specifiy the ratio of reading operation by percentage.
 .br
 .RE
 .PP

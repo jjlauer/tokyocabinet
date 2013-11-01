@@ -1,7 +1,7 @@
-.TH "TCHMTTEST" 1 "2007-10-24" "Man Page" "Tokyo Cabinet"
+.TH "TCHMTTEST" 1 "2008-01-17" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
-tchmttest \- test cases of the hash database API of Tokyo Cabinet
+tchmttest \- test cases of the hash database API
 
 .SH DESCRIPTION
 .PP
@@ -9,17 +9,17 @@ The command `\fBtchmttest\fR' is a utility for facility test under multi\-thread
 .PP
 .RS
 .br
-\fBtchmttest write \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-as\fR]\fB \fIpath\fB \fItnum\fB \fIrnum\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR
+\fBtchmttest write \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-as\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB \fItnum\fB \fIrnum\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR]\fB\fR
 .RS
 Store records with keys of 8 bytes.  They change as `00000001', `00000002'...
 .RE
 .br
-\fBtchmttest read \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-wb\fR]\fB \fIpath\fB \fItnum\fB\fR
+\fBtchmttest read \fR[\fB\-rc \fInum\fB\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-wb\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB \fItnum\fB\fR
 .RS
 Retrieve all records of the database above.
 .RE
 .br
-\fBtchmttest read \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fIpath\fB \fItnum\fB\fR
+\fBtchmttest remove \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-rnd\fR]\fB \fIpath\fB \fItnum\fB\fR
 .RS
 Remove all records of the database above.
 .RE
@@ -29,7 +29,7 @@ Remove all records of the database above.
 Perform updating operations selected at random.
 .RE
 .br
-\fBtchmttest typical \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-nc\fR]\fB \fIpath\fB \fItnum\fB \fIrnum\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR
+\fBtchmttest typical \fR[\fB\-tl\fR]\fB \fR[\fB\-td\fR|\fB\-tb\fR]\fB \fR[\fB\-rc \fInum\fB\fR]\fB \fR[\fB\-nl\fR|\fB\-nb\fR]\fB \fR[\fB\-nc\fR]\fB \fR[\fB\-rr \fInum\fB\fR]\fB \fIpath\fB \fItnum\fB \fIrnum\fB \fR[\fB\fIbnum\fB \fR[\fB\fIapow\fB \fR[\fB\fIfpow\fB\fR]\fB\fR]\fB\fR
 .RS
 Perform typical operations selected at random.
 .RE
@@ -44,15 +44,21 @@ Options feature the following.
 .br
 \fB\-tb\fR : enable the option `HDBTTCBS'.
 .br
+\fB\-rc\fR \fInum\fR : specify the number of cached records.
+.br
 \fB\-nl\fR : enable the option `HDBNOLCK'.
 .br
 \fB\-nb\fR : enable the option `HDBLCKNB'.
 .br
 \fB\-as\fR : use the function `tchdbputasync' instead of `tchdbput'.
 .br
+\fB\-rnd\fR : select keys at random.
+.br
 \fB\-wb\fR : use the function `tchdbget3' instead of `tchdbget'.
 .br
 \fB\-nc\fR : omit the comparison test.
+.br
+\fB\-rr\fR \fInum\fR : specifiy the ratio of reading operation by percentage.
 .br
 .RE
 .PP
