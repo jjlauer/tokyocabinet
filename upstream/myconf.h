@@ -91,9 +91,16 @@
 #define TCUSEPTHREAD   1
 #endif
 
+#if defined(_MYMICROYIELD)
+#define TCMICROYIELD   1
+#else
+#define TCMICROYIELD   0
+#endif
+
 #define sizeof(a)      ((int)sizeof(a))
 
 int _tc_dummyfunc(void);
+int _tc_dummyfuncv(int a, ...);
 
 
 
@@ -163,9 +170,9 @@ int _tc_dummyfunc(void);
 
 
 enum {
-  _TC_ZMZLIB,
-  _TC_ZMRAW,
-  _TC_ZMGZIP
+  _TCZMZLIB,
+  _TCZMRAW,
+  _TCZMGZIP
 };
 
 
@@ -184,25 +191,32 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 #if ! TCUSEPTHREAD
 
-#define pthread_mutex_t               int
+#define pthread_mutexattr_t              int
+#undef PTHREAD_MUTEX_RECURSIVE
+#define PTHREAD_MUTEX_RECURSIVE          0
+#define pthread_mutexattr_init(TC_a)     _tc_dummyfuncv((int)(TC_a))
+#define pthread_mutexattr_destroy(TC_a)  _tc_dummyfuncv((int)(TC_a))
+#define pthread_mutexattr_settype(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a), (TC_b))
+
+#define pthread_mutex_t                  int
 #undef PTHREAD_MUTEX_INITIALIZER
 #define PTHREAD_MUTEX_INITIALIZER     0
-#define pthread_mutex_init(a, b)      0
-#define pthread_mutex_destroy(a)      0
-#define pthread_mutex_lock(a)         0
-#define pthread_mutex_unlock(a)       0
+#define pthread_mutex_init(TC_a, TC_b)   _tc_dummyfuncv((int)(TC_a), (TC_b))
+#define pthread_mutex_destroy(TC_a)      _tc_dummyfuncv((int)(TC_a))
+#define pthread_mutex_lock(TC_a)         _tc_dummyfuncv((int)(TC_a))
+#define pthread_mutex_unlock(TC_a)       _tc_dummyfuncv((int)(TC_a))
 
-#define pthread_rwlock_t              int
-#define pthread_rwlock_init(a, b)     0
-#define pthread_rwlock_destroy(a)     0
-#define pthread_rwlock_rdlock(a)      0
-#define pthread_rwlock_wrlock(a)      0
-#define pthread_rwlock_unlock(a)      0
+#define pthread_rwlock_t                 int
+#define pthread_rwlock_init(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a), (TC_b))
+#define pthread_rwlock_destroy(TC_a)     _tc_dummyfuncv((int)(TC_a))
+#define pthread_rwlock_rdlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
+#define pthread_rwlock_wrlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
+#define pthread_rwlock_unlock(TC_a)      _tc_dummyfuncv((int)(TC_a))
 
-#define pthread_key_create(a, b)      0
-#define pthread_key_delete(a)         0
-#define pthread_setspecific(a, b)     0
-#define pthread_getspecific(a)        0
+#define pthread_key_create(TC_a, TC_b)   _tc_dummyfuncv((int)(TC_a), (TC_b))
+#define pthread_key_delete(TC_a)         _tc_dummyfuncv((int)(TC_a))
+#define pthread_setspecific(TC_a, TC_b)  _tc_dummyfuncv((int)(TC_a))
+#define pthread_getspecific(TC_a)        _tc_dummyfuncv((int)(TC_a))
 
 #define pthread_create(TC_th, TC_attr, TC_func, TC_arg) \
   (*(TC_th) = 0, (TC_func)(TC_arg), 0)
@@ -212,6 +226,30 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
 
 #endif
 
+#if TCUSEPTHREAD && TCMICROYIELD
+#define TCTESTYIELD() \
+  do { \
+    static uint32_t cnt = 0; \
+    if(((++cnt) & (0x20 - 1)) == 0){ \
+      pthread_yield(); \
+      if(cnt > 0x1000) cnt = (uint32_t)time(NULL) % 0x1000; \
+    } \
+  } while(false)
+#undef assert
+#define assert(TC_expr) \
+  do { \
+    if(!(TC_expr)){ \
+      fprintf(stderr, "assertion failed: %s\n", #TC_expr); \
+      abort(); \
+    } \
+    TCTESTYIELD(); \
+  } while(false)
+#else
+#define TCTESTYIELD() \
+  do { \
+  } while(false);
+#endif
+
 
 
 /*************************************************************************************************
@@ -219,11 +257,11 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
  *************************************************************************************************/
 
 
-#define TC_NUMBUFSIZ   32                // size of a buffer for a number
-#define TC_VNUMBUFSIZ  12                // size of a buffer for variable length number
+#define TCNUMBUFSIZ    32                // size of a buffer for a number
+#define TCVNUMBUFSIZ   12                // size of a buffer for variable length number
 
 /* set a buffer for a variable length number */
-#define TC_SETVNUMBUF(TC_len, TC_buf, TC_num) \
+#define TCSETVNUMBUF(TC_len, TC_buf, TC_num) \
   do { \
     int _TC_num = (TC_num); \
     if(_TC_num == 0){ \
@@ -245,7 +283,7 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
   } while(false)
 
 /* set a buffer for a variable length number of 64-bit */
-#define TC_SETVNUMBUF64(TC_len, TC_buf, TC_num) \
+#define TCSETVNUMBUF64(TC_len, TC_buf, TC_num) \
   do { \
     long long int _TC_num = (TC_num); \
     if(_TC_num == 0){ \
@@ -267,7 +305,7 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
   } while(false)
 
 /* read a variable length buffer */
-#define TC_READVNUMBUF(TC_buf, TC_num, TC_step) \
+#define TCREADVNUMBUF(TC_buf, TC_num, TC_step) \
   do { \
     TC_num = 0; \
     int _TC_base = 1; \
@@ -285,7 +323,7 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
   } while(false)
 
 /* read a variable length buffer */
-#define TC_READVNUMBUF64(TC_buf, TC_num, TC_step) \
+#define TCREADVNUMBUF64(TC_buf, TC_num, TC_step) \
   do { \
     TC_num = 0; \
     long long int _TC_base = 1; \
@@ -300,6 +338,20 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
       _TC_i++; \
     } \
     (TC_step) = _TC_i + 1; \
+  } while(false)
+
+/* Compare keys of two records by lexical order. */
+#define TCCMPLEXICAL(TC_rv, TC_aptr, TC_asiz, TC_bptr, TC_bsiz) \
+  do { \
+    (TC_rv) = 0; \
+    int _TC_min = (TC_asiz) < (TC_bsiz) ? (TC_asiz) : (TC_bsiz); \
+    for(int _TC_i = 0; _TC_i < _TC_min; _TC_i++){ \
+      if(((unsigned char *)(TC_aptr))[_TC_i] != ((unsigned char *)(TC_bptr))[_TC_i]){ \
+        (TC_rv) = ((unsigned char *)(TC_aptr))[_TC_i] - ((unsigned char *)(TC_bptr))[_TC_i]; \
+        break; \
+      } \
+    } \
+    if((TC_rv) == 0) (TC_rv) = (TC_asiz) - (TC_bsiz); \
   } while(false)
 
 

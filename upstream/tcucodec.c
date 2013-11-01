@@ -43,7 +43,7 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt);
 static int proctcbs(const char *ibuf, int isiz, bool dec);
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz);
 static int procxml(const char *ibuf, int isiz, bool dec, bool br);
-static int procconf(void);
+static int procconf(int mode);
 
 
 /* main routine */
@@ -78,18 +78,18 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: popular encoders and decoders\n", g_progname);
+  fprintf(stderr, "%s: popular encoders and decoders of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s url [-d] [-br] [-rs base] file\n", g_progname);
-  fprintf(stderr, "  %s base [-d] file\n", g_progname);
-  fprintf(stderr, "  %s quote [-d] file\n", g_progname);
-  fprintf(stderr, "  %s mime [-d] [-en name] [-q] file\n", g_progname);
-  fprintf(stderr, "  %s pack [-d] [-bwt] file\n", g_progname);
-  fprintf(stderr, "  %s tcbs [-d] file\n", g_progname);
-  fprintf(stderr, "  %s zlib [-d] [-gz] file\n", g_progname);
-  fprintf(stderr, "  %s xml [-d] [-br] file\n", g_progname);
-  fprintf(stderr, "  %s conf\n", g_progname);
+  fprintf(stderr, "  %s url [-d] [-br] [-rs base] [file]\n", g_progname);
+  fprintf(stderr, "  %s base [-d] [file]\n", g_progname);
+  fprintf(stderr, "  %s quote [-d] [file]\n", g_progname);
+  fprintf(stderr, "  %s mime [-d] [-en name] [-q] [file]\n", g_progname);
+  fprintf(stderr, "  %s pack [-d] [-bwt] [file]\n", g_progname);
+  fprintf(stderr, "  %s tcbs [-d] [file]\n", g_progname);
+  fprintf(stderr, "  %s zlib [-d] [-gz] [file]\n", g_progname);
+  fprintf(stderr, "  %s xml [-d] [-br] [file]\n", g_progname);
+  fprintf(stderr, "  %s conf [-v|-i|-l|-p]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -423,7 +423,25 @@ static int runxml(int argc, char **argv){
 
 /* parse arguments of conf command */
 static int runconf(int argc, char **argv){
-  int rv = procconf();
+  int mode = 0;
+  for(int i = 2; i < argc; i++){
+    if(argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-v")){
+        mode = 'v';
+      } else if(!strcmp(argv[i], "-i")){
+        mode = 'i';
+      } else if(!strcmp(argv[i], "-l")){
+        mode = 'l';
+      } else if(!strcmp(argv[i], "-p")){
+        mode = 'p';
+      } else {
+        usage();
+      }
+    } else {
+      usage();
+    }
+  }
+  int rv = procconf(mode);
   return rv;
 }
 
@@ -520,7 +538,7 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
     char *obuf = tcpackdecode(ibuf, isiz, &osiz);
     if(bwt && osiz > 0){
       int idx, step;
-      TC_READVNUMBUF(obuf, idx, step);
+      TCREADVNUMBUF(obuf, idx, step);
       char *tbuf = tcbwtdecode(obuf + step, osiz - step, idx);
       fwrite(tbuf, osiz - step, 1, stdout);
       free(tbuf);
@@ -535,7 +553,7 @@ static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
       tbuf = tcbwtencode(ibuf, isiz, &idx);
       char vnumbuf[sizeof(int)+1];
       int step;
-      TC_SETVNUMBUF(step, vnumbuf, idx);
+      TCSETVNUMBUF(step, vnumbuf, idx);
       tbuf = tcrealloc(tbuf, isiz + step + 1);
       memmove(tbuf + step, tbuf, isiz);
       memcpy(tbuf, vnumbuf, step);
@@ -658,47 +676,64 @@ static int procxml(const char *ibuf, int isiz, bool dec, bool br){
 
 
 /* perform conf command */
-static int procconf(void){
-  printf("myconf(version): %s\n", tcversion);
-  printf("myconf(libver): %d\n", _TC_LIBVER);
-  printf("myconf(formatver): %s\n", _TC_FORMATVER);
-  printf("myconf(prefix): %s\n", _TC_PREFIX);
-  printf("myconf(includedir): %s\n", _TC_INCLUDEDIR);
-  printf("myconf(libdir): %s\n", _TC_LIBDIR);
-  printf("myconf(bindir): %s\n", _TC_BINDIR);
-  printf("myconf(libexecdir): %s\n", _TC_LIBEXECDIR);
-  printf("myconf(bigend): %d\n", TCBIGEND);
-  printf("myconf(usezlib): %d\n", TCUSEZLIB);
-  printf("sizeof(bool): %d\n", sizeof(bool));
-  printf("sizeof(char): %d\n", sizeof(char));
-  printf("sizeof(short): %d\n", sizeof(short));
-  printf("sizeof(int): %d\n", sizeof(int));
-  printf("sizeof(long): %d\n", sizeof(long));
-  printf("sizeof(long long): %d\n", sizeof(long long));
-  printf("sizeof(float): %d\n", sizeof(float));
-  printf("sizeof(double): %d\n", sizeof(double));
-  printf("sizeof(long double): %d\n", sizeof(long double));
-  printf("sizeof(size_t): %d\n", sizeof(size_t));
-  printf("sizeof(time_t): %d\n", sizeof(time_t));
-  printf("sizeof(off_t): %d\n", sizeof(off_t));
-  printf("sizeof(ino_t): %d\n", sizeof(ino_t));
-  printf("sizeof(intptr_t): %d\n", sizeof(intptr_t));
-  printf("sizeof(void *): %d\n", sizeof(void *));
-  printf("macro(CHAR_MAX): %llu\n", (unsigned long long)CHAR_MAX);
-  printf("macro(SHRT_MAX): %llu\n", (unsigned long long)SHRT_MAX);
-  printf("macro(INT_MAX): %llu\n", (unsigned long long)INT_MAX);
-  printf("macro(LONG_MAX): %llu\n", (unsigned long long)LONG_MAX);
-  printf("macro(LLONG_MAX): %llu\n", (unsigned long long)LLONG_MAX);
-  printf("macro(PATH_MAX): %llu\n", (unsigned long long)PATH_MAX);
-  printf("macro(RAND_MAX): %llu\n", (unsigned long long)RAND_MAX);
-  printf("sysconf(_SC_CLK_TCK): %ld\n", sysconf(_SC_CLK_TCK));
-  printf("sysconf(_SC_OPEN_MAX): %ld\n", sysconf(_SC_OPEN_MAX));
-  printf("sysconf(_SC_PAGESIZE): %ld\n", sysconf(_SC_PAGESIZE));
-  struct stat sbuf;
-  if(stat(MYCDIRSTR, &sbuf) == 0){
-    printf("stat(st_uid): %d\n", (int)sbuf.st_uid);
-    printf("stat(st_gid): %d\n", (int)sbuf.st_gid);
-    printf("stat(st_blksize): %d\n", (int)sbuf.st_blksize);
+static int procconf(int mode){
+  switch(mode){
+  case 'v':
+    printf("%s\n", tcversion);
+    break;
+  case 'i':
+    printf("%s\n", _TC_APPINC);
+    break;
+  case 'l':
+    printf("%s\n", _TC_APPLIBS);
+    break;
+  case 'p':
+    printf("%s\n", _TC_BINDIR);
+    break;
+  default:
+    printf("myconf(version): %s\n", tcversion);
+    printf("myconf(libver): %d\n", _TC_LIBVER);
+    printf("myconf(formatver): %s\n", _TC_FORMATVER);
+    printf("myconf(prefix): %s\n", _TC_PREFIX);
+    printf("myconf(includedir): %s\n", _TC_INCLUDEDIR);
+    printf("myconf(libdir): %s\n", _TC_LIBDIR);
+    printf("myconf(bindir): %s\n", _TC_BINDIR);
+    printf("myconf(libexecdir): %s\n", _TC_LIBEXECDIR);
+    printf("myconf(appinc): %s\n", _TC_APPINC);
+    printf("myconf(applibs): %s\n", _TC_APPLIBS);
+    printf("myconf(bigend): %d\n", TCBIGEND);
+    printf("myconf(usezlib): %d\n", TCUSEZLIB);
+    printf("sizeof(bool): %d\n", sizeof(bool));
+    printf("sizeof(char): %d\n", sizeof(char));
+    printf("sizeof(short): %d\n", sizeof(short));
+    printf("sizeof(int): %d\n", sizeof(int));
+    printf("sizeof(long): %d\n", sizeof(long));
+    printf("sizeof(long long): %d\n", sizeof(long long));
+    printf("sizeof(float): %d\n", sizeof(float));
+    printf("sizeof(double): %d\n", sizeof(double));
+    printf("sizeof(long double): %d\n", sizeof(long double));
+    printf("sizeof(size_t): %d\n", sizeof(size_t));
+    printf("sizeof(time_t): %d\n", sizeof(time_t));
+    printf("sizeof(off_t): %d\n", sizeof(off_t));
+    printf("sizeof(ino_t): %d\n", sizeof(ino_t));
+    printf("sizeof(intptr_t): %d\n", sizeof(intptr_t));
+    printf("sizeof(void *): %d\n", sizeof(void *));
+    printf("macro(CHAR_MAX): %llu\n", (unsigned long long)CHAR_MAX);
+    printf("macro(SHRT_MAX): %llu\n", (unsigned long long)SHRT_MAX);
+    printf("macro(INT_MAX): %llu\n", (unsigned long long)INT_MAX);
+    printf("macro(LONG_MAX): %llu\n", (unsigned long long)LONG_MAX);
+    printf("macro(LLONG_MAX): %llu\n", (unsigned long long)LLONG_MAX);
+    printf("macro(PATH_MAX): %llu\n", (unsigned long long)PATH_MAX);
+    printf("macro(RAND_MAX): %llu\n", (unsigned long long)RAND_MAX);
+    printf("sysconf(_SC_CLK_TCK): %ld\n", sysconf(_SC_CLK_TCK));
+    printf("sysconf(_SC_OPEN_MAX): %ld\n", sysconf(_SC_OPEN_MAX));
+    printf("sysconf(_SC_PAGESIZE): %ld\n", sysconf(_SC_PAGESIZE));
+    struct stat sbuf;
+    if(stat(MYCDIRSTR, &sbuf) == 0){
+      printf("stat(st_uid): %d\n", (int)sbuf.st_uid);
+      printf("stat(st_gid): %d\n", (int)sbuf.st_gid);
+      printf("stat(st_blksize): %d\n", (int)sbuf.st_blksize);
+    }
   }
   return 0;
 }

@@ -440,10 +440,10 @@ static int procmisc(int rnum){
         for(int32_t num = j - 1; num <= j + 1; num++){
           int32_t nnum = TCHTOIL(num);
           if(num != TCITOHL(nnum)) err = true;
-          char buf[TC_VNUMBUFSIZ];
+          char buf[TCVNUMBUFSIZ];
           int step, nstep;
-          TC_SETVNUMBUF(step, buf, num);
-          TC_READVNUMBUF(buf, nnum, nstep);
+          TCSETVNUMBUF(step, buf, num);
+          TCREADVNUMBUF(buf, nnum, nstep);
           if(num != nnum || step != nstep) err = true;
         }
       }
@@ -451,10 +451,10 @@ static int procmisc(int rnum){
         for(int64_t num = j - 1; num <= j + 1; num++){
           int64_t nnum = TCHTOILL(num);
           if(num != TCITOHLL(nnum)) err = true;
-          char buf[TC_VNUMBUFSIZ];
+          char buf[TCVNUMBUFSIZ];
           int step, nstep;
-          TC_SETVNUMBUF64(step, buf, num);
-          TC_READVNUMBUF64(buf, nnum, nstep);
+          TCSETVNUMBUF64(step, buf, num);
+          TCREADVNUMBUF64(buf, nnum, nstep);
           if(num != nnum || step != nstep) err = true;
         }
       }

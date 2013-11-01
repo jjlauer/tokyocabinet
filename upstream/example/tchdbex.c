@@ -1,7 +1,6 @@
 #include <tcutil.h>
 #include <tchdb.h>
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
 

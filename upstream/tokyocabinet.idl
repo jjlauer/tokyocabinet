@@ -1,0 +1,156 @@
+/*************************************************************************************************
+ * IDL for bindings of scripting languages
+ *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
+ * This file is part of Tokyo Cabinet.
+ * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
+ * the GNU Lesser General Public License as published by the Free Software Foundation; either
+ * version 2.1 of the License or any later version.  Tokyo Cabinet is distributed in the hope
+ * that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ * You should have received a copy of the GNU Lesser General Public License along with Tokyo
+ * Cabinet; if not, write to the Free Software Foundation, Inc., 59 Temple Place, Suite 330,
+ * Boston, MA 02111-1307 USA.
+ *************************************************************************************************/
+
+
+/**
+ * namespace of Tokyo Cabinet
+ */
+module TokyoCabinet {
+  //----------------------------------------------------------------
+  // list of strings (substituted for by the native mechanism).
+  //----------------------------------------------------------------
+  interface List {
+    string get(in long index);
+  };
+  //----------------------------------------------------------------
+  // the error codes
+  //----------------------------------------------------------------
+  interface ECODE {
+    const long TCESUCCESS = 0;
+    const long TCETHREAD = 1;
+    const long TCEINVALID = 2;
+    const long TCENOFILE = 3;
+    const long TCENOPERM = 4;
+    const long TCEMETA = 5;
+    const long TCERHEAD = 6;
+    const long TCEOPEN = 7;
+    const long TCECLOSE = 8;
+    const long TCETRUNC = 9;
+    const long TCESYNC = 10;
+    const long TCESTAT = 11;
+    const long TCESEEK = 12;
+    const long TCEREAD = 13;
+    const long TCEWRITE = 14;
+    const long TCEMMAP = 15;
+    const long TCELOCK = 16;
+    const long TCEUNLINK = 17;
+    const long TCERENAME = 18;
+    const long TCEMKDIR = 19;
+    const long TCERMDIR = 20;
+    const long TCEKEEP = 21;
+    const long TCENOREC = 22;
+    const long TCEMISC = 9999;
+    string errmsg(in long ecode);
+  };
+  //----------------------------------------------------------------
+  // the hash database API
+  //----------------------------------------------------------------
+  interface HDB :ECODE {
+    const long TLARGE = 1 << 0;
+    const long TDEFLATE = 1 << 1;
+    const long TTCBS = 1 << 2;
+    const long OREADER = 1 << 0;
+    const long OWRITER = 1 << 1;
+    const long OCREAT = 1 << 2;
+    const long OTRUNC = 1 << 3;
+    const long ONOLCK = 1 << 4;
+    const long OLCKNB = 1 << 5;
+    long ecode();
+    boolean tune(in long long bnum, in long apow, in long fpow, in long opts);
+    boolean open(in string path, in long omode);
+    boolean close();
+    boolean put(in string key, in string value);
+    boolean putkeep(in string key, in string value);
+    boolean putcat(in string key, in string value);
+    boolean putasync(in string key, in string value);
+    boolean out(in string key);
+    string get(in string key);
+    long vsiz(in string key);
+    boolean iterinit();
+    string iternext();
+    boolean sync();
+    boolean optimize(in long long bnum, in long apow, in long fpow, in long opts);
+    boolean vanish();
+    boolean copy(in string path);
+    string path();
+    long long rnum();
+    long long fsiz();
+  };
+  //----------------------------------------------------------------
+  // the B+ tree database API
+  //----------------------------------------------------------------
+  interface BDB :ECODE {
+    const long TLARGE = 1 << 0;
+    const long TDEFLATE = 1 << 1;
+    const long TTCBS = 1 << 2;
+    const long OREADER = 1 << 0;
+    const long OWRITER = 1 << 1;
+    const long OCREAT = 1 << 2;
+    const long OTRUNC = 1 << 3;
+    const long ONOLCK = 1 << 4;
+    const long OLCKNB = 1 << 5;
+    long ecode();
+    boolean tune(in long lmemb, in long nmemb,
+                 in long long bnum, in long apow, in long fpow, in long opts);
+    boolean setcache(in long lcnum, in long ncnum);
+    boolean open(in string path, in long omode);
+    boolean close();
+    boolean put(in string key, in string value);
+    boolean putkeep(in string key, in string value);
+    boolean putcat(in string key, in string value);
+    boolean putdup(in string key, in string value);
+    boolean putlist(in string key, in List values);
+    boolean out(in string key);
+    boolean outlist(in string key);
+    string get(in string key);
+    List getlist(in string key);
+    long vnum(in string key);
+    long vsiz(in string key);
+    List range(in string bkey, in boolean binc,
+               in string ekey, in boolean einc, in long long max);
+    boolean sync();
+    boolean optimize(in long lmemb, in long nmemb,
+                     in long long bnum, in long apow, in long fpow, in long opts);
+    boolean vanish();
+    boolean copy(in string path);
+    boolean tranbegin();
+    boolean trancommit();
+    boolean tranabort();
+    string path();
+    long long rnum();
+    long long fsiz();
+  };
+  //----------------------------------------------------------------
+  // the B+ tree cursor API
+  //----------------------------------------------------------------
+  interface BDBCUR {
+    const long CPCURRENT = 0;
+    const long CPBEFORE = 1;
+    const long CPAFTER = 2;
+    boolean first();
+    boolean last();
+    boolean jump(in string key);
+    boolean prev();
+    boolean next();
+    boolean put(in string value, in long cpmode);
+    boolean out();
+    string key();
+    string val();
+  };
+};
+
+
+
+/* END OF FILE */

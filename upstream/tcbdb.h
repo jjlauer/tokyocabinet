@@ -17,6 +17,15 @@
 #ifndef _TCBDB_H                         /* duplication check */
 #define _TCBDB_H
 
+#if defined(__cplusplus)
+#define __TCBDB_CLINKAGEBEGIN extern "C" {
+#define __TCBDB_CLINKAGEEND }
+#else
+#define __TCBDB_CLINKAGEBEGIN
+#define __TCBDB_CLINKAGEEND
+#endif
+__TCBDB_CLINKAGEBEGIN
+
 
 #include <stdlib.h>
 #include <time.h>
@@ -65,6 +74,7 @@ typedef struct {                         /* type of structure for a B+ tree data
   void *cmpop;                           /* opaque object for the comparison function */
   uint32_t lcnum;                        /* max number of cached leaves */
   uint32_t ncnum;                        /* max number of cached nodes */
+  uint32_t lsmax;                        /* max size of each leaf */
   uint64_t *hist;                        /* history array of visited nodes */
   int hnum;                              /* number of element of the history array */
   uint64_t hleaf;                        /* ID number of the leaf referred by the history */
@@ -99,11 +109,6 @@ enum {                                   /* enumeration for open modes */
   BDBOLCKNB = 1 << 5                     /* lock without blocking */
 };
 
-enum {                                   /* enumeration for transaction locking modes */
-  BDBTLSHAR,                             /* shared locking */
-  BDBTLEXCL                              /* exclusive locking */
-};
-
 typedef struct {                         /* type of structure for a B+ tree cursor */
   TCBDB *bdb;                            /* database object */
   uint64_t id;                           /* ID number of the leaf */
@@ -119,7 +124,8 @@ enum {                                   /* enumeration for cursor put mode */
 
 
 /* Get the message string corresponding to an error code.
-   `ecode' specifies the error code. */
+   `ecode' specifies the error code.
+   The return value is the message string of the error code. */
 const char *tcbdberrmsg(int ecode);
 
 
@@ -137,7 +143,16 @@ void tcbdbdel(TCBDB *bdb);
 
 /* Get the last happened error code of a B+ tree database object.
    `bdb' specifies the B+ tree database object.
-   The return value is the last happened error code. */
+   The return value is the last happened error code.
+   The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading
+   error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no
+   permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN'
+   for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync
+   error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error,
+   `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK'
+   for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for
+   rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for
+   miscellaneous error. */
 int tcbdbecode(TCBDB *bdb);
 
 
@@ -154,9 +169,12 @@ bool tcbdbsetmutex(TCBDB *bdb);
    `cmp' specifies the pointer to the custom comparison function.
    `cmpop' specifies an arbitrary pointer to be given as a parameter of the comparison function.
    If it is not needed, `NULL' can be specified.
-   The default comparison function compares keys of two records by lexical order.  Note that the
-   custom comparison function should be set before the database is opened and should be set
-   every time the database is being opened. */
+   If successful, the return value is true, else, it is false.
+   The default comparison function compares keys of two records by lexical order.  The functions
+   `tcbdbcmplexical' (dafault), `tcbdbcmpdecimal', `tcbdbcmpint32', and `tcbdbcmpint64' are
+   built-in.  Note that the comparison function should be set before the database is opened.
+   Moreover, user-defined comparison functions should be set every time the database is being
+   opened. */
 bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
 
 
@@ -167,7 +185,8 @@ bool tcbdbsetcmpfunc(TCBDB *bdb, BDBCMP cmp, void *cmpop);
    `nmemb' specifies the number of members in each non-leaf page.  If it is not more than 0, the
    default value is specified.  The default value is 256.
    `bnum' specifies the number of elements of the bucket array.  If it is not more than 0, the
-   default value is specified.  The default value is 16381.
+   default value is specified.  The default value is 16381.  Suggested size of the bucket array
+   is about from 1 to 4 times of the number of all pages to be stored.
    `apow' specifies the size of record alignment by power of 2.  If it is negative, the default
    value is specified.  The default value is 8 standing for 2^8=256.
    `fpow' specifies the maximum number of elements of the free block pool by power of 2.  If it
@@ -185,9 +204,9 @@ bool tcbdbtune(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
 /* Set the caching parameters of a B+ tree database object.
    `bdb' specifies the B+ tree database object which is not opened.
    `lcnum' specifies the maximum number of leaf nodes to be cached.  If it is not more than 0,
-   the default value is specified.
+   the default value is specified.  The default value is 1024.
    `ncnum' specifies the maximum number of non-leaf nodes to be cached.  If it is not more than 0,
-   the default value is specified.
+   the default value is specified.  The default value is 512.
    If successful, the return value is true, else, it is false.
    Note that the tuning parameters of the database should be set before the database is opened. */
 bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum);
@@ -201,7 +220,7 @@ bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum);
    means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database
    regardless if one exists.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by
    bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or
-   `BDBOLOCKNB', which means locking is performed without blocking.
+   `BDBOLCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
 bool tcbdbopen(TCBDB *bdb, const char *path, int omode);
 
@@ -229,7 +248,6 @@ bool tcbdbput(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz
    `bdb' specifies the B+ tree database object connected as a writer.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
-   `over' specifies whether the value of the duplicated record is overwritten or not.
    If successful, the return value is true, else, it is false.
    If a record with the same key exists in the database, it is overwritten. */
 bool tcbdbput2(TCBDB *bdb, const char *kstr, const char *vstr);
@@ -275,7 +293,7 @@ bool tcbdbputcat(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int v
 bool tcbdbputcat2(TCBDB *bdb, const char *kstr, const char *vstr);
 
 
-/* Store a new record into a B+ tree database object with allowing duplication of keys.
+/* Store a record into a B+ tree database object with allowing duplication of keys.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
@@ -287,7 +305,7 @@ bool tcbdbputcat2(TCBDB *bdb, const char *kstr, const char *vstr);
 bool tcbdbputdup(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
 
 
-/* Store a new string record into a B+ tree database object with allowing duplication of keys.
+/* Store a string record into a B+ tree database object with allowing duplication of keys.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
@@ -297,12 +315,23 @@ bool tcbdbputdup(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int v
 bool tcbdbputdup2(TCBDB *bdb, const char *kstr, const char *vstr);
 
 
+/* Store records into a B+ tree database object with allowing duplication of keys.
+   `bdb' specifies the B+ tree database object connected as a writer.
+   `kbuf' specifies the pointer to the region of the common key.
+   `ksiz' specifies the size of the region of the common key.
+   `vals' specifies a list object containing values.
+   If successful, the return value is true, else, it is false.
+   If a record with the same key exists in the database, the new records are placed after the
+   existing one. */
+bool tcbdbputdup3(TCBDB *bdb, const void *kbuf, int ksiz, const TCLIST *vals);
+
+
 /* Remove a record of a B+ tree database object.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
    If successful, the return value is true, else, it is false.
-   If the key of duplicated records is specified, the value of the first record is selected. */
+   If the key of duplicated records is specified, the first one is selected. */
 bool tcbdbout(TCBDB *bdb, const void *kbuf, int ksiz);
 
 
@@ -310,7 +339,7 @@ bool tcbdbout(TCBDB *bdb, const void *kbuf, int ksiz);
    `bdb' specifies the B+ tree database object connected as a writer.
    `kstr' specifies the string of the key.
    If successful, the return value is true, else, it is false.
-   If the key of duplicated records is specified, the value of the first record is selected. */
+   If the key of duplicated records is specified, the first one is selected. */
 bool tcbdbout2(TCBDB *bdb, const char *kstr);
 
 
@@ -331,11 +360,11 @@ bool tcbdbout3(TCBDB *bdb, const void *kbuf, int ksiz);
    value is assigned.
    If successful, the return value is the pointer to the region of the value of the corresponding
    record.  `NULL' is returned if no record corresponds.
-   If the key of duplicated records is specified, the value of the first record is selected.
-   Because an additional zero code is appended at the end of the region of the return value,
-   the return value can be treated as a character string.  Because the region of the return
-   value is allocated with the `malloc' call, it should be released with the `free' call when
-   it is no longer in use. */
+   If the key of duplicated records is specified, the first one is selected.  Because an
+   additional zero code is appended at the end of the region of the return value, the return
+   value can be treated as a character string.  Because the region of the return value is
+   allocated with the `malloc' call, it should be released with the `free' call when it is no
+   longer in use. */
 void *tcbdbget(TCBDB *bdb, const void *kbuf, int ksiz, int *sp);
 
 
@@ -344,9 +373,9 @@ void *tcbdbget(TCBDB *bdb, const void *kbuf, int ksiz, int *sp);
    `kstr' specifies the string of the key.
    If successful, the return value is the string of the value of the corresponding record.
    `NULL' is returned if no record corresponds.
-   If the key of duplicated records is specified, the value of the first record is selected.
-   Because the region of the return value is allocated with the `malloc' call, it should be
-   released with the `free' call when it is no longer in use. */
+   If the key of duplicated records is specified, the first one is selected.  Because the region
+   of the return value is allocated with the `malloc' call, it should be released with the `free'
+   call when it is no longer in use. */
 char *tcbdbget2(TCBDB *bdb, const char *kstr);
 
 
@@ -358,11 +387,11 @@ char *tcbdbget2(TCBDB *bdb, const char *kstr);
    value is assigned.
    If successful, the return value is the pointer to the region of the value of the corresponding
    record.  `NULL' is returned if no record corresponds.
-   If the key of duplicated records is specified, the value of the first record is selected.
-   Because an additional zero code is appended at the end of the region of the return value,
-   the return value can be treated as a character string.  Because the region of the return value
-   is volatile and it may be spoiled by another operation of the database, the data should be
-   copied into another involatile buffer immediately. */
+   If the key of duplicated records is specified, the first one is selected.  Because an
+   additional zero code is appended at the end of the region of the return value, the return
+   value can be treated as a character string.  Because the region of the return value is
+   volatile and it may be spoiled by another operation of the database, the data should be copied
+   into another involatile buffer immediately. */
 const void *tcbdbget3(TCBDB *bdb, const void *kbuf, int ksiz, int *sp);
 
 
@@ -385,14 +414,80 @@ TCLIST *tcbdbget4(TCBDB *bdb, const void *kbuf, int ksiz);
 int tcbdbvnum(TCBDB *bdb, const void *kbuf, int ksiz);
 
 
+/* Get the number of records corresponding a string key in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is the number of the corresponding records, else, it is 0. */
+int tcbdbvnum2(TCBDB *bdb, const char *kstr);
+
+
 /* Get the size of the value of a record in a B+ tree database object.
    `bdb' specifies the B+ tree database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
    If successful, the return value is the size of the value of the corresponding record, else,
    it is -1.
-   If the key of duplicated records is specified, the value of the first record is selected. */
+   If the key of duplicated records is specified, the first one is selected. */
 int tcbdbvsiz(TCBDB *bdb, const void *kbuf, int ksiz);
+
+
+/* Get the size of the value of a string record in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is the size of the value of the corresponding record, else,
+   it is -1.
+   If the key of duplicated records is specified, the first one is selected. */
+int tcbdbvsiz2(TCBDB *bdb, const char *kstr);
+
+
+/* Get keys of ranged records in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `bkbuf' specifies the pointer to the region of the key of the beginning border.  If it is
+   `NULL', the first record is specified.
+   `bksiz' specifies the size of the region of the beginning key.
+   `binc' specifies whether the beginning border is inclusive or not.
+   `ekbuf' specifies the pointer to the region of the key of the ending border.  If it is `NULL',
+   the last record is specified.
+   `eksiz' specifies the size of the region of the ending key.
+   `einc' specifies whether the ending border is inclusive or not.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the values of the corresponding records.  This function
+   does never fail and return an empty list even if no record corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should
+   be deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcbdbrange(TCBDB *bdb, const void *bkbuf, int bksiz, bool binc,
+                   const void *ekbuf, int eksiz, bool einc, int max);
+
+
+/* Get string keys of ranged records in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `bkstr' specifies the string of the key of the beginning border.  If it is `NULL', the first
+   record is specified.
+   `binc' specifies whether the beginning border is inclusive or not.
+   `ekstr' specifies the string of the key of the ending border.  If it is `NULL', the last
+   record is specified.
+   `einc' specifies whether the ending border is inclusive or not.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the values of the corresponding records.  This function
+   does never fail and return an empty list even if no record corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should
+   be deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcbdbrange2(TCBDB *bdb, const char *bkstr, bool binc,
+                    const char *ekstr, bool einc, int max);
+
+
+/* Get forward matching keys in a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `prefix' specifies the prefix of the corresponding keys.
+   `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
+   specified.
+   The return value is a list object of the values of the corresponding records.  This function
+   does never fail and return an empty list even if no record corresponds.
+   Because the object of the return value is created with the function `tclistnew', it should
+   be deleted with the function `tclistdel' when it is no longer in use. */
+TCLIST *tcbdbrange3(TCBDB *bdb, const char *prefix, int max);
 
 
 /* Synchronize updated contents of a B+ tree database object with the file and the device.
@@ -409,7 +504,7 @@ bool tcbdbsync(TCBDB *bdb);
    `nmemb' specifies the number of members in each non-leaf page.  If it is not more than 0, the
    current setting is not changed.
    `bnum' specifies the number of elements of the bucket array.  If it is not more than 0, the
-   current setting is not changed.
+   default value is specified.  The default value is two times of the number of pages.
    `apow' specifies the size of record alignment by power of 2.  If it is negative, the current
    setting is not changed.
    `fpow' specifies the maximum number of elements of the free block pool by power of 2.  If it
@@ -417,7 +512,7 @@ bool tcbdbsync(TCBDB *bdb);
    `opts' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `BDBTDEFLATE' specifies that each record
    is compressed with Deflate encoding, `BDBTTCBS' specifies that each page is compressed with
-   TCBS encoding.  If it is `UINT8_MAX', the default setting is not changed.
+   TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
    If successful, the return value is true, else, it is false.
    This function is useful to reduce the size of the database file with data fragmentation by
    successive updating. */
@@ -425,12 +520,31 @@ bool tcbdboptimize(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
                    int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
 
 
+/* Remove all records of a B+ tree database object.
+   `bdb' specifies the B+ tree database object connected as a writer.
+   If successful, the return value is true, else, it is false. */
+bool tcbdbvanish(TCBDB *bdb);
+
+
+/* Copy the database file of a B+ tree database object.
+   `bdb' specifies the B+ tree database object.
+   `path' specifies the path of the destination file.  If it begins with `@', the trailing
+   substring is executed as a command line.
+   If successful, the return value is true, else, it is false.  False is returned if the executed
+   command returns non-zero code.
+   The database file is assured to be kept synchronized and not modified while the copying or
+   executing operation is in progress.  So, this function is useful to create a backup file of
+   the database file. */
+bool tcbdbcopy(TCBDB *bdb, const char *path);
+
+
 /* Begin the transaction of a B+ tree database object.
    `bdb' specifies the B+ tree database object connected as a writer.
    If successful, the return value is true, else, it is false.
    The database is locked by the thread while the transaction so that only one transaction can be
    activated with a database object at the same time.  Thus, the serializable isolation level is
-   assumed if every database operation is performed in the transaction. */
+   assumed if every database operation is performed in the transaction.  If the database is
+   closed during transaction, the transaction is aborted implicitly. */
 bool tcbdbtranbegin(TCBDB *bdb);
 
 
@@ -758,6 +872,15 @@ char *tcbdbopaque(TCBDB *bdb);
 uint64_t tcbdbbnumused(TCBDB *bdb);
 
 
+/* Set the maximum size of each leaf node.
+   `bdb' specifies the B+ tree database object which is not opened.
+   `lsmax' specifies the maximum size of each leaf node.  If it is not more than 0, the maximum
+   size is unlimited.
+   If successful, the return value is true, else, it is false.
+   Note that the tuning parameters of the database should be set before the database is opened. */
+bool tcbdbsetlsmax(TCBDB *bdb, uint32_t lsmax);
+
+
 /* Store a new record into a B+ tree database object with backward duplication.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kbuf' specifies the pointer to the region of the key.
@@ -846,6 +969,7 @@ int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *
 
 
 
+__TCBDB_CLINKAGEEND
 #endif                                   /* duplication check */
 
 

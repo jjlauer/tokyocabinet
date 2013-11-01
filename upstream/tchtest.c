@@ -1034,6 +1034,10 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     eprint(hdb, "tchdbsync");
     err = true;
   }
+  if(!tchdbvanish(hdb)){
+    eprint(hdb, "tchdbvanish");
+    err = true;
+  }
   iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
   iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
   mprint(hdb);
@@ -1270,6 +1274,19 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
         err = true;
       }
     } else if(i == rnum / 4){
+      char *npath = tcsprintf("%s-tmp", path);
+      if(!tchdbcopy(hdb, npath)){
+        eprint(hdb, "tchdbcopy");
+        err = true;
+      }
+      TCHDB *nhdb = tchdbnew();
+      if(!tchdbopen(nhdb, npath, HDBOREADER | omode)){
+        eprint(nhdb, "tchdbopen");
+        err = true;
+      }
+      tchdbdel(nhdb);
+      unlink(npath);
+      free(npath);
       if(!tchdboptimize(hdb, rnum / 50, -1, -1, -1)){
         eprint(hdb, "tchdboptimize");
         err = true;

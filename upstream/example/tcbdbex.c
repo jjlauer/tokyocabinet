@@ -1,9 +1,7 @@
 #include <tcutil.h>
 #include <tchdb.h>
 #include <tcbdb.h>
-#include <tchdb.h>
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -49,9 +47,6 @@ int main(int argc, char **argv){
     if(value){
       printf("%s:%s\n", key, value);
       free(value);
-    } else {
-      ecode = tcbdbecode(bdb);
-      fprintf(stderr, "get error: %s\n", tcbdberrmsg(ecode));
     }
     free(key);
     tcbdbcurnext(cur);

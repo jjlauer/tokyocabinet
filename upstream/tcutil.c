@@ -51,7 +51,7 @@ void *tccalloc(size_t nmemb, size_t size){
 
 /* Re-allocate a region on memory. */
 void *tcrealloc(void *ptr, size_t size){
-  assert(size > 0);
+  assert(size >= 0 && size < INT_MAX);
   char *p = realloc(ptr, size);
   if(!p) tcmyfatal("out of memory");
   return p;
@@ -61,7 +61,8 @@ void *tcrealloc(void *ptr, size_t size){
 /* Duplicate a region on memory. */
 void *tcmemdup(const void *ptr, size_t size){
   assert(ptr && size >= 0);
-  char *p = tcmalloc(size + 1);
+  char *p;
+  TCMALLOC(p, size + 1);
   memcpy(p, ptr, size);
   p[size] = '\0';
   return p;
@@ -72,7 +73,8 @@ void *tcmemdup(const void *ptr, size_t size){
 char *tcstrdup(const void *str){
   assert(str);
   int size = strlen(str);
-  char *p = tcmalloc(size + 1);
+  char *p;
+  TCMALLOC(p, size + 1);
   memcpy(p, str, size);
   p[size] = '\0';
   return p;
@@ -91,7 +93,7 @@ void tcfree(void *ptr){
  *************************************************************************************************/
 
 
-#define TC_XSTRUNIT    12                // allocation unit size of an extensible string
+#define TCXSTRUNIT     12                // allocation unit size of an extensible string
 
 
 /* private function prototypes */
@@ -100,10 +102,11 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap);
 
 /* Create an extensible string object. */
 TCXSTR *tcxstrnew(void){
-  TCXSTR *xstr = tcmalloc(sizeof(*xstr));
-  xstr->ptr = tcmalloc(TC_XSTRUNIT);
+  TCXSTR *xstr;
+  TCMALLOC(xstr, sizeof(*xstr));
+  TCMALLOC(xstr->ptr, TCXSTRUNIT);
   xstr->size = 0;
-  xstr->asize = TC_XSTRUNIT;
+  xstr->asize = TCXSTRUNIT;
   xstr->ptr[0] = '\0';
   return xstr;
 }
@@ -113,10 +116,10 @@ TCXSTR *tcxstrnew(void){
 TCXSTR *tcxstrnew2(const char *str){
   assert(str);
   TCXSTR *xstr;
-  xstr = tcmalloc(sizeof(*xstr));
+  TCMALLOC(xstr, sizeof(*xstr));
   int size = strlen(str);
-  int asize = tclmax(size + 1, TC_XSTRUNIT);
-  xstr->ptr = tcmalloc(asize);
+  int asize = tclmax(size + 1, TCXSTRUNIT);
+  TCMALLOC(xstr->ptr, asize);
   xstr->size = size;
   xstr->asize = asize;
   memcpy(xstr->ptr, str, size + 1);
@@ -127,9 +130,10 @@ TCXSTR *tcxstrnew2(const char *str){
 /* Create an extensible string object with the initial allocation size. */
 TCXSTR *tcxstrnew3(int asiz){
   assert(asiz >= 0);
-  asiz = tclmax(asiz, TC_XSTRUNIT);
-  TCXSTR *xstr = tcmalloc(sizeof(*xstr));
-  xstr->ptr = tcmalloc(asiz);
+  asiz = tclmax(asiz, TCXSTRUNIT);
+  TCXSTR *xstr;
+  TCMALLOC(xstr, sizeof(*xstr));
+  TCMALLOC(xstr->ptr, asiz);
   xstr->size = 0;
   xstr->asize = asiz;
   xstr->ptr[0] = '\0';
@@ -141,9 +145,9 @@ TCXSTR *tcxstrnew3(int asiz){
 TCXSTR *tcxstrdup(const TCXSTR *xstr){
   assert(xstr);
   TCXSTR *nxstr;
-  nxstr = tcmalloc(sizeof(*nxstr));
-  int asize = tclmax(xstr->size + 1, TC_XSTRUNIT);
-  nxstr->ptr = tcmalloc(asize);
+  TCMALLOC(nxstr, sizeof(*nxstr));
+  int asize = tclmax(xstr->size + 1, TCXSTRUNIT);
+  TCMALLOC(nxstr->ptr, asize);
   nxstr->size = xstr->size;
   nxstr->asize = asize;
   memcpy(nxstr->ptr, xstr->ptr, xstr->size + 1);
@@ -168,7 +172,7 @@ void tcxstrcat(TCXSTR *xstr, const void *ptr, int size){
       xstr->asize *= 2;
       if(xstr->asize < nsize) xstr->asize = nsize;
     }
-    xstr->ptr = tcrealloc(xstr->ptr, xstr->asize);
+    TCREALLOC(xstr->ptr, xstr->ptr, xstr->asize);
   }
   memcpy(xstr->ptr + xstr->size, ptr, size);
   xstr->size += size;
@@ -186,7 +190,7 @@ void tcxstrcat2(TCXSTR *xstr, const char *str){
       xstr->asize *= 2;
       if(xstr->asize < nsize) xstr->asize = nsize;
     }
-    xstr->ptr = tcrealloc(xstr->ptr, xstr->asize);
+    TCREALLOC(xstr->ptr, xstr->ptr, xstr->asize);
   }
   memcpy(xstr->ptr + xstr->size, str, size + 1);
   xstr->size += size;
@@ -227,8 +231,9 @@ void *tcxstrtomalloc(TCXSTR *xstr){
 
 /* Create an extensible string object from an allocated region. */
 TCXSTR *tcxstrfrommalloc(void *ptr, int size){
-  TCXSTR *xstr = tcmalloc(sizeof(*xstr));
-  xstr->ptr = tcrealloc(ptr, size + 1);
+  TCXSTR *xstr;
+  TCMALLOC(xstr, sizeof(*xstr));
+  TCREALLOC(xstr->ptr, ptr, size + 1);
   xstr->ptr[size] = '\0';
   xstr->size = size;
   xstr->asize = size;
@@ -263,20 +268,20 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
   assert(xstr && format);
   while(*format != '\0'){
     if(*format == '%'){
-      char cbuf[TC_NUMBUFSIZ];
+      char cbuf[TCNUMBUFSIZ];
       cbuf[0] = '%';
       int cblen = 1;
       int lnum = 0;
       format++;
       while(strchr("0123456789 .+-hlLz", *format) && *format != '\0' &&
-            cblen < TC_NUMBUFSIZ - 1){
+            cblen < TCNUMBUFSIZ - 1){
         if(*format == 'l' || *format == 'L') lnum++;
         cbuf[cblen++] = *(format++);
       }
       cbuf[cblen++] = *format;
       cbuf[cblen] = '\0';
       int tlen;
-      char *tmp, tbuf[TC_NUMBUFSIZ*2];
+      char *tmp, tbuf[TCNUMBUFSIZ*2];
       switch(*format){
       case 's':
         tmp = va_arg(ap, char *);
@@ -285,7 +290,7 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
         break;
       case 'd':
         tlen = sprintf(tbuf, cbuf, va_arg(ap, int));
-        tcxstrcat(xstr, tbuf, tlen);
+        TCXSTRCAT(xstr, tbuf, tlen);
         break;
       case 'o': case 'u': case 'x': case 'X': case 'c':
         if(lnum >= 2){
@@ -295,7 +300,7 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
         } else {
           tlen = sprintf(tbuf, cbuf, va_arg(ap, unsigned int));
         }
-        tcxstrcat(xstr, tbuf, tlen);
+        TCXSTRCAT(xstr, tbuf, tlen);
         break;
       case 'e': case 'E': case 'f': case 'g': case 'G':
         if(lnum >= 1){
@@ -303,20 +308,20 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
         } else {
           tlen = sprintf(tbuf, cbuf, va_arg(ap, double));
         }
-        tcxstrcat(xstr, tbuf, tlen);
+        TCXSTRCAT(xstr, tbuf, tlen);
         break;
       case '@':
         tmp = va_arg(ap, char *);
         if(!tmp) tmp = "(null)";
         while(*tmp){
           switch(*tmp){
-          case '&': tcxstrcat(xstr, "&amp;", 5); break;
-          case '<': tcxstrcat(xstr, "&lt;", 4); break;
-          case '>': tcxstrcat(xstr, "&gt;", 4); break;
-          case '"': tcxstrcat(xstr, "&quot;", 6); break;
+          case '&': TCXSTRCAT(xstr, "&amp;", 5); break;
+          case '<': TCXSTRCAT(xstr, "&lt;", 4); break;
+          case '>': TCXSTRCAT(xstr, "&gt;", 4); break;
+          case '"': TCXSTRCAT(xstr, "&quot;", 6); break;
           default:
             if(!((*tmp >= 0 && *tmp <= 0x8) || (*tmp >= 0x0e && *tmp <= 0x1f)))
-              tcxstrcat(xstr, tmp, 1);
+              TCXSTRCAT(xstr, tmp, 1);
             break;
           }
           tmp++;
@@ -329,20 +334,20 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
           unsigned char c = *(unsigned char *)tmp;
           if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
              (c >= '0' && c <= '9') || (c != '\0' && strchr("_-.", c))){
-            tcxstrcat(xstr, tmp, 1);
+            TCXSTRCAT(xstr, tmp, 1);
           } else {
             tlen = sprintf(tbuf, "%%%02X", c);
-            tcxstrcat(xstr, tbuf, tlen);
+            TCXSTRCAT(xstr, tbuf, tlen);
           }
           tmp++;
         }
         break;
       case '%':
-        tcxstrcat(xstr, "%", 1);
+        TCXSTRCAT(xstr, "%", 1);
         break;
       }
     } else {
-      tcxstrcat(xstr, format, 1);
+      TCXSTRCAT(xstr, format, 1);
     }
     format++;
   }
@@ -355,7 +360,7 @@ static void tcvxstrprintf(TCXSTR *xstr, const char *format, va_list ap){
  *************************************************************************************************/
 
 
-#define TC_LISTUNIT    64                // allocation unit number of a list handle
+#define TCLISTUNIT     64                // allocation unit number of a list handle
 
 
 /* private function prototypes */
@@ -365,9 +370,10 @@ static int tclistelemcmpci(const void *a, const void *b);
 
 /* Create a list object. */
 TCLIST *tclistnew(void){
-  TCLIST *list = tcmalloc(sizeof(*list));
-  list->anum = TC_LISTUNIT;
-  list->array = tcmalloc(sizeof(list->array[0]) * list->anum);
+  TCLIST *list;
+  TCMALLOC(list, sizeof(*list));
+  list->anum = TCLISTUNIT;
+  TCMALLOC(list->array, sizeof(list->array[0]) * list->anum);
   list->start = 0;
   list->num = 0;
   return list;
@@ -376,10 +382,11 @@ TCLIST *tclistnew(void){
 
 /* Create a list object. */
 TCLIST *tclistnew2(int anum){
-  TCLIST *list = tcmalloc(sizeof(*list));
+  TCLIST *list;
+  TCMALLOC(list, sizeof(*list));
   if(anum < 1) anum = 1;
   list->anum = anum;
-  list->array = tcmalloc(sizeof(list->array[0]) * list->anum);
+  TCMALLOC(list->array, sizeof(list->array[0]) * list->anum);
   list->start = 0;
   list->num = 0;
   return list;
@@ -392,11 +399,13 @@ TCLIST *tclistdup(const TCLIST *list){
   int num = list->num;
   if(num < 1) tclistnew();
   const TCLISTDATUM *array = list->array + list->start;
-  TCLIST *nlist = tcmalloc(sizeof(*nlist));
-  TCLISTDATUM *narray = tcmalloc(sizeof(list->array[0]) * tclmax(num, 1));
+  TCLIST *nlist;
+  TCMALLOC(nlist, sizeof(*nlist));
+  TCLISTDATUM *narray;
+  TCMALLOC(narray, sizeof(list->array[0]) * tclmax(num, 1));
   for(int i = 0; i < num; i++){
     int size = array[i].size;
-    narray[i].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+    TCMALLOC(narray[i].ptr, tclmax(size + 1, TCXSTRUNIT));
     memcpy(narray[i].ptr, array[i].ptr, size + 1);
     narray[i].size = array[i].size;
   }
@@ -453,10 +462,10 @@ void tclistpush(TCLIST *list, const void *ptr, int size){
   int index = list->start + list->num;
   if(index >= list->anum){
     list->anum += list->num + 1;
-    list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
   }
   TCLISTDATUM *array = list->array;
-  array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(array[index].ptr, ptr, size);
   array[index].ptr[size] = '\0';
   array[index].size = size;
@@ -470,11 +479,11 @@ void tclistpush2(TCLIST *list, const char *str){
   int index = list->start + list->num;
   if(index >= list->anum){
     list->anum += list->num + 1;
-    list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
   }
   int size = strlen(str);
   TCLISTDATUM *array = list->array;
-  array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(array[index].ptr, str, size + 1);
   array[index].size = size;
   list->num++;
@@ -487,10 +496,10 @@ void tclistpushmalloc(TCLIST *list, void *ptr, int size){
   int index = list->start + list->num;
   if(index >= list->anum){
     list->anum += list->num + 1;
-    list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
   }
   TCLISTDATUM *array = list->array;
-  array[index].ptr = tcrealloc(ptr, size + 1);
+  TCREALLOC(array[index].ptr, ptr, size + 1);
   array[index].ptr[size] = '\0';
   array[index].size = size;
   list->num++;
@@ -524,13 +533,13 @@ void tclistunshift(TCLIST *list, const void *ptr, int size){
   if(list->start < 1){
     if(list->start + list->num >= list->anum){
       list->anum += list->num + 1;
-      list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+      TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
     }
     list->start = list->anum - list->num;
     memmove(list->array + list->start, list->array, list->num * sizeof(list->array[0]));
   }
   int index = list->start - 1;
-  list->array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(list->array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(list->array[index].ptr, ptr, size);
   list->array[index].ptr[size] = '\0';
   list->array[index].size = size;
@@ -545,14 +554,14 @@ void tclistunshift2(TCLIST *list, const char *str){
   if(list->start < 1){
     if(list->start + list->num >= list->anum){
       list->anum += list->num + 1;
-      list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+      TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
     }
     list->start = list->anum - list->num;
     memmove(list->array + list->start, list->array, list->num * sizeof(list->array[0]));
   }
   int index = list->start - 1;
   int size = strlen(str);
-  list->array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(list->array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(list->array[index].ptr, str, size + 1);
   list->array[index].size = size;
   list->start--;
@@ -590,11 +599,11 @@ void tclistinsert(TCLIST *list, int index, const void *ptr, int size){
   index += list->start;
   if(list->start + list->num >= list->anum){
     list->anum += list->num + 1;
-    list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
   }
   memmove(list->array + index + 1, list->array + index,
           sizeof(list->array[0]) * (list->start + list->num - index));
-  list->array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(list->array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(list->array[index].ptr, ptr, size);
   list->array[index].ptr[size] = '\0';
   list->array[index].size = size;
@@ -609,12 +618,12 @@ void tclistinsert2(TCLIST *list, int index, const char *str){
   index += list->start;
   if(list->start + list->num >= list->anum){
     list->anum += list->num + 1;
-    list->array = tcrealloc(list->array, list->anum * sizeof(list->array[0]));
+    TCREALLOC(list->array, list->array, list->anum * sizeof(list->array[0]));
   }
   memmove(list->array + index + 1, list->array + index,
           sizeof(list->array[0]) * (list->start + list->num - index));
   int size = strlen(str);
-  list->array[index].ptr = tcmalloc(tclmax(size + 1, TC_XSTRUNIT));
+  TCMALLOC(list->array[index].ptr, tclmax(size + 1, TCXSTRUNIT));
   memcpy(list->array[index].ptr, str, size);
   list->array[index].ptr[size] = '\0';
   list->array[index].size = size;
@@ -655,7 +664,7 @@ void tclistover(TCLIST *list, int index, const void *ptr, int size){
   if(index >= list->num) return;
   index += list->start;
   if(size > list->array[index].size)
-    list->array[index].ptr = tcrealloc(list->array[index].ptr, size + 1);
+    TCREALLOC(list->array[index].ptr, list->array[index].ptr, size + 1);
   memcpy(list->array[index].ptr, ptr, size);
   list->array[index].size = size;
   list->array[index].ptr[size] = '\0';
@@ -669,7 +678,7 @@ void tclistover2(TCLIST *list, int index, const char *str){
   index += list->start;
   int size = strlen(str);
   if(size > list->array[index].size)
-    list->array[index].ptr = tcrealloc(list->array[index].ptr, size + 1);
+    TCREALLOC(list->array[index].ptr, list->array[index].ptr, size + 1);
   memcpy(list->array[index].ptr, str, size + 1);
   list->array[index].size = size;
 }
@@ -735,11 +744,12 @@ void *tclistdump(const TCLIST *list, int *sp){
   for(int i = list->start; i < end; i++){
     tsiz += array[i].size + sizeof(int);
   }
-  char *buf = tcmalloc(tsiz + 1);
+  char *buf;
+  TCMALLOC(buf, tsiz + 1);
   char *wp = buf;
   for(int i = list->start; i < end; i++){
     int step;
-    TC_SETVNUMBUF(step, wp, array[i].size);
+    TCSETVNUMBUF(step, wp, array[i].size);
     wp += step;
     memcpy(wp, array[i].ptr, array[i].size);
     wp += array[i].size;
@@ -752,21 +762,23 @@ void *tclistdump(const TCLIST *list, int *sp){
 /* Create a list object from a serialized byte array. */
 TCLIST *tclistload(const void *ptr, int size){
   assert(ptr && size >= 0);
-  TCLIST *list = tcmalloc(sizeof(*list));
+  TCLIST *list;
+  TCMALLOC(list, sizeof(*list));
   int anum = size / sizeof(int) + 1;
-  TCLISTDATUM *array = tcmalloc(sizeof(array[0]) * anum);
+  TCLISTDATUM *array;
+  TCMALLOC(array, sizeof(array[0]) * anum);
   int num = 0;
   const char *rp = ptr;
   const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, vsiz;
-    TC_READVNUMBUF(rp, vsiz, step);
+    TCREADVNUMBUF(rp, vsiz, step);
     rp += step;
     if(num >= anum){
       anum *= 2;
-      array = tcrealloc(array, anum * sizeof(array[0]));
+      TCREALLOC(array, array, anum * sizeof(array[0]));
     }
-    array[num].ptr = tcmalloc(tclmax(vsiz + 1, TC_XSTRUNIT));
+    TCMALLOC(array[num].ptr, tclmax(vsiz + 1, TCXSTRUNIT));
     memcpy(array[num].ptr, rp, vsiz);
     array[num].ptr[vsiz] = '\0';
     array[num].size = vsiz;
@@ -840,50 +852,52 @@ static int tclistelemcmpci(const void *a, const void *b){
  *************************************************************************************************/
 
 
-#define TC_MAPBNUM     4093              // allocation unit number of a list handle
-#define TC_MAPCSUNIT   52                // small allocation unit size of map concatenation
-#define TC_MAPCBUNIT   252               // big allocation unit size of map concatenation
+#define TCMAPBNUM      4093              // allocation unit number of a list handle
+#define TCMAPCSUNIT    52                // small allocation unit size of map concatenation
+#define TCMAPCBUNIT    252               // big allocation unit size of map concatenation
 
 /* get the first hash value */
-#define TC_MAPHASH1(TC_res, TC_kbuf, TC_ksiz) \
+#define TCMAPHASH1(TC_res, TC_kbuf, TC_ksiz) \
   do { \
     const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf); \
     int _TC_ksiz = TC_ksiz; \
     for((TC_res) = 19780211; _TC_ksiz--;){ \
-      (TC_res) = (TC_res) * 37 + *(_TC_p)++; \
+      (TC_res) = ((TC_res) << 5) + ((TC_res) << 2) + (TC_res) + *(_TC_p)++; \
     } \
   } while(false)
 
 /* get the second hash value */
-#define TC_MAPHASH2(TC_res, TC_kbuf, TC_ksiz) \
+#define TCMAPHASH2(TC_res, TC_kbuf, TC_ksiz) \
   do { \
     const unsigned char *_TC_p = (const unsigned char *)(TC_kbuf) + TC_ksiz - 1; \
     int _TC_ksiz = TC_ksiz; \
     for((TC_res) = 0x13579bdf; _TC_ksiz--;){ \
-      (TC_res) = (TC_res) * 31 + *(_TC_p)--; \
+      (TC_res) = ((TC_res) << 5) - (TC_res) + *(_TC_p)--; \
     } \
   } while(false)
 
 /* get the size of padding bytes for pointer alignment */
-#define TC_ALIGNPAD(TC_hsiz) \
+#define TCALIGNPAD(TC_hsiz) \
   (((TC_hsiz | ~-(int)sizeof(void *)) + 1) - TC_hsiz)
 
 /* compare two keys */
-#define TC_KEYCMP(TC_abuf, TC_asiz, TC_bbuf, TC_bsiz) \
+#define TCKEYCMP(TC_abuf, TC_asiz, TC_bbuf, TC_bsiz) \
   ((TC_asiz > TC_bsiz) ? 1 : (TC_asiz < TC_bsiz) ? -1 : memcmp(TC_abuf, TC_bbuf, TC_asiz))
 
 
 /* Create a map object. */
 TCMAP *tcmapnew(void){
-  return tcmapnew2(TC_MAPBNUM);
+  return tcmapnew2(TCMAPBNUM);
 }
 
 
 /* Create a map object with specifying the number of the buckets. */
 TCMAP *tcmapnew2(int bnum){
   if(bnum < 1) bnum = 1;
-  TCMAP *map = tcmalloc(sizeof(*map));
-  TCMAPREC **buckets = tcmalloc(sizeof(map->buckets[0]) * bnum);
+  TCMAP *map;
+  TCMALLOC(map, sizeof(*map));
+  TCMAPREC **buckets;
+  TCMALLOC(buckets, sizeof(map->buckets[0]) * bnum);
   for(int i = 0; i < bnum; i++){
     buckets[i] = NULL;
   }
@@ -900,7 +914,7 @@ TCMAP *tcmapnew2(int bnum){
 /* Copy a map object. */
 TCMAP *tcmapdup(const TCMAP *map){
   assert(map);
-  TCMAP *nmap = tcmapnew2(tclmax(tclmax(map->bnum, map->rnum), TC_MAPBNUM));
+  TCMAP *nmap = tcmapnew2(tclmax(tclmax(map->bnum, map->rnum), TCMAPBNUM));
   TCMAPREC *cur = map->cur;
   const char *kbuf;
   int ksiz;
@@ -933,11 +947,11 @@ void tcmapdel(TCMAP *map){
 void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(map && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   int bidx = hash % map->bnum;
   TCMAPREC *rec = map->buckets[bidx];
   TCMAPREC **entp = map->buckets + bidx;
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       entp = &(rec->left);
@@ -947,7 +961,7 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         entp = &(rec->left);
         rec = rec->left;
@@ -955,10 +969,10 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
         entp = &(rec->right);
         rec = rec->right;
       } else {
-        int psiz = TC_ALIGNPAD(ksiz);
+        int psiz = TCALIGNPAD(ksiz);
         if(vsiz > rec->vsiz){
           TCMAPREC *old = rec;
-          rec = tcrealloc(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
+          TCREALLOC(rec, rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
           if(rec != old){
             if(map->first == old) map->first = rec;
             if(map->last == old) map->last = rec;
@@ -976,8 +990,8 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
       }
     }
   }
-  int psiz = TC_ALIGNPAD(ksiz);
-  rec = tcmalloc(sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
   dbuf[ksiz] = '\0';
@@ -1009,11 +1023,11 @@ void tcmapput2(TCMAP *map, const char *kstr, const char *vstr){
 bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(map && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   int bidx = hash % map->bnum;
   TCMAPREC *rec = map->buckets[bidx];
   TCMAPREC **entp = map->buckets + bidx;
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       entp = &(rec->left);
@@ -1023,7 +1037,7 @@ bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int 
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         entp = &(rec->left);
         rec = rec->left;
@@ -1035,8 +1049,8 @@ bool tcmapputkeep(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int 
       }
     }
   }
-  int psiz = TC_ALIGNPAD(ksiz);
-  rec = tcmalloc(sizeof(*rec) + ksiz + psiz + vsiz + 1);
+  int psiz = TCALIGNPAD(ksiz);
+  TCMALLOC(rec, sizeof(*rec) + ksiz + psiz + vsiz + 1);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
   dbuf[ksiz] = '\0';
@@ -1074,11 +1088,11 @@ bool tcmapputkeep2(TCMAP *map, const char *kstr, const char *vstr){
 void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz){
   assert(map && kbuf && ksiz >= 0 && vbuf && vsiz >= 0);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   int bidx = hash % map->bnum;
   TCMAPREC *rec = map->buckets[bidx];
   TCMAPREC **entp = map->buckets + bidx;
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       entp = &(rec->left);
@@ -1088,7 +1102,7 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         entp = &(rec->left);
         rec = rec->left;
@@ -1096,12 +1110,12 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
         entp = &(rec->right);
         rec = rec->right;
       } else {
-        int psiz = TC_ALIGNPAD(ksiz);
+        int psiz = TCALIGNPAD(ksiz);
         int asiz = sizeof(*rec) + ksiz + psiz + rec->vsiz + vsiz + 1;
-        int unit = (asiz <= TC_MAPCSUNIT) ? TC_MAPCSUNIT : TC_MAPCBUNIT;
+        int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
         asiz = (asiz - 1) + unit - (asiz - 1) % unit;
         TCMAPREC *old = rec;
-        rec = tcrealloc(rec, asiz);
+        TCREALLOC(rec, rec, asiz);
         if(rec != old){
           if(map->first == old) map->first = rec;
           if(map->last == old) map->last = rec;
@@ -1118,11 +1132,11 @@ void tcmapputcat(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int v
       }
     }
   }
-  int psiz = TC_ALIGNPAD(ksiz);
+  int psiz = TCALIGNPAD(ksiz);
   int asiz = sizeof(*rec) + ksiz + psiz + vsiz + 1;
-  int unit = (asiz <= TC_MAPCSUNIT) ? TC_MAPCSUNIT : TC_MAPCBUNIT;
+  int unit = (asiz <= TCMAPCSUNIT) ? TCMAPCSUNIT : TCMAPCBUNIT;
   asiz = (asiz - 1) + unit - (asiz - 1) % unit;
-  rec = tcmalloc(asiz);
+  TCMALLOC(rec, asiz);
   char *dbuf = (char *)rec + sizeof(*rec);
   memcpy(dbuf, kbuf, ksiz);
   dbuf[ksiz] = '\0';
@@ -1154,11 +1168,11 @@ void tcmapputcat2(TCMAP *map, const char *kstr, const char *vstr){
 bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
   assert(map && kbuf && ksiz >= 0);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   int bidx = hash % map->bnum;
   TCMAPREC *rec = map->buckets[bidx];
   TCMAPREC **entp = map->buckets + bidx;
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       entp = &(rec->left);
@@ -1168,7 +1182,7 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         entp = &(rec->left);
         rec = rec->left;
@@ -1206,7 +1220,7 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
 
 
 /* Remove a string record of a map object. */
-bool tcmapout2(TCMAP *map, const void *kstr){
+bool tcmapout2(TCMAP *map, const char *kstr){
   assert(map && kstr);
   return tcmapout(map, kstr, strlen(kstr));
 }
@@ -1216,9 +1230,9 @@ bool tcmapout2(TCMAP *map, const void *kstr){
 const void *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp){
   assert(map && kbuf && ksiz >= 0 && sp);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   TCMAPREC *rec = map->buckets[hash%map->bnum];
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       rec = rec->left;
@@ -1226,14 +1240,14 @@ const void *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp){
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         rec = rec->left;
       } else if(kcmp > 0){
         rec = rec->right;
       } else {
         *sp = rec->vsiz;
-        return dbuf + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
+        return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
       }
     }
   }
@@ -1246,9 +1260,9 @@ const char *tcmapget2(const TCMAP *map, const char *kstr){
   assert(map && kstr);
   int ksiz = strlen(kstr);
   unsigned int hash;
-  TC_MAPHASH1(hash, kstr, ksiz);
+  TCMAPHASH1(hash, kstr, ksiz);
   TCMAPREC *rec = map->buckets[hash%map->bnum];
-  TC_MAPHASH2(hash, kstr, ksiz);
+  TCMAPHASH2(hash, kstr, ksiz);
   while(rec){
     if(hash > rec->hash){
       rec = rec->left;
@@ -1256,13 +1270,13 @@ const char *tcmapget2(const TCMAP *map, const char *kstr){
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kstr, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kstr, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         rec = rec->left;
       } else if(kcmp > 0){
         rec = rec->right;
       } else {
-        return dbuf + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
+        return dbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
       }
     }
   }
@@ -1274,9 +1288,9 @@ const char *tcmapget2(const TCMAP *map, const char *kstr){
 bool tcmapmove(TCMAP *map, const void *kbuf, int ksiz, bool head){
   assert(map && kbuf && ksiz >= 0);
   unsigned int hash;
-  TC_MAPHASH1(hash, kbuf, ksiz);
+  TCMAPHASH1(hash, kbuf, ksiz);
   TCMAPREC *rec = map->buckets[hash%map->bnum];
-  TC_MAPHASH2(hash, kbuf, ksiz);
+  TCMAPHASH2(hash, kbuf, ksiz);
   while(rec){
     if(hash > rec->hash){
       rec = rec->left;
@@ -1284,7 +1298,7 @@ bool tcmapmove(TCMAP *map, const void *kbuf, int ksiz, bool head){
       rec = rec->right;
     } else {
       char *dbuf = (char *)rec + sizeof(*rec);
-      int kcmp = TC_KEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
+      int kcmp = TCKEYCMP(kbuf, ksiz, dbuf, rec->ksiz);
       if(kcmp < 0){
         rec = rec->left;
       } else if(kcmp > 0){
@@ -1359,7 +1373,7 @@ const void *tcmapiterval(const void *kbuf, int *sp){
   assert(kbuf && sp);
   TCMAPREC *rec = (TCMAPREC *)((char *)kbuf - sizeof(*rec));
   *sp = rec->vsiz;
-  return (char *)kbuf + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
+  return (char *)kbuf + rec->ksiz + TCALIGNPAD(rec->ksiz);
 }
 
 
@@ -1367,7 +1381,7 @@ const void *tcmapiterval(const void *kbuf, int *sp){
 const char *tcmapiterval2(const char *kstr){
   assert(kstr);
   TCMAPREC *rec = (TCMAPREC *)(kstr - sizeof(*rec));
-  return kstr + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
+  return kstr + rec->ksiz + TCALIGNPAD(rec->ksiz);
 }
 
 
@@ -1387,7 +1401,7 @@ TCLIST *tcmapkeys(const TCMAP *map){
   int ksiz;
   ((TCMAP *)map)->cur = map->first;
   while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
-    tclistpush(list, kbuf, ksiz);
+    TCLISTPUSH(list, kbuf, ksiz);
   }
   ((TCMAP *)map)->cur = cur;
   return list;
@@ -1405,7 +1419,7 @@ TCLIST *tcmapvals(const TCMAP *map){
   while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
     int vsiz;
     const char *vbuf = tcmapiterval(kbuf, &vsiz);
-    tclistpush(list, vbuf, vsiz);
+    TCLISTPUSH(list, vbuf, vsiz);
   }
   ((TCMAP *)map)->cur = cur;
   return list;
@@ -1445,17 +1459,18 @@ void *tcmapdump(const TCMAP *map, int *sp){
     vbuf = tcmapiterval(kbuf, &vsiz);
     tsiz += ksiz + vsiz + sizeof(int) * 2;
   }
-  char *buf = tcmalloc(tsiz + 1);
+  char *buf;
+  TCMALLOC(buf, tsiz + 1);
   char *wp = buf;
   ((TCMAP *)map)->cur = map->first;
   while((kbuf = tcmapiternext((TCMAP *)map, &ksiz)) != NULL){
     vbuf = tcmapiterval(kbuf, &vsiz);
     int step;
-    TC_SETVNUMBUF(step, wp, ksiz);
+    TCSETVNUMBUF(step, wp, ksiz);
     wp += step;
     memcpy(wp, kbuf, ksiz);
     wp += ksiz;
-    TC_SETVNUMBUF(step, wp, vsiz);
+    TCSETVNUMBUF(step, wp, vsiz);
     wp += step;
     memcpy(wp, vbuf, vsiz);
     wp += vsiz;
@@ -1474,11 +1489,11 @@ TCMAP *tcmapload(const void *ptr, int size){
   const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, ksiz, vsiz;
-    TC_READVNUMBUF(rp, ksiz, step);
+    TCREADVNUMBUF(rp, ksiz, step);
     rp += step;
     const char *kbuf = rp;
     rp += ksiz;
-    TC_READVNUMBUF(rp, vsiz, step);
+    TCREADVNUMBUF(rp, vsiz, step);
     rp += step;
     tcmapputkeep(map, kbuf, ksiz, rp, vsiz);
     rp += vsiz;
@@ -1494,17 +1509,19 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
   const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, rsiz;
-    TC_READVNUMBUF(rp, rsiz, step);
+    TCREADVNUMBUF(rp, rsiz, step);
     rp += step;
     if(rsiz == ksiz && !memcmp(kbuf, rp, rsiz)){
       rp += rsiz;
-      TC_READVNUMBUF(rp, rsiz, step);
+      TCREADVNUMBUF(rp, rsiz, step);
       rp += step;
       *sp = rsiz;
-      return tcmemdup(rp, rsiz);
+      char *rv;
+      TCMEMDUP(rv, rp, rsiz);
+      return rv;
     }
     rp += rsiz;
-    TC_READVNUMBUF(rp, rsiz, step);
+    TCREADVNUMBUF(rp, rsiz, step);
     rp += step;
     rp += rsiz;
   }
@@ -1518,7 +1535,7 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
  *************************************************************************************************/
 
 
-#define TC_MPOOLUNIT   128               // allocation unit size of memory pool elements
+#define TCMPOOLUNIT    128               // allocation unit size of memory pool elements
 
 
 /* Global memory pool object */
@@ -1531,9 +1548,10 @@ static void tcmpooldelglobal(void);
 
 /* Create a memory pool object. */
 TCMPOOL *tcmpoolnew(void){
-  TCMPOOL *mpool = tcmalloc(sizeof(*mpool));
-  mpool->anum = TC_MPOOLUNIT;
-  mpool->elems = tcmalloc(sizeof(mpool->elems[0]) * mpool->anum);
+  TCMPOOL *mpool;
+  TCMALLOC(mpool, sizeof(*mpool));
+  mpool->anum = TCMPOOLUNIT;
+  TCMALLOC(mpool->elems, sizeof(mpool->elems[0]) * mpool->anum);
   mpool->num = 0;
   return mpool;
 }
@@ -1557,7 +1575,7 @@ void tcmpoolput(TCMPOOL *mpool, void *ptr, void (*del)(void *)){
   int num = mpool->num;
   if(num >= mpool->anum){
     mpool->anum *= 2;
-    mpool->elems = tcrealloc(mpool->elems, mpool->anum * sizeof(mpool->elems[0]));
+    TCREALLOC(mpool->elems, mpool->elems, mpool->anum * sizeof(mpool->elems[0]));
   }
   mpool->elems[num].ptr = ptr;
   mpool->elems[num].del = del;
@@ -1596,7 +1614,8 @@ void tcmpoolputmap(TCMPOOL *mpool, TCMAP *map){
 /* Allocate a region relegated to a memory pool object. */
 void *tcmpoolmalloc(TCMPOOL *mpool, size_t size){
   assert(mpool && size > 0);
-  void *ptr = tcmalloc(size);
+  void *ptr;
+  TCMALLOC(ptr, size);
   tcmpoolput(mpool, ptr, (void (*)(void *))free);
   return ptr;
 }
@@ -1895,21 +1914,30 @@ double tctime(void){
  *************************************************************************************************/
 
 
-#define TC_FILEMODE    00644             // permission of a creating file
-#define TC_IOBUFSIZ    16384             // size of an I/O buffer
+#define TCFILEMODE     00644             // permission of a creating file
+#define TCIOBUFSIZ     16384             // size of an I/O buffer
+
+
+/* Get the canonicalized absolute path of a file. */
+char *tcrealpath(const char *path){
+  assert(path);
+  char buf[PATH_MAX];
+  if(!realpath(path, buf)) return NULL;
+  return tcstrdup(buf);
+}
 
 
 /* Read whole data of a file. */
 void *tcreadfile(const char *path, int limit, int *sp){
-  int fd = path ? open(path, O_RDONLY, TC_FILEMODE) : 0;
+  int fd = path ? open(path, O_RDONLY, TCFILEMODE) : 0;
   if(fd == -1) return NULL;
   if(fd == 0){
     TCXSTR *xstr = tcxstrnew();
-    char buf[TC_IOBUFSIZ];
+    char buf[TCIOBUFSIZ];
     limit = limit > 0 ? limit : INT_MAX;
     int rsiz;
-    while((rsiz = read(fd, buf, tclmin(TC_IOBUFSIZ, limit))) > 0){
-      tcxstrcat(xstr, buf, rsiz);
+    while((rsiz = read(fd, buf, tclmin(TCIOBUFSIZ, limit))) > 0){
+      TCXSTRCAT(xstr, buf, rsiz);
       limit -= rsiz;
     }
     *sp = tcxstrsize(xstr);
@@ -1921,7 +1949,8 @@ void *tcreadfile(const char *path, int limit, int *sp){
     return NULL;
   }
   limit = limit > 0 ? tclmin((int)sbuf.st_size, limit) : sbuf.st_size;
-  char *buf = tcmalloc(sbuf.st_size + 1);
+  char *buf;
+  TCMALLOC(buf, sbuf.st_size + 1);
   char *wp = buf;
   int rsiz;
   while((rsiz = read(fd, wp, limit - (wp - buf))) > 0){
@@ -1936,13 +1965,13 @@ void *tcreadfile(const char *path, int limit, int *sp){
 
 /* Read every line of a file. */
 TCLIST *tcreadfilelines(const char *path){
-  int fd = path ? open(path, O_RDONLY, TC_FILEMODE) : 0;
+  int fd = path ? open(path, O_RDONLY, TCFILEMODE) : 0;
   if(fd == -1) return NULL;
   TCLIST *list = tclistnew();
   TCXSTR *xstr = tcxstrnew();
-  char buf[TC_IOBUFSIZ];
+  char buf[TCIOBUFSIZ];
   int rsiz;
-  while((rsiz = read(fd, buf, TC_IOBUFSIZ)) > 0){
+  while((rsiz = read(fd, buf, TCIOBUFSIZ)) > 0){
     for(int i = 0; i < rsiz; i++){
       switch(buf[i]){
       case '\r':
@@ -1952,7 +1981,7 @@ TCLIST *tcreadfilelines(const char *path){
         tcxstrclear(xstr);
         break;
       default:
-        tcxstrcat(xstr, buf + i, 1);
+        TCXSTRCAT(xstr, buf + i, 1);
         break;
       }
     }
@@ -1968,10 +1997,43 @@ TCLIST *tcreadfilelines(const char *path){
 bool tcwritefile(const char *path, const void *ptr, int size){
   assert(ptr && size >= 0);
   int fd = 1;
-  if(path && (fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, TC_FILEMODE)) == -1) return false;
+  if(path && (fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, TCFILEMODE)) == -1) return false;
   bool err = false;
   if(!tcwrite(fd, ptr, size)) err = true;
   if(close(fd) == -1) err = true;
+  return err ? false : true;
+}
+
+
+/* Copy a file. */
+bool tccopyfile(const char *src, const char *dest){
+  int ifd = open(src, O_RDONLY, TCFILEMODE);
+  if(ifd == -1) return false;
+  int ofd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, TCFILEMODE);
+  if(ofd == -1){
+    close(ifd);
+    return false;
+  }
+  bool err = false;
+  while(true){
+    char buf[TCIOBUFSIZ];
+    int size = read(ifd, buf, TCIOBUFSIZ);
+    if(size > 0){
+      if(!tcwrite(ofd, buf, size)){
+        err = true;
+        break;
+      }
+    } else if(size == -1){
+      if(errno != EINTR){
+        err = true;
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  if(close(ofd) == -1) err = true;
+  if(close(ifd) == -1) err = true;
   return err ? false : true;
 }
 
@@ -2001,8 +2063,8 @@ bool tcremovelink(const char *path){
   TCLIST *list;
   if(!S_ISDIR(sbuf.st_mode) || !(list = tcreaddir(path))) return false;
   bool tail = path[0] != '\0' && path[strlen(path)-1] == MYPATHCHR;
-  for(int i = 0; i < tclistnum(list); i++){
-    const char *elem = tclistval2(list, i);
+  for(int i = 0; i < TCLISTNUM(list); i++){
+    const char *elem = TCLISTVALPTR(list, i);
     if(!strcmp(MYCDIRSTR, elem) || !strcmp(MYPDIRSTR, elem)) continue;
     char *cpath;
     if(tail){
@@ -2078,15 +2140,16 @@ bool tclock(int fd, bool ex, bool nb){
  *************************************************************************************************/
 
 
-#define TC_URLELBNUM   31                // bucket number of URL elements
-#define TC_ENCBUFSIZ   32                // size of a buffer for encoding name
-#define TC_XMLATBNUM   31                // bucket number of XML attributes
+#define TCURLELBNUM    31                // bucket number of URL elements
+#define TCENCBUFSIZ    32                // size of a buffer for encoding name
+#define TCXMLATBNUM    31                // bucket number of XML attributes
 
 
 /* Encode a serial object with URL encoding. */
 char *tcurlencode(const char *ptr, int size){
   assert(ptr && size >= 0);
-  char *buf = tcmalloc(size * 3 + 1);
+  char *buf;
+  TCMALLOC(buf, size * 3 + 1);
   char *wp = buf;
   for(int i = 0; i < size; i++){
     int c = ((unsigned char *)ptr)[i];
@@ -2154,7 +2217,7 @@ char *tcurldecode(const char *str, int *sp){
 /* Break up a URL into elements. */
 TCMAP *tcurlbreak(const char *str){
   assert(str);
-  TCMAP *map = tcmapnew2(TC_URLELBNUM);
+  TCMAP *map = tcmapnew2(TCURLELBNUM);
   char *tmp = tcstrdup(str);
   const char *rp = tcstrtrim(tmp);
   tcmapput2(map, "self", rp);
@@ -2257,7 +2320,7 @@ char *tcurlresolve(const char *base, const char *target){
   TCMAP *belems = tcurlbreak(tcmapget2(telems, "scheme") ? target : base);
   if((vbuf = tcmapget2(belems, "scheme")) != NULL){
     tcxstrcat2(rbuf, vbuf);
-    tcxstrcat(rbuf, "://", 3);
+    TCXSTRCAT(rbuf, "://", 3);
     if(!tcstricmp(vbuf, "https")){
       port = 443;
     } else if(!tcstricmp(vbuf, "ftp")){
@@ -2285,7 +2348,7 @@ char *tcurlresolve(const char *base, const char *target){
       tcxstrcat2(rbuf, enc);
       free(enc);
       free(tmp);
-      tcxstrcat(rbuf, ":", 1);
+      TCXSTRCAT(rbuf, ":", 1);
       wp++;
       tmp = tcurldecode(wp, &vsiz);
       enc = tcurlencode(tmp, vsiz);
@@ -2299,7 +2362,7 @@ char *tcurlresolve(const char *base, const char *target){
       free(enc);
       free(tmp);
     }
-    tcxstrcat(rbuf, "@", 1);
+    TCXSTRCAT(rbuf, "@", 1);
   }
   if((vbuf = tcmapget2(belems, "host")) != NULL){
     tmp = tcurldecode(vbuf, &vsiz);
@@ -2309,10 +2372,10 @@ char *tcurlresolve(const char *base, const char *target){
     free(enc);
     free(tmp);
   } else {
-    tcxstrcat(rbuf, "localhost", 9);
+    TCXSTRCAT(rbuf, "localhost", 9);
   }
   int num;
-  char numbuf[TC_NUMBUFSIZ];
+  char numbuf[TCNUMBUFSIZ];
   if((vbuf = tcmapget2(belems, "port")) != NULL && (num = atoi(vbuf)) != port && num > 0){
     sprintf(numbuf, ":%d", num);
     tcxstrcat2(rbuf, numbuf);
@@ -2328,49 +2391,49 @@ char *tcurlresolve(const char *base, const char *target){
     opaths = tcstrsplit("/", "/");
   }
   free(tclistpop2(opaths));
-  for(int i = 0; i < tclistnum(opaths); i++){
+  for(int i = 0; i < TCLISTNUM(opaths); i++){
     vbuf = tclistval(opaths, i, &vsiz);
     if(vsiz < 1 || !strcmp(vbuf, ".")) continue;
     if(!strcmp(vbuf, "..")){
       free(tclistpop2(bpaths));
     } else {
-      tclistpush(bpaths, vbuf, vsiz);
+      TCLISTPUSH(bpaths, vbuf, vsiz);
     }
   }
   tclistdel(opaths);
   opaths = tcstrsplit(path, "/");
-  for(int i = 0; i < tclistnum(opaths); i++){
+  for(int i = 0; i < TCLISTNUM(opaths); i++){
     vbuf = tclistval(opaths, i, &vsiz);
     if(vsiz < 1 || !strcmp(vbuf, ".")) continue;
     if(!strcmp(vbuf, "..")){
       free(tclistpop2(bpaths));
     } else {
-      tclistpush(bpaths, vbuf, vsiz);
+      TCLISTPUSH(bpaths, vbuf, vsiz);
     }
   }
   tclistdel(opaths);
-  for(int i = 0; i < tclistnum(bpaths); i++){
-    vbuf = tclistval2(bpaths, i);
+  for(int i = 0; i < TCLISTNUM(bpaths); i++){
+    vbuf = TCLISTVALPTR(bpaths, i);
     if(strchr(vbuf, '%')){
       tmp = tcurldecode(vbuf, &vsiz);
     } else {
       tmp = tcstrdup(vbuf);
     }
     enc = tcurlencode(tmp, strlen(tmp));
-    tcxstrcat(rbuf, "/", 1);
+    TCXSTRCAT(rbuf, "/", 1);
     tcxstrcat2(rbuf, enc);
     free(enc);
     free(tmp);
   }
-  if(tcstrbwm(path, "/")) tcxstrcat(rbuf, "/", 1);
+  if(tcstrbwm(path, "/")) TCXSTRCAT(rbuf, "/", 1);
   tclistdel(bpaths);
   if((vbuf = tcmapget2(telems, "query")) != NULL ||
      (*target == '#' && (vbuf = tcmapget2(belems, "query")) != NULL)){
-    tcxstrcat(rbuf, "?", 1);
+    TCXSTRCAT(rbuf, "?", 1);
     TCLIST *qelems = tcstrsplit(vbuf, "&;");
-    for(int i = 0; i < tclistnum(qelems); i++){
-      vbuf = tclistval2(qelems, i);
-      if(i > 0) tcxstrcat(rbuf, "&", 1);
+    for(int i = 0; i < TCLISTNUM(qelems); i++){
+      vbuf = TCLISTVALPTR(qelems, i);
+      if(i > 0) TCXSTRCAT(rbuf, "&", 1);
       if((wp = strchr(vbuf, '=')) != NULL){
         *wp = '\0';
         tmp = tcurldecode(vbuf, &vsiz);
@@ -2378,7 +2441,7 @@ char *tcurlresolve(const char *base, const char *target){
         tcxstrcat2(rbuf, enc);
         free(enc);
         free(tmp);
-        tcxstrcat(rbuf, "=", 1);
+        TCXSTRCAT(rbuf, "=", 1);
         wp++;
         tmp = tcurldecode(wp, &vsiz);
         enc = tcurlencode(tmp, strlen(tmp));
@@ -2398,7 +2461,7 @@ char *tcurlresolve(const char *base, const char *target){
   if((vbuf = tcmapget2(telems, "fragment")) != NULL){
     tmp = tcurldecode(vbuf, &vsiz);
     enc = tcurlencode(tmp, vsiz);
-    tcxstrcat(rbuf, "#", 1);
+    TCXSTRCAT(rbuf, "#", 1);
     tcxstrcat2(rbuf, enc);
     free(enc);
     free(tmp);
@@ -2414,7 +2477,8 @@ char *tcbaseencode(const char *ptr, int size){
   assert(ptr && size >= 0);
   char *tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const unsigned char *obj = (const unsigned char *)ptr;
-  char *buf = tcmalloc(4 * (size + 2) / 3 + 1);
+  char *buf;
+  TCMALLOC(buf, 4 * (size + 2) / 3 + 1);
   char *wp = buf;
   for(int i = 0; i < size; i += 3){
     switch(size - i){
@@ -2451,7 +2515,8 @@ char *tcbasedecode(const char *str, int *sp){
   int bpos = 0;
   int eqcnt = 0;
   int len = strlen(str);
-  unsigned char *obj = tcmalloc(len + 4);
+  unsigned char *obj;
+  TCMALLOC(obj, len + 4);
   unsigned char *wp = obj;
   while(bpos < len && eqcnt == 0){
     int bits = 0;
@@ -2507,7 +2572,8 @@ char *tcbasedecode(const char *str, int *sp){
 char *tcquoteencode(const char *ptr, int size){
   assert(ptr && size >= 0);
   const unsigned char *rp = (const unsigned char *)ptr;
-  char *buf = tcmalloc(size * 3 + 1);
+  char *buf;
+  TCMALLOC(buf, size * 3 + 1);
   char *wp = buf;
   int cols = 0;
   for(int i = 0; i < size; i++){
@@ -2528,7 +2594,8 @@ char *tcquoteencode(const char *ptr, int size){
 /* Decode a string encoded with Quoted-printable encoding. */
 char *tcquotedecode(const char *str, int *sp){
   assert(str && sp);
-  char *buf = tcmalloc(strlen(str) + 1);
+  char *buf;
+  TCMALLOC(buf, strlen(str) + 1);
   char *wp = buf;
   for(; *str != '\0'; str++){
     if(*str == '='){
@@ -2571,7 +2638,8 @@ char *tcquotedecode(const char *str, int *sp){
 char *tcmimeencode(const char *str, const char *encname, bool base){
   assert(str && encname);
   int len = strlen(str);
-  char *buf = tcmalloc(len * 3 + strlen(encname) + 16);
+  char *buf;
+  TCMALLOC(buf, len * 3 + strlen(encname) + 16);
   char *wp = buf;
   wp += sprintf(wp, "=?%s?%c?", encname, base ? 'B' : 'Q');
   char *enc = base ? tcbaseencode(str, len) : tcquoteencode(str, len);
@@ -2585,7 +2653,8 @@ char *tcmimeencode(const char *str, const char *encname, bool base){
 char *tcmimedecode(const char *str, char *enp){
   assert(str);
   if(enp) sprintf(enp, "US-ASCII");
-  char *buf = tcmalloc(strlen(str) + 1);
+  char *buf;
+  TCMALLOC(buf, strlen(str) + 1);
   char *wp = buf;
   while(*str != '\0'){
     if(tcstrfwm(str, "=?")){
@@ -2593,7 +2662,7 @@ char *tcmimedecode(const char *str, char *enp){
       const char *pv = str;
       const char *ep = strchr(str, '?');
       if(!ep) continue;
-      if(enp && ep - pv < TC_ENCBUFSIZ){
+      if(enp && ep - pv < TCENCBUFSIZ){
         memcpy(enp, pv, ep - pv);
         enp[ep-pv] = '\0';
       }
@@ -2602,7 +2671,8 @@ char *tcmimedecode(const char *str, char *enp){
       if(*pv != '\0') pv++;
       if(*pv != '\0') pv++;
       if(!(ep = strchr(pv, '?'))) continue;
-      char *tmp = tcmemdup(pv, ep - pv);
+      char *tmp;
+      TCMEMDUP(tmp, pv, ep - pv);
       int len;
       char *dec = quoted ? tcquotedecode(tmp, &len) : tcbasedecode(tmp, &len);
       wp += sprintf(wp, "%s", dec);
@@ -2623,7 +2693,8 @@ char *tcmimedecode(const char *str, char *enp){
 /* Compress a serial object with Packbits encoding. */
 char *tcpackencode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0 && sp);
-  char *buf = tcmalloc(size * 2 + 1);
+  char *buf;
+  TCMALLOC(buf, size * 2 + 1);
   char *wp = buf;
   const char *end = ptr + size;
   while(ptr < end){
@@ -2663,14 +2734,15 @@ char *tcpackencode(const char *ptr, int size, int *sp){
 char *tcpackdecode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0 && sp);
   int asiz = size * 3;
-  char *buf = tcmalloc(asiz + 1);
+  char *buf;
+  TCMALLOC(buf, asiz + 1);
   int wi = 0;
   const char *end = ptr + size;
   while(ptr < end){
     int step = abs(*ptr);
     if(wi + step >= asiz){
       asiz = asiz * 2 + step;
-      buf = tcrealloc(buf, asiz + 1);
+      TCREALLOC(buf, buf, asiz + 1);
     }
     if(*(ptr++) >= 0){
       memset(buf + wi, *ptr, step);
@@ -2692,7 +2764,7 @@ char *tcpackdecode(const char *ptr, int size, int *sp){
 char *tcdeflate(const char *ptr, int size, int *sp){
   assert(ptr && sp);
   if(!_tc_deflate) return NULL;
-  return _tc_deflate(ptr, size, sp, _TC_ZMZLIB);
+  return _tc_deflate(ptr, size, sp, _TCZMZLIB);
 }
 
 
@@ -2700,7 +2772,7 @@ char *tcdeflate(const char *ptr, int size, int *sp){
 char *tcinflate(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0);
   if(!_tc_inflate) return NULL;
-  return _tc_inflate(ptr, size, sp, _TC_ZMZLIB);
+  return _tc_inflate(ptr, size, sp, _TCZMZLIB);
 }
 
 
@@ -2708,7 +2780,7 @@ char *tcinflate(const char *ptr, int size, int *sp){
 char *tcgzipencode(const char *ptr, int size, int *sp){
   assert(ptr && sp);
   if(!_tc_deflate) return NULL;
-  return _tc_deflate(ptr, size, sp, _TC_ZMGZIP);
+  return _tc_deflate(ptr, size, sp, _TCZMGZIP);
 }
 
 
@@ -2716,7 +2788,7 @@ char *tcgzipencode(const char *ptr, int size, int *sp){
 char *tcgzipdecode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0);
   if(!_tc_inflate) return NULL;
-  return _tc_inflate(ptr, size, sp, _TC_ZMGZIP);
+  return _tc_inflate(ptr, size, sp, _TCZMGZIP);
 }
 
 
@@ -2753,7 +2825,8 @@ char *tcxmlescape(const char *str){
     }
     rp++;
   }
-  char *buf = tcmalloc(bsiz + 1);
+  char *buf;
+  TCMALLOC(buf, bsiz + 1);
   char *wp = buf;
   while(*str != '\0'){
     switch(*str){
@@ -2787,7 +2860,8 @@ char *tcxmlescape(const char *str){
 /* Unescape entity references in a string of XML. */
 char *tcxmlunescape(const char *str){
   assert(str);
-  char *buf = tcmalloc(strlen(str) + 1);
+  char *buf;
+  TCMALLOC(buf, strlen(str) + 1);
   char *wp = buf;
   while(*str != '\0'){
     if(*str == '&'){
@@ -2842,13 +2916,13 @@ TCLIST *tcxmlbreak(const char *str){
           TCXSTR *xstr = tcxstrnew();
           while(str + i < ep){
             if(str[i] == '&'){
-              tcxstrcat(xstr, "&amp;", 5);
+              TCXSTRCAT(xstr, "&amp;", 5);
             } else if(str[i] == '<'){
-              tcxstrcat(xstr, "&lt;", 4);
+              TCXSTRCAT(xstr, "&lt;", 4);
             } else if(str[i] == '>'){
-              tcxstrcat(xstr, "&gt;", 4);
+              TCXSTRCAT(xstr, "&gt;", 4);
             } else {
-              tcxstrcat(xstr, str + i, 1);
+              TCXSTRCAT(xstr, str + i, 1);
             }
             i++;
           }
@@ -2876,7 +2950,7 @@ TCLIST *tcxmlbreak(const char *str){
 /* Get the map of attributes of an XML tag. */
 TCMAP *tcxmlattrs(const char *str){
   assert(str);
-  TCMAP *map = tcmapnew2(TC_XMLATBNUM);
+  TCMAP *map = tcmapnew2(TCXMLATBNUM);
   const unsigned char *rp = (unsigned char *)str;
   while(*rp == '<' || *rp == '/' || *rp == '?' || *rp == '!' || *rp == ' '){
     rp++;
@@ -2923,7 +2997,8 @@ TCMAP *tcxmlattrs(const char *str){
     }
     if(*rp != '\0') rp++;
     if(ksiz > 0){
-      char *copy = tcmemdup(val, vsiz);
+      char *copy;
+      TCMEMDUP(copy, val, vsiz);
       char *raw = tcxmlunescape(copy);
       tcmapputkeep(map, (char *)key, ksiz, raw, strlen(raw));
       free(raw);
@@ -2940,10 +3015,10 @@ TCMAP *tcxmlattrs(const char *str){
  *************************************************************************************************/
 
 
-#define TC_BSENCUNIT    8192             // unit size of TCBS encoding
-#define TC_BWTCNTMIN    64               // minimum element number of counting sort
-#define TC_BWTCNTLV     4                // maximum recursion level of counting sort
-#define TC_BWTBUFNUM    16384            // number of elements of BWT buffer
+#define TCBSENCUNIT    8192             // unit size of TCBS encoding
+#define TCBWTCNTMIN    64               // minimum element number of counting sort
+#define TCBWTCNTLV     4                // maximum recursion level of counting sort
+#define TCBWTBUFNUM    16384            // number of elements of BWT buffer
 
 typedef struct {                         // type of structure for a BWT character
   int fchr;                              // character code of the first character
@@ -2999,14 +3074,15 @@ bool tcglobalmutexunlock(void){
 /* Compress a serial object with TCBS encoding. */
 char *tcbsencode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0 && sp);
-  char *result = tcmalloc((size * 7) / 3 + (size / TC_BSENCUNIT + 1) * sizeof(uint16_t) +
-                          TC_BSENCUNIT * 2 + 0x200);
+  char *result;
+  TCMALLOC(result, (size * 7) / 3 + (size / TCBSENCUNIT + 1) * sizeof(uint16_t) +
+           TCBSENCUNIT * 2 + 0x200);
   char *pv = result + size + 0x100;
   char *wp = pv;
   char *tp = pv + size + 0x100;
   const char *end = ptr + size;
   while(ptr < end){
-    int usiz = tclmin(TC_BSENCUNIT, end - ptr);
+    int usiz = tclmin(TCBSENCUNIT, end - ptr);
     memcpy(tp, ptr, usiz);
     memcpy(tp + usiz, ptr, usiz);
     char *sp = wp;
@@ -3017,7 +3093,7 @@ char *tcbsencode(const char *ptr, int size, int *sp){
       arrays[i] = tp + i;
     }
     const char *fp = arrays[0];
-    if(usiz >= TC_BWTCNTMIN){
+    if(usiz >= TCBWTCNTMIN){
       tcbwtsortstrcount(arrays, usiz, usiz, 0);
     } else if(usiz > 1){
       tcbwtsortstrinsert(arrays, usiz, usiz, 0);
@@ -3033,7 +3109,7 @@ char *tcbsencode(const char *ptr, int size, int *sp){
     }
     idx = TCHTOIS(idx);
     memcpy(sp, &idx, sizeof(idx));
-    ptr += TC_BSENCUNIT;
+    ptr += TCBSENCUNIT;
   }
   size = wp - pv;
   tcmtfencode(pv, size);
@@ -3045,7 +3121,8 @@ char *tcbsencode(const char *ptr, int size, int *sp){
 
 /* Decompress a serial object compressed with TCBS encoding. */
 char *tcbsdecode(const char *ptr, int size, int *sp){
-  char *result = tcmalloc(size * 9 + 0x200);
+  char *result;
+  TCMALLOC(result, size * 9 + 0x200);
   char *wp = result + size + 0x100;
   int nsiz = tcgammadecode(ptr, size, wp);
   tcmtfdecode(wp, nsiz);
@@ -3057,11 +3134,11 @@ char *tcbsdecode(const char *ptr, int size, int *sp){
     memcpy(&idx, ptr, sizeof(idx));
     idx = TCITOHS(idx);
     ptr += sizeof(idx);
-    int usiz = tclmin(TC_BSENCUNIT, end - ptr);
+    int usiz = tclmin(TCBSENCUNIT, end - ptr);
     if(idx >= usiz) idx = 0;
     char rbuf[usiz+1];
     memcpy(rbuf, ptr, usiz);
-    if(usiz >= TC_BWTCNTMIN){
+    if(usiz >= TCBWTCNTMIN){
       tcbwtsortchrcount((unsigned char *)rbuf, usiz);
     } else if(usiz > 0){
       tcbwtsortchrinsert((unsigned char *)rbuf, usiz);
@@ -3079,7 +3156,7 @@ char *tcbsdecode(const char *ptr, int size, int *sp){
       rp++;
     }
     unsigned int fchr = array[idx].fchr;
-    if(usiz >= TC_BWTCNTMIN){
+    if(usiz >= TCBWTCNTMIN){
       tcbwtsortreccount(array, usiz);
     } else if(usiz > 1){
       tcbwtsortrecinsert(array, usiz);
@@ -3107,20 +3184,23 @@ char *tcbwtencode(const char *ptr, int size, int *idxp){
   assert(ptr && size >= 0 && idxp);
   if(size < 1){
     *idxp = 0;
-    return tcmemdup("", 0);
+    char *rv;
+    TCMEMDUP(rv, "", 0);
+    return rv;
   }
-  char *result = tcmalloc(size * 3 + 1);
+  char *result;
+  TCMALLOC(result, size * 3 + 1);
   char *tp = result + size + 1;
   memcpy(tp, ptr, size);
   memcpy(tp + size, ptr, size);
-  const char *abuf[TC_BWTBUFNUM];
+  const char *abuf[TCBWTBUFNUM];
   const char **arrays = abuf;
-  if(size > TC_BWTBUFNUM) arrays = tcmalloc(sizeof(*arrays) * size);
+  if(size > TCBWTBUFNUM) TCMALLOC(arrays, sizeof(*arrays) * size);
   for(int i = 0; i < size; i++){
     arrays[i] = tp + i;
   }
   const char *fp = arrays[0];
-  if(size >= TC_BWTCNTMIN){
+  if(size >= TCBWTCNTMIN){
     tcbwtsortstrcount(arrays, size, size, -1);
   } else if(size > 1){
     tcbwtsortstrinsert(arrays, size, size, 0);
@@ -3143,11 +3223,16 @@ char *tcbwtencode(const char *ptr, int size, int *idxp){
 /* Decode a serial object encoded with BWT encoding. */
 char *tcbwtdecode(const char *ptr, int size, int idx){
   assert(ptr && size >= 0);
-  if(size < 1 || idx < 0) return tcmemdup("", 0);
+  if(size < 1 || idx < 0){
+    char *rv;
+    TCMEMDUP(rv, "", 0);
+    return rv;
+  }
   if(idx >= size) idx = 0;
-  char *result = tcmalloc(size + 1);
+  char *result;
+  TCMALLOC(result, size + 1);
   memcpy(result, ptr, size);
-  if(size >= TC_BWTCNTMIN){
+  if(size >= TCBWTCNTMIN){
     tcbwtsortchrcount((unsigned char *)result, size);
   } else {
     tcbwtsortchrinsert((unsigned char *)result, size);
@@ -3155,9 +3240,9 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
   int fnums[0x100], tnums[0x100];
   memset(fnums, 0, sizeof(fnums));
   memset(tnums, 0, sizeof(tnums));
-  TCBWTREC abuf[TC_BWTBUFNUM];
+  TCBWTREC abuf[TCBWTBUFNUM];
   TCBWTREC *array = abuf;
-  if(size > TC_BWTBUFNUM) array = tcmalloc(sizeof(*array) * size);
+  if(size > TCBWTBUFNUM) TCMALLOC(array, sizeof(*array) * size);
   TCBWTREC *rp = array;
   for(int i = 0; i < size; i++){
     int fc = *(unsigned char *)(result + i);
@@ -3167,7 +3252,7 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
     rp++;
   }
   unsigned int fchr = array[idx].fchr;
-  if(size >= TC_BWTCNTMIN){
+  if(size >= TCBWTCNTMIN){
     tcbwtsortreccount(array, size);
   } else if(size > 1){
     tcbwtsortrecinsert(array, size);
@@ -3196,9 +3281,9 @@ char *tcbwtdecode(const char *ptr, int size, int idx){
    `level' specifies the level of recursion. */
 static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level){
   assert(arrays && anum >= 0 && len >= 0);
-  const char *nbuf[TC_BWTBUFNUM];
+  const char *nbuf[TCBWTBUFNUM];
   const char **narrays = nbuf;
-  if(anum > TC_BWTBUFNUM) narrays = tcmalloc(sizeof(*narrays) * anum);
+  if(anum > TCBWTBUFNUM) TCMALLOC(narrays, sizeof(*narrays) * anum);
   int count[0x100], accum[0x100];
   memset(count, 0, sizeof(count));
   int skip = level < 0 ? 0 : level;
@@ -3213,11 +3298,11 @@ static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level)
     narrays[--accum[((unsigned char *)arrays[i])[skip]]] = arrays[i];
   }
   int off = 0;
-  if(level >= 0 && level < TC_BWTCNTLV){
+  if(level >= 0 && level < TCBWTCNTLV){
     for(int i = 0; i < 0x100; i++){
       int c = count[i];
       if(c > 1){
-        if(c >= TC_BWTCNTMIN){
+        if(c >= TCBWTCNTMIN){
           tcbwtsortstrcount(narrays + off, c, len, level + 1);
         } else {
           tcbwtsortstrinsert(narrays + off, c, len, skip + 1);
@@ -3229,7 +3314,7 @@ static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level)
     for(int i = 0; i < 0x100; i++){
       int c = count[i];
       if(c > 1){
-        if(c >= TC_BWTCNTMIN){
+        if(c >= TCBWTCNTMIN){
           tcbwtsortstrheap(narrays + off, c, len, skip + 1);
         } else {
           tcbwtsortstrinsert(narrays + off, c, len, skip + 1);
@@ -3371,9 +3456,9 @@ static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
    `len' specifies the length of the string. */
 static void tcbwtsortchrcount(unsigned char *str, int len){
   assert(str && len >= 0);
-  unsigned char nbuf[TC_BWTBUFNUM];
+  unsigned char nbuf[TCBWTBUFNUM];
   unsigned char *nstr = nbuf;
-  if(len > TC_BWTBUFNUM) nstr = tcmalloc(sizeof(*nstr) * len);
+  if(len > TCBWTBUFNUM) TCMALLOC(nstr, sizeof(*nstr) * len);
   int count[0x100], accum[0x100];
   memset(count, 0, sizeof(count));
   for(int i = 0; i < len; i++){
@@ -3418,9 +3503,9 @@ static void tcbwtsortchrinsert(unsigned char *str, int len){
    `anum' specifies the number of the array. */
 static void tcbwtsortreccount(TCBWTREC *array, int anum){
   assert(array && anum >= 0);
-  TCBWTREC nbuf[TC_BWTBUFNUM];
+  TCBWTREC nbuf[TCBWTBUFNUM];
   TCBWTREC *narray = nbuf;
-  if(anum > TC_BWTBUFNUM) narray = tcmalloc(sizeof(*narray) * anum);
+  if(anum > TCBWTBUFNUM) TCMALLOC(narray, sizeof(*narray) * anum);
   int count[0x100], accum[0x100];
   memset(count, 0, sizeof(count));
   for(int i = 0; i < anum; i++){

@@ -17,6 +17,15 @@
 #ifndef _TCHDB_H                         /* duplication check */
 #define _TCHDB_H
 
+#if defined(__cplusplus)
+#define __TCHDB_CLINKAGEBEGIN extern "C" {
+#define __TCHDB_CLINKAGEEND }
+#else
+#define __TCHDB_CLINKAGEBEGIN
+#define __TCHDB_CLINKAGEEND
+#endif
+__TCHDB_CLINKAGEBEGIN
+
 
 #include <stdlib.h>
 #include <time.h>
@@ -108,7 +117,7 @@ enum {                                   /* enumeration for error codes */
   TCERMDIR,                              /* rmdir error */
   TCEKEEP,                               /* existing record */
   TCENOREC,                              /* no record found */
-  TCEMISC                                /* miscellaneous error */
+  TCEMISC = 9999                         /* miscellaneous error */
 };
 
 enum {                                   /* enumeration for database type */
@@ -138,7 +147,8 @@ enum {                                   /* enumeration for open modes */
 
 
 /* Get the message string corresponding to an error code.
-   `ecode' specifies the error code. */
+   `ecode' specifies the error code.
+   The return value is the message string of the error code. */
 const char *tchdberrmsg(int ecode);
 
 
@@ -156,7 +166,16 @@ void tchdbdel(TCHDB *hdb);
 
 /* Get the last happened error code of a hash database object.
    `hdb' specifies the hash database object.
-   The return value is the last happened error code. */
+   The return value is the last happened error code.
+   The following error code is defined: `TCESUCCESS' for success, `TCETHREAD' for threading
+   error, `TCEINVALID' for invalid operation, `TCENOFILE' for file not found, `TCENOPERM' for no
+   permission, `TCEMETA' for invalid meta data, `TCERHEAD' for invalid record header, `TCEOPEN'
+   for open error, `TCECLOSE' for close error, `TCETRUNC' for trunc error, `TCESYNC' for sync
+   error, `TCESTAT' for stat error, `TCESEEK' for seek error, `TCEREAD' for read error,
+   `TCEWRITE' for write error, `TCEMMAP' for mmap error, `TCELOCK' for lock error, `TCEUNLINK'
+   for unlink error, `TCERENAME' for rename error, `TCEMKDIR' for mkdir error, `TCERMDIR' for
+   rmdir error, `TCEKEEP' for existing record, `TCENOREC' for no record found, and `TCEMISC' for
+   miscellaneous error. */
 int tchdbecode(TCHDB *hdb);
 
 
@@ -194,7 +213,7 @@ bool tchdbtune(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts)
    means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new
    database regardless if one exists.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by
    bitwise or: `HDBONOLCK', which means it opens the database file without file locking, or
-   `HDBOLOCKNB', which means locking is performed without blocking.
+   `HDBOLCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
 bool tchdbopen(TCHDB *hdb, const char *path, int omode);
 
@@ -222,7 +241,6 @@ bool tchdbput(TCHDB *hdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz
    `hdb' specifies the hash database object connected as a writer.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
-   `over' specifies whether the value of the duplicated record is overwritten or not.
    If successful, the return value is true, else, it is false.
    If a record with the same key exists in the database, it is overwritten. */
 bool tchdbput2(TCHDB *hdb, const char *kstr, const char *vstr);
@@ -353,6 +371,14 @@ int tchdbget3(TCHDB *hdb, const void *kbuf, int ksiz, void *vbuf, int max);
 int tchdbvsiz(TCHDB *hdb, const void *kbuf, int ksiz);
 
 
+/* Get the size of the value of a string record in a hash database object.
+   `hdb' specifies the hash database object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is the size of the value of the corresponding record, else,
+   it is -1. */
+int tchdbvsiz2(TCHDB *hdb, const char *kstr);
+
+
 /* Initialize the iterator of a hash database object.
    `hdb' specifies the hash database object.
    If successful, the return value is true, else, it is false.
@@ -417,11 +443,29 @@ bool tchdbsync(TCHDB *hdb);
    `opts' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `HDBTDEFLATE' specifies that each record
    is compressed with Deflate encoding, `HDBTTCBS' specifies that each record is compressed with
-   TCBS encoding.  If it is `UINT8_MAX', the default setting is not changed.
+   TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
    If successful, the return value is true, else, it is false.
    This function is useful to reduce the size of the database file with data fragmentation by
    successive updating. */
 bool tchdboptimize(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
+
+
+/* Remove all records of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   If successful, the return value is true, else, it is false. */
+bool tchdbvanish(TCHDB *hdb);
+
+
+/* Copy the database file of a hash database object.
+   `hdb' specifies the hash database object.
+   `path' specifies the path of the destination file.  If it begins with `@', the trailing
+   substring is executed as a command line.
+   If successful, the return value is true, else, it is false.  False is returned if the executed
+   command returns non-zero code.
+   The database file is assured to be kept synchronized and not modified while the copying or
+   executing operation is in progress.  So, this function is useful to create a backup file of
+   the database file. */
+bool tchdbcopy(TCHDB *hdb, const char *path);
 
 
 /* Get the file path of a hash database object.
@@ -558,6 +602,7 @@ uint64_t tchdbbnumused(TCHDB *hdb);
 
 
 
+__TCHDB_CLINKAGEEND
 #endif                                   /* duplication check */
 
 

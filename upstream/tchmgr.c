@@ -32,6 +32,7 @@ static void usage(void);
 static void printerr(TCHDB *hdb);
 static int printdata(const char *ptr, int size, bool px);
 static char *hextoobj(const char *str, int *sp);
+static char *mygetline(FILE *ifp);
 static int runcreate(int argc, char **argv);
 static int runinform(int argc, char **argv);
 static int runput(int argc, char **argv);
@@ -39,6 +40,7 @@ static int runout(int argc, char **argv);
 static int runget(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
+static int runimporttsv(int argc, char **argv);
 static int runversion(int argc, char **argv);
 static int proccreate(const char *path, int bnum, int apow, int fpow, int opts);
 static int procinform(const char *path, int omode);
@@ -46,8 +48,9 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
                    int omode, int dmode);
 static int procout(const char *path, const char *kbuf, int ksiz, int omode);
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz);
-static int proclist(const char *path, int omode, bool pv, bool px);
+static int proclist(const char *path, int omode, int max, bool pv, bool px);
 static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode);
+static int procimporttsv(const char *path, const char *file, int omode, bool sc);
 static int procversion(void);
 
 
@@ -73,6 +76,8 @@ int main(int argc, char **argv){
     rv = runlist(argc, argv);
   } else if(!strcmp(argv[1], "optimize")){
     rv = runoptimize(argc, argv);
+  } else if(!strcmp(argv[1], "importtsv")){
+    rv = runimporttsv(argc, argv);
   } else if(!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")){
     rv = runversion(argc, argv);
   } else {
@@ -92,9 +97,10 @@ static void usage(void){
   fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
-  fprintf(stderr, "  %s list [-nl|-nb] [-pv] path\n", g_progname);
+  fprintf(stderr, "  %s list [-nl|-nb] [-m num] [-pv] [-px] path\n", g_progname);
   fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum [apow [fpow]]]\n",
           g_progname);
+  fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -143,6 +149,26 @@ static char *hextoobj(const char *str, int *sp){
   }
   buf[j] = '\0';
   *sp = j;
+  return buf;
+}
+
+
+/* read a line from a file descriptor */
+static char *mygetline(FILE *ifp){
+  char *buf;
+  int c, len, blen;
+  buf = NULL;
+  len = 0;
+  blen = 256;
+  while((c = fgetc(ifp)) != EOF){
+    if(blen <= len) blen *= 2;
+    buf = tcrealloc(buf, blen + 1);
+    if(c == '\n' || c == '\r') c = '\0';
+    buf[len++] = c;
+    if(c == '\0') break;
+  }
+  if(!buf) return NULL;
+  buf[len] = '\0';
   return buf;
 }
 
@@ -353,6 +379,7 @@ static int runget(int argc, char **argv){
 static int runlist(int argc, char **argv){
   char *path = NULL;
   int omode = 0;
+  int max = -1;
   bool pv = false;
   bool px = false;
   for(int i = 2; i < argc; i++){
@@ -361,6 +388,9 @@ static int runlist(int argc, char **argv){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= HDBOLCKNB;
+      } else if(!strcmp(argv[i], "-m")){
+        if(++i >= argc) usage();
+        max = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-pv")){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -375,7 +405,7 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = proclist(path, omode, pv, px);
+  int rv = proclist(path, omode, max, pv, px);
   return rv;
 }
 
@@ -425,6 +455,37 @@ static int runoptimize(int argc, char **argv){
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
   int rv = procoptimize(path, bnum, apow, fpow, opts, omode);
+  return rv;
+}
+
+
+/* parse arguments of importtsv command */
+static int runimporttsv(int argc, char **argv){
+  char *path = NULL;
+  char *file = NULL;
+  int omode = 0;
+  bool sc = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-nl")){
+        omode |= HDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= HDBOLCKNB;
+      } else if(!strcmp(argv[i], "-sc")){
+        sc = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else if(!file){
+      file = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path) usage();
+  int rv = procimporttsv(path, file, omode, sc);
   return rv;
 }
 
@@ -573,7 +634,7 @@ static int procout(const char *path, const char *kbuf, int ksiz, int omode){
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
+  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
     printerr(hdb);
     tchdbdel(hdb);
     return 1;
@@ -599,7 +660,7 @@ static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool
 
 
 /* perform list command */
-static int proclist(const char *path, int omode, bool pv, bool px){
+static int proclist(const char *path, int omode, int max, bool pv, bool px){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
   if(!tchdbopen(hdb, path, HDBOREADER | omode)){
@@ -614,6 +675,7 @@ static int proclist(const char *path, int omode, bool pv, bool px){
   }
   TCXSTR *key = tcxstrnew();
   TCXSTR *val = tcxstrnew();
+  int cnt = 0;
   while(tchdbiternext3(hdb, key, val)){
     printdata(tcxstrptr(key), tcxstrsize(key), px);
     if(pv){
@@ -621,6 +683,7 @@ static int proclist(const char *path, int omode, bool pv, bool px){
       printdata(tcxstrptr(val), tcxstrsize(val), px);
     }
     putchar('\n');
+    if(max >= 0 && ++cnt >= max) break;
   }
   tcxstrdel(val);
   tcxstrdel(key);
@@ -652,6 +715,52 @@ static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts
     err = true;
   }
   tchdbdel(hdb);
+  return err ? 1 : 0;
+}
+
+
+/* perform importtsv command */
+static int procimporttsv(const char *path, const char *file, int omode, bool sc){
+  TCHDB *hdb = tchdbnew();
+  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  FILE *ifp = file ? fopen(file, "rb") : stdin;
+  if(!ifp){
+    fprintf(stderr, "%s: could not open\n", file ? file : "(stdin)");
+    tchdbdel(hdb);
+    return 1;
+  }
+  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | omode)){
+    printerr(hdb);
+    tchdbdel(hdb);
+    return 1;
+  }
+  bool err = false;
+  char *line;
+  int cnt = 0;
+  while(!err && (line = mygetline(ifp)) != NULL){
+    char *pv = strchr(line, '\t');
+    if(!pv) continue;
+    *pv = '\0';
+    if(sc) tcstrtolower(line);
+    if(!tchdbput2(hdb, line, pv + 1) && tchdbecode(hdb) != TCEKEEP){
+      printerr(hdb);
+      err = true;
+    }
+    free(line);
+    if(cnt > 0 && cnt % 100 == 0){
+      putchar('.');
+      fflush(stdout);
+      if(cnt % 5000 == 0) printf(" (%08d)\n", cnt);
+    }
+    cnt++;
+  }
+  printf(" (%08d)\n", cnt);
+  if(!tchdbclose(hdb)){
+    if(!err) printerr(hdb);
+    err = true;
+  }
+  tchdbdel(hdb);
+  if(ifp != stdin) fclose(ifp);
   return err ? 1 : 0;
 }
 

@@ -33,6 +33,7 @@ static void usage(void);
 static void printerr(TCBDB *bdb);
 static int printdata(const char *ptr, int size, bool px);
 static char *hextoobj(const char *str, int *sp);
+static char *mygetline(FILE *ifp);
 static int runcreate(int argc, char **argv);
 static int runinform(int argc, char **argv);
 static int runput(int argc, char **argv);
@@ -40,6 +41,7 @@ static int runout(int argc, char **argv);
 static int runget(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
+static int runimporttsv(int argc, char **argv);
 static int runversion(int argc, char **argv);
 static int proccreate(const char *path, int lmemb, int nmemb,
                       int bnum, int apow, int fpow, BDBCMP cmp, int opts);
@@ -49,10 +51,11 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
 static int procout(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode);
 static int procget(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode,
                    bool px, bool pz);
-static int proclist(const char *path, BDBCMP cmp, int omode, bool pv, bool bk,
-                    const char *jstr, bool px);
+static int proclist(const char *path, BDBCMP cmp, int omode, int max, bool pv, bool px, bool bk,
+                    const char *jstr, const char *bstr, const char *estr, const char *pstr);
 static int procoptimize(const char *path, int lmemb, int nmemb,
                         int bnum, int apow, int fpow, BDBCMP cmp, int opts, int omode);
+static int procimporttsv(const char *path, const char *file, int omode, bool sc);
 static int procversion(void);
 
 
@@ -78,6 +81,8 @@ int main(int argc, char **argv){
     rv = runlist(argc, argv);
   } else if(!strcmp(argv[1], "optimize")){
     rv = runoptimize(argc, argv);
+  } else if(!strcmp(argv[1], "importtsv")){
+    rv = runimporttsv(argc, argv);
   } else if(!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")){
     rv = runversion(argc, argv);
   } else {
@@ -99,9 +104,11 @@ static void usage(void){
           " key value\n", g_progname);
   fprintf(stderr, "  %s out [-cd|-ci|-cj] [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-cd|-ci|-cj] [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
-  fprintf(stderr, "  %s list [-cd|-ci|-cj] [-nl|-nb] [-bk] [-pv] [-j str] path\n", g_progname);
+  fprintf(stderr, "  %s list [-cd|-ci|-cj] [-nl|-nb] [-m num] [-bk] [-pv] [-px] [-j str]"
+          " [-rb bkey ekey] [-rp str] path\n", g_progname);
   fprintf(stderr, "  %s optimize [-cd|-ci|-cj] [-tl] [-td|-tb] [-tz] [-nl|-nb] path"
           " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
+  fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -150,6 +157,26 @@ static char *hextoobj(const char *str, int *sp){
   }
   buf[j] = '\0';
   *sp = j;
+  return buf;
+}
+
+
+/* read a line from a file descriptor */
+static char *mygetline(FILE *ifp){
+  char *buf;
+  int c, len, blen;
+  buf = NULL;
+  len = 0;
+  blen = 256;
+  while((c = fgetc(ifp)) != EOF){
+    if(blen <= len) blen *= 2;
+    buf = tcrealloc(buf, blen + 1);
+    if(c == '\n' || c == '\r') c = '\0';
+    buf[len++] = c;
+    if(c == '\0') break;
+  }
+  if(!buf) return NULL;
+  buf[len] = '\0';
   return buf;
 }
 
@@ -401,10 +428,14 @@ static int runlist(int argc, char **argv){
   char *path = NULL;
   BDBCMP cmp = NULL;
   int omode = 0;
+  int max = -1;
   bool pv = false;
+  bool px = false;
   bool bk = false;
   char *jstr = NULL;
-  bool px = false;
+  char *bstr = NULL;
+  char *estr = NULL;
+  char *pstr = NULL;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-cd")){
@@ -417,15 +448,26 @@ static int runlist(int argc, char **argv){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
-      } else if(!strcmp(argv[i], "-pv")){
-        pv = true;
+      } else if(!strcmp(argv[i], "-m")){
+        if(++i >= argc) usage();
+        max = atoi(argv[i]);
       } else if(!strcmp(argv[i], "-bk")){
         bk = true;
+      } else if(!strcmp(argv[i], "-pv")){
+        pv = true;
+      } else if(!strcmp(argv[i], "-px")){
+        px = true;
       } else if(!strcmp(argv[i], "-j")){
         if(++i >= argc) usage();
         jstr = argv[i];
-      } else if(!strcmp(argv[i], "-px")){
-        px = true;
+      } else if(!strcmp(argv[i], "-rb")){
+        if(++i >= argc) usage();
+        bstr = argv[i];
+        if(++i >= argc) usage();
+        estr = argv[i];
+      } else if(!strcmp(argv[i], "-rp")){
+        if(++i >= argc) usage();
+        pstr = argv[i];
       } else {
         usage();
       }
@@ -436,7 +478,7 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = proclist(path, cmp, omode, pv, bk, jstr, px);
+  int rv = proclist(path, cmp, omode, max, pv, px, bk, jstr, bstr, estr, pstr);
   return rv;
 }
 
@@ -501,6 +543,37 @@ static int runoptimize(int argc, char **argv){
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
   int rv = procoptimize(path, lmemb, nmemb, bnum, apow, fpow, cmp, opts, omode);
+  return rv;
+}
+
+
+/* parse arguments of importtsv command */
+static int runimporttsv(int argc, char **argv){
+  char *path = NULL;
+  char *file = NULL;
+  int omode = 0;
+  bool sc = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-nl")){
+        omode |= BDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-sc")){
+        sc = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else if(!file){
+      file = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path) usage();
+  int rv = procimporttsv(path, file, omode, sc);
   return rv;
 }
 
@@ -692,8 +765,8 @@ static int procget(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int
 
 
 /* perform list command */
-static int proclist(const char *path, BDBCMP cmp, int omode, bool pv, bool bk,
-                    const char *jstr, bool px){
+static int proclist(const char *path, BDBCMP cmp, int omode, int max, bool pv, bool px, bool bk,
+                    const char *jstr, const char *bstr, const char *estr, const char *pstr){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
   if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
@@ -702,57 +775,93 @@ static int proclist(const char *path, BDBCMP cmp, int omode, bool pv, bool bk,
     tcbdbdel(bdb);
     return 1;
   }
-  BDBCUR *cur = tcbdbcurnew(bdb);
   bool err = false;
-  if(bk){
-    if(jstr){
-      if(!tcbdbcurjumpback(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
+  if(bstr || pstr){
+    TCLIST *keys = pstr ? tcbdbrange3(bdb, pstr, max) :
+      tcbdbrange(bdb, bstr, strlen(bstr), true, estr, strlen(estr), true, max);
+    int cnt = 0;
+    for(int i = 0; i < tclistnum(keys); i++){
+      int ksiz;
+      const char *kbuf = tclistval(keys, i, &ksiz);
+      if(pv){
+        TCLIST *vals = tcbdbget4(bdb, kbuf, ksiz);
+        if(vals){
+          for(int j = 0; j < tclistnum(vals); j++){
+            int vsiz;
+            const char *vbuf = tclistval(vals, j, &vsiz);
+            printdata(kbuf, ksiz, px);
+            putchar('\t');
+            printdata(vbuf, vsiz, px);
+            putchar('\n');
+            if(max >= 0 && ++cnt >= max) break;
+          }
+          tclistdel(vals);
+        }
+      } else {
+        int num = tcbdbvnum(bdb, kbuf, ksiz);
+        for(int j = 0; j < num; j++){
+          printdata(kbuf, ksiz, px);
+          putchar('\n');
+          if(max >= 0 && ++cnt >= max) break;
+        }
       }
-    } else {
-      if(!tcbdbcurlast(cur) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
-      }
+      if(max >= 0 && cnt >= max) break;
     }
+    tclistdel(keys);
   } else {
-    if(jstr){
-      if(!tcbdbcurjump(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
-      }
-    } else {
-      if(!tcbdbcurfirst(cur) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
-      }
-    }
-  }
-  TCXSTR *key = tcxstrnew();
-  TCXSTR *val = tcxstrnew();
-  while(tcbdbcurrec(cur, key, val)){
-    printdata(tcxstrptr(key), tcxstrsize(key), px);
-    if(pv){
-      putchar('\t');
-      printdata(tcxstrptr(val), tcxstrsize(val), px);
-    }
-    putchar('\n');
+    BDBCUR *cur = tcbdbcurnew(bdb);
     if(bk){
-      if(!tcbdbcurprev(cur) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
+      if(jstr){
+        if(!tcbdbcurjumpback(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
+      } else {
+        if(!tcbdbcurlast(cur) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
       }
     } else {
-      if(!tcbdbcurnext(cur) && tcbdbecode(bdb) != TCENOREC){
-        printerr(bdb);
-        err = true;
+      if(jstr){
+        if(!tcbdbcurjump(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
+      } else {
+        if(!tcbdbcurfirst(cur) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
       }
     }
+    TCXSTR *key = tcxstrnew();
+    TCXSTR *val = tcxstrnew();
+    int cnt = 0;
+    while(tcbdbcurrec(cur, key, val)){
+      printdata(tcxstrptr(key), tcxstrsize(key), px);
+      if(pv){
+        putchar('\t');
+        printdata(tcxstrptr(val), tcxstrsize(val), px);
+      }
+      putchar('\n');
+      if(bk){
+        if(!tcbdbcurprev(cur) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
+      } else {
+        if(!tcbdbcurnext(cur) && tcbdbecode(bdb) != TCENOREC){
+          printerr(bdb);
+          err = true;
+        }
+      }
+      if(max >= 0 && ++cnt >= max) break;
+    }
+    tcxstrdel(val);
+    tcxstrdel(key);
+    tcbdbcurdel(cur);
   }
-  tcxstrdel(val);
-  tcxstrdel(key);
-  tcbdbcurdel(cur);
   if(!tcbdbclose(bdb)){
     if(!err) printerr(bdb);
     err = true;
@@ -783,6 +892,52 @@ static int procoptimize(const char *path, int lmemb, int nmemb,
     err = true;
   }
   tcbdbdel(bdb);
+  return err ? 1 : 0;
+}
+
+
+/* perform importtsv command */
+static int procimporttsv(const char *path, const char *file, int omode, bool sc){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  FILE *ifp = file ? fopen(file, "rb") : stdin;
+  if(!ifp){
+    fprintf(stderr, "%s: could not open\n", file ? file : "(stdin)");
+    tcbdbdel(bdb);
+    return 1;
+  }
+  if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
+    return 1;
+  }
+  bool err = false;
+  char *line;
+  int cnt = 0;
+  while(!err && (line = mygetline(ifp)) != NULL){
+    char *pv = strchr(line, '\t');
+    if(!pv) continue;
+    *pv = '\0';
+    if(sc) tcstrtolower(line);
+    if(!tcbdbputdup2(bdb, line, pv + 1) && tcbdbecode(bdb) != TCEKEEP){
+      printerr(bdb);
+      err = true;
+    }
+    free(line);
+    if(cnt > 0 && cnt % 100 == 0){
+      putchar('.');
+      fflush(stdout);
+      if(cnt % 5000 == 0) printf(" (%08d)\n", cnt);
+    }
+    cnt++;
+  }
+  printf(" (%08d)\n", cnt);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
+    err = true;
+  }
+  tcbdbdel(bdb);
+  if(ifp != stdin) fclose(ifp);
   return err ? 1 : 0;
 }
 

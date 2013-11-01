@@ -7,11 +7,11 @@
 #================================================================
 
 # Package name
-AC_INIT(tokyocabinet, 0.9.1)
+AC_INIT(tokyocabinet, 1.0.9)
 
 # Package information
 MYLIBVER=1
-MYLIBREV=8
+MYLIBREV=18
 MYFORMATVER="1.0"
 
 # Targets
@@ -20,7 +20,7 @@ MYLIBRARYFILES="libtokyocabinet.a"
 MYLIBOBJFILES="tcutil.o tchdb.o tcbdb.o myconf.o"
 MYCOMMANDFILES="tcutest tcucodec tchtest tchmttest tchmgr tcbtest tcbmttest tcbmgr"
 MYMAN1FILES="tcutest.1 tcucodec.1 tchtest.1 tchmttest.1 tchmgr.1 tcbtest.1 tcbmttest.1 tcbmgr.1"
-MYMAN3FILES="tcutil.3 tchdb.3 tcbdb.3"
+MYMAN3FILES="tokyocabinet.3 tcutil.3 tchdb.3 tcbdb.3"
 MYDOCUMENTFILES="COPYING ChangeLog THANKS doc"
 MYPCFILES="tokyocabinet.pc"
 
@@ -29,6 +29,7 @@ MYCFLAGS="-std=c99 -Wall -fPIC -fsigned-char -O2"
 MYCPPFLAGS="-I. -I\$(INCLUDEDIR) -L$HOME/include -L/usr/local/include -DNDEBUG -D_GNU_SOURCE=1"
 MYLDFLAGS="-L. -L\$(LIBDIR) -L$HOME/lib -L/usr/local/lib"
 MYRUNPATH="\$(LIBDIR)"
+MYLDLIBPATHENV="LD_LIBRARY_PATH"
 MYPOSTCMD="true"
 
 # Building paths
@@ -81,6 +82,15 @@ then
   enables="$enables (profile)"
 fi
 
+# 64-bit offset mode
+AC_ARG_ENABLE(off64,
+  AC_HELP_STRING([--enable-off64], [build with 64-bit file offset on 32-bit system]))
+if test "$enable_off64" = "yes"
+then
+  MYCPPFLAGS="$MYCPPFLAGS -D_FILE_OFFSET_BITS=64"
+  enables="$enables (off64)"
+fi
+
 # Fastest mode
 AC_ARG_ENABLE(fastest,
   AC_HELP_STRING([--enable-fastest], [build for fastest run]))
@@ -88,6 +98,7 @@ if test "$enable_fastest" = "yes"
 then
   MYCFLAGS="-std=c99 -Wall -fPIC -pedantic -fsigned-char -O3"
   MYCFLAGS="$MYCFLAGS -fomit-frame-pointer -fforce-addr -minline-all-stringops"
+  MYCPPFLAGS="$MYCPPFLAGS -D_MYFASTEST"
   enables="$enables (fastest)"
 fi
 
@@ -98,6 +109,15 @@ if test "$enable_swab" = "yes"
 then
   MYCPPFLAGS="$MYCPPFLAGS -D_MYSWAB"
   enables="$enables (swab)"
+fi
+
+# Micro yield mode
+AC_ARG_ENABLE(uyield,
+  AC_HELP_STRING([--enable-uyield], [build for detecting race conditions]))
+if test "$enable_uyield" = "yes"
+then
+  MYCPPFLAGS="$MYCPPFLAGS -D_MYMICROYIELD"
+  enables="$enables (uyield)"
 fi
 
 # Disable ZLIB compression
@@ -155,12 +175,20 @@ then
   AC_CHECK_LIB(z, main)
 fi
 
-# shared libraries libraries
+# Shared libraries
 if test "$enable_shared" != "no" && test "$enable_profile" != "yes"
 then
-  MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so.$MYLIBVER.$MYLIBREV.0"
-  MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so.$MYLIBVER"
-  MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so"
+  if uname | grep Darwin >/dev/null
+  then
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.$MYLIBVER.$MYLIBREV.0.dylib"
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.$MYLIBVER.dylib"
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.dylib"
+    MYLDLIBPATHENV="DYLD_LIBRARY_PATH"
+  else
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so.$MYLIBVER.$MYLIBREV.0"
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so.$MYLIBVER"
+    MYLIBRARYFILES="$MYLIBRARYFILES libtokyocabinet.so"
+  fi
 fi
 
 
@@ -185,6 +213,7 @@ AC_SUBST(MYCFLAGS)
 AC_SUBST(MYCPPFLAGS)
 AC_SUBST(MYLDFLAGS)
 AC_SUBST(MYRUNPATH)
+AC_SUBST(MYLDLIBPATHENV)
 AC_SUBST(MYPOSTCMD)
 
 # Targets

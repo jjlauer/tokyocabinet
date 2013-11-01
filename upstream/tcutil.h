@@ -17,6 +17,15 @@
 #ifndef _TCUTIL_H                        /* duplication check */
 #define _TCUTIL_H
 
+#if defined(__cplusplus)
+#define __TCUTIL_CLINKAGEBEGIN extern "C" {
+#define __TCUTIL_CLINKAGEEND }
+#else
+#define __TCUTIL_CLINKAGEBEGIN
+#define __TCUTIL_CLINKAGEEND
+#endif
+__TCUTIL_CLINKAGEBEGIN
+
 
 #include <stdlib.h>
 #include <time.h>
@@ -35,9 +44,9 @@ extern const char *tcversion;
 
 
 /* Pointer to the call back function for handling a fatal error.
-   The argument specifies the error message.  The initial value of this variable is `NULL'.
-   If the value is `NULL', the default function is called when a fatal error occurs.  A fatal
-   error occurs when memory allocation is failed. */
+   The argument specifies the error message.
+   The initial value of this variable is `NULL'.  If the value is `NULL', the default function is
+   called when a fatal error occurs.  A fatal error occurs when memory allocation is failed. */
 extern void (*tcfatalfunc)(const char *);
 
 
@@ -51,7 +60,8 @@ void *tcmalloc(size_t size);
 
 
 /* Allocate a nullified region on memory.
-   `size' specifies the size of the region.
+   `nmemb' specifies the number of elements.
+   `size' specifies the size of each element.
    The return value is the pointer to the allocated nullified region.
    This function handles failure of memory allocation implicitly.  Because the region of the
    return value is allocated with the `calloc' call, it should be released with the `free' call
@@ -532,7 +542,6 @@ void tcmapput(TCMAP *map, const void *kbuf, int ksiz, const void *vbuf, int vsiz
    `map' specifies the map object.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
-   `over' specifies whether the value of the duplicated record is overwritten or not.
    If a record with the same key exists in the database, it is overwritten. */
 void tcmapput2(TCMAP *map, const char *kstr, const char *vstr);
 
@@ -589,7 +598,7 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz);
    `kstr' specifies the string of the key.
    If successful, the return value is true.  False is returned when no record corresponds to
    the specified key. */
-bool tcmapout2(TCMAP *map, const void *kstr);
+bool tcmapout2(TCMAP *map, const char *kstr);
 
 
 /* Retrieve a record in a map object.
@@ -955,6 +964,15 @@ double tctime(void);
  *************************************************************************************************/
 
 
+/* Get the canonicalized absolute path of a file.
+   `path' specifies the path of the file.
+   The return value is the canonicalized absolute path of a file, or `NULL' if the path is
+   invalid.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcrealpath(const char *path);
+
+
 /* Read whole data of a file.
    `path' specifies the path of the file.  If it is `NULL', the standard input is specified.
    `limit' specifies the limiting size of reading data.  If it is not more than 0, the limitation
@@ -985,6 +1003,14 @@ TCLIST *tcreadfilelines(const char *path);
    `size' specifies the size of the region.
    If successful, the return value is true, else, it is false. */
 bool tcwritefile(const char *path, const void *ptr, int size);
+
+
+/* Copy a file.
+   `src' specifies the path of the source file.
+   `dest' specifies the path of the destination file.
+   The return value is true if successful, else, it is false.
+   If the destination file exists, it is overwritten. */
+bool tccopyfile(const char *src, const char *dest);
 
 
 /* Read names of files in a directory.
@@ -1400,8 +1426,8 @@ typedef struct {                         /* type of structure for a bit stream o
 
 #include <stdio.h>
 
-#define _TC_VERSION    "0.9.1"
-#define _TC_LIBVER     108
+#define _TC_VERSION    "1.0.9"
+#define _TC_LIBVER     118
 #define _TC_FORMATVER  "1.0"
 
 
@@ -1448,41 +1474,41 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
 
 /* Print debug information with a formatted string as with `printf'. */
 #if __STDC_VERSION__ >= 199901L
-#define tcdprintf(...) \
+#define TCDPRINTF(...) \
   do { \
     fprintf(stderr, "%s:%d:%s: ", __FILE__, __LINE__, __func__); \
     fprintf(stderr, __VA_ARGS__); \
     fprintf(stderr, "\n"); \
-  } while(0);
+  } while(false);
 #else
-#define tcdprintf(TC_str) \
+#define TCDPRINTF(TC_str) \
   do { \
     fprintf(stderr, "%s:%d:%s: %s\n", __FILE__, __LINE__, __func__, TC_str); \
-  } while(0);
+  } while(false);
 #endif
 
 
 /* Print hexadecimal pattern of a binary region. */
-#define tcprinthex(TC_ptr, TC_size) \
+#define TCPRINTHEX(TC_ptr, TC_size) \
   do { \
     for(int TC_i = 0; TC_i < (TC_size); TC_i++){ \
       if(TC_i > 0) putchar(' '); \
       printf("%02X", ((unsigned char *)(TC_ptr))[TC_i]); \
     } \
     putchar('\n'); \
-  } while(0);
+  } while(false);
 
 
 /* Print an extensible string object. */
-#define tcprintxstr(TC_xstr) \
+#define TCPRINTXSTR(TC_xstr) \
   do { \
     fwrite(tcxstrptr((TC_xstr)), tcxstrsize((TC_xstr)), 1, stdout); \
     putchar('\n'); \
-  } while(0);
+  } while(false);
 
 
 /* Print all elements of a list object. */
-#define tcprintlist(TC_list) \
+#define TCPRINTLIST(TC_list) \
   do { \
     for(int TC_i = 0; TC_i < tclistnum((TC_list)); TC_i++){ \
       int TC_size; \
@@ -1492,11 +1518,11 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
       putchar('\n'); \
     } \
     putchar('\n'); \
-  } while(0);
+  } while(false);
 
 
 /* Print all records of a list object. */
-#define tcprintmap(TC_map) \
+#define TCPRINTMAP(TC_map) \
   do { \
     TCLIST *TC_keys = tcmapkeys((TC_map)); \
     for(int TC_i = 0; TC_i < tclistnum(TC_keys); TC_i++){ \
@@ -1512,10 +1538,111 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
     } \
     putchar('\n'); \
     tclistdel(TC_keys); \
-  } while(0);
+  } while(false);
+
+
+/* Alias of `tcmemdup'. */
+#if defined(_MYFASTEST)
+#define TCMALLOC(TC_res, TC_size) \
+  do { \
+    (TC_res) = malloc(TC_size); \
+  } while(false)
+#else
+#define TCMALLOC(TC_res, TC_size) \
+  do { \
+    if(!((TC_res) = malloc(TC_size))) tcmyfatal("out of memory"); \
+  } while(false)
+#endif
+
+/* Alias of `tccalloc'. */
+#if defined(_MYFASTEST)
+#define TCCALLOC(TC_res, TC_nmemb, TC_size) \
+  do { \
+    (TC_res) = calloc((TC_nmemb), (TC_size)); \
+  } while(false)
+#else
+#define TCCALLOC(TC_res, TC_nmemb, TC_size) \
+  do { \
+    if(!((TC_res) = calloc((TC_nmemb), (TC_size)))) tcmyfatal("out of memory"); \
+  } while(false)
+#endif
+
+/* Alias of `tcrealloc'. */
+#if defined(_MYFASTEST)
+#define TCREALLOC(TC_res, TC_ptr, TC_size) \
+  do { \
+    (TC_res) = realloc((TC_ptr), (TC_size)); \
+  } while(false)
+#else
+#define TCREALLOC(TC_res, TC_ptr, TC_size) \
+  do { \
+    if(!((TC_res) = realloc((TC_ptr), (TC_size)))) tcmyfatal("out of memory"); \
+  } while(false)
+#endif
+
+/* Alias of `tcmemdup'. */
+#define TCMEMDUP(TC_res, TC_ptr, TC_size) \
+  do { \
+    TCMALLOC((TC_res), (TC_size) + 1);   \
+    memcpy((TC_res), (TC_ptr), (TC_size));      \
+    (TC_res)[TC_size] = '\0'; \
+  } while(false)
+
+
+/* Alias of `tcxstrcat'. */
+#define TCXSTRCAT(TC_xstr, TC_ptr, TC_size) \
+  do { \
+    int TC_mysize = (TC_size); \
+    int TC_nsize = (TC_xstr)->size + TC_mysize + 1; \
+    if((TC_xstr)->asize < TC_nsize){ \
+      while((TC_xstr)->asize < TC_nsize){ \
+        (TC_xstr)->asize *= 2; \
+        if((TC_xstr)->asize < TC_nsize) (TC_xstr)->asize = TC_nsize; \
+      } \
+      TCREALLOC((TC_xstr)->ptr, (TC_xstr)->ptr, (TC_xstr)->asize); \
+    } \
+    memcpy((TC_xstr)->ptr + (TC_xstr)->size, (TC_ptr), TC_mysize); \
+    (TC_xstr)->size += TC_mysize; \
+    (TC_xstr)->ptr[(TC_xstr)->size] = '\0'; \
+  } while(false)
+
+
+/* Alias of `tclistnum'. */
+#define TCLISTNUM(TC_list) \
+  ((TC_list)->num)
+
+
+/* Alias of `tclistval' but not checking size and not using the third parameter. */
+#define TCLISTVALPTR(TC_list, TC_index) \
+  ((void *)((TC_list)->array[(TC_index)+(TC_list)->start].ptr))
+
+
+/* Add an element at the end of a list object. */
+#define TCLISTPUSH(TC_list, TC_ptr, TC_size) \
+  do { \
+    int TC_mysize = (TC_size); \
+    int TC_index = (TC_list)->start + (TC_list)->num; \
+    if(TC_index >= (TC_list)->anum){ \
+      (TC_list)->anum += (TC_list)->num + 1; \
+      TCREALLOC((TC_list)->array, (TC_list)->array, \
+                (TC_list)->anum * sizeof((TC_list)->array[0])); \
+    } \
+    TCLISTDATUM *array = (TC_list)->array; \
+    TCMALLOC(array[TC_index].ptr, TC_mysize + 1);     \
+    memcpy(array[TC_index].ptr, (TC_ptr), TC_mysize); \
+    array[TC_index].ptr[TC_mysize] = '\0'; \
+    array[TC_index].size = TC_mysize; \
+    (TC_list)->num++; \
+  } while(false)
+
+
+/* Alias of `tcmaprnum'. */
+#define TCMAPRNUM(TC_map) \
+  ((TC_map)->rnum)
 
 
 
+__TCUTIL_CLINKAGEEND
 #endif                                   /* duplication check */
 
 

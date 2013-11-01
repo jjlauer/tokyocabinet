@@ -48,6 +48,13 @@ typedef struct {                         // type of structure for wicked thread
   TCMAP *map;
 } TARGWICKED;
 
+typedef struct {                         // type of structure for typical thread
+  TCHDB *hdb;
+  int rnum;
+  bool nc;
+  int id;
+} TARGTYPICAL;
+
 
 /* global variables */
 const char *g_progname;                  // program name
@@ -65,15 +72,19 @@ static int runwrite(int argc, char **argv);
 static int runread(int argc, char **argv);
 static int runremove(int argc, char **argv);
 static int runwicked(int argc, char **argv);
+static int runtypical(int argc, char **argv);
 static int procwrite(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
                      int opts, int omode, bool as);
 static int procread(const char *path, int tnum, int omode, bool wb);
 static int procremove(const char *path, int tnum, int omode);
 static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc);
+static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
+                       int opts, int omode, bool nc);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
 static void *threadremove(void *targ);
 static void *threadwicked(void *targ);
+static void *threadtypical(void *targ);
 
 
 /* main routine */
@@ -93,6 +104,8 @@ int main(int argc, char **argv){
     rv = runremove(argc, argv);
   } else if(!strcmp(argv[1], "wicked")){
     rv = runwicked(argc, argv);
+  } else if(!strcmp(argv[1], "typical")){
+    rv = runtypical(argc, argv);
   } else {
     usage();
   }
@@ -111,6 +124,8 @@ static void usage(void){
   fprintf(stderr, "  %s remove [-nl|-nb] [-wb] path tnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum\n",
           g_progname);
+  fprintf(stderr, "  %s typical [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum"
+          " [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -322,6 +337,62 @@ static int runwicked(int argc, char **argv){
   int rnum = atoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
   int rv = procwicked(path, tnum, rnum, opts, omode, nc);
+  return rv;
+}
+
+
+/* parse arguments of typical command */
+static int runtypical(int argc, char **argv){
+  char *path = NULL;
+  char *tstr = NULL;
+  char *rstr = NULL;
+  char *bstr = NULL;
+  char *astr = NULL;
+  char *fstr = NULL;
+  int opts = 0;
+  int omode = 0;
+  bool nc = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-tl")){
+        opts |= HDBTLARGE;
+      } else if(!strcmp(argv[i], "-td")){
+        opts |= HDBTDEFLATE;
+      } else if(!strcmp(argv[i], "-tb")){
+        opts |= HDBTTCBS;
+      } else if(!strcmp(argv[i], "-nl")){
+        omode |= HDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= HDBOLCKNB;
+      } else if(!strcmp(argv[i], "-nc")){
+        nc = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else if(!tstr){
+      tstr = argv[i];
+    } else if(!rstr){
+      rstr = argv[i];
+    } else if(!bstr){
+      bstr = argv[i];
+    } else if(!astr){
+      astr = argv[i];
+    } else if(!fstr){
+      fstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path || !tstr || !rstr) usage();
+  int tnum = atoi(tstr);
+  int rnum = atoi(rstr);
+  if(tnum < 1 || rnum < 1) usage();
+  int bnum = bstr ? atoi(bstr) : -1;
+  int apow = astr ? atoi(astr) : -1;
+  int fpow = fstr ? atoi(fstr) : -1;
+  int rv = proctypical(path, tnum, rnum, bnum, apow, fpow, opts, omode, nc);
   return rv;
 }
 
@@ -624,6 +695,72 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
 }
 
 
+/* perform typical command */
+static int proctypical(const char *path, int tnum, int rnum, int bnum, int apow, int fpow,
+                       int opts, int omode, bool nc){
+  iprintf("<Typical Access Test>\n  path=%s  tnum=%d  rnum=%d  bnum=%d  apow=%d  fpow=%d"
+          "  opts=%d  omode=%d  nc=%d\n\n", path, tnum, rnum, bnum, apow, fpow, opts, omode, nc);
+  bool err = false;
+  double stime = tctime();
+  TCHDB *hdb = tchdbnew();
+  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
+  if(!tchdbsetmutex(hdb)){
+    eprint(hdb, "tchdbsetmutex");
+    err = true;
+  }
+  if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
+    eprint(hdb, "tchdbtune");
+    err = true;
+  }
+  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC | omode)){
+    eprint(hdb, "tchdbopen");
+    err = true;
+  }
+  TARGTYPICAL targs[tnum];
+  pthread_t threads[tnum];
+  if(tnum == 1){
+    targs[0].hdb = hdb;
+    targs[0].rnum = rnum;
+    targs[0].nc = nc;
+    targs[0].id = 0;
+    if(threadtypical(targs) != NULL) err = true;
+  } else {
+    for(int i = 0; i < tnum; i++){
+      targs[i].hdb = hdb;
+      targs[i].rnum = rnum;
+      targs[i].nc = nc;
+      targs[i].id = i;
+      if(pthread_create(threads + i, NULL, threadtypical, targs + i) != 0){
+        eprint(hdb, "pthread_create");
+        targs[i].id = -1;
+        err = true;
+      }
+    }
+    for(int i = 0; i < tnum; i++){
+      if(targs[i].id == -1) continue;
+      void *rv;
+      if(pthread_join(threads[i], &rv) != 0){
+        eprint(hdb, "pthread_join");
+        err = true;
+      } else if(rv){
+        err = true;
+      }
+    }
+  }
+  iprintf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
+  iprintf("size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
+  mprint(hdb);
+  if(!tchdbclose(hdb)){
+    eprint(hdb, "tchdbclose");
+    err = true;
+  }
+  tchdbdel(hdb);
+  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
 /* thread the write function */
 static void *threadwrite(void *targ){
   TCHDB *hdb = ((TARGWRITE *)targ)->hdb;
@@ -648,7 +785,7 @@ static void *threadwrite(void *targ){
         break;
       }
     }
-    if(id <= 0 && rnum > 250 && i % (rnum / 250) == 0){
+    if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
       fflush(stdout);
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
@@ -926,6 +1063,120 @@ static void *threadwicked(void *targ){
         }
       }
     }
+  }
+  return err ? "error" : NULL;
+}
+
+
+/* thread the typical function */
+static void *threadtypical(void *targ){
+  TCHDB *hdb = ((TARGTYPICAL *)targ)->hdb;
+  int rnum = ((TARGTYPICAL *)targ)->rnum;
+  bool nc = ((TARGTYPICAL *)targ)->nc;
+  int id = ((TARGTYPICAL *)targ)->id;
+  bool err = false;
+  TCMAP *map = (!nc && id == 0) ? tcmapnew2(rnum + 1) : NULL;
+  int base = id * rnum;
+  for(int i = 1; !err && i <= rnum; i++){
+    char buf[RECBUFSIZ];
+    int len = sprintf(buf, "%08d", base + myrand(i));
+    int rnd = myrand(100);
+    if(rnd < 10){
+      if(!tchdbput(hdb, buf, len, buf, len)){
+        eprint(hdb, "tchdbput");
+        err = true;
+      }
+      if(map) tcmapput(map, buf, len, buf, len);
+    } else if(rnd < 15){
+      if(!tchdbputkeep(hdb, buf, len, buf, len) && tchdbecode(hdb) != TCEKEEP){
+        eprint(hdb, "tchdbputkeep");
+        err = true;
+      }
+      if(map) tcmapputkeep(map, buf, len, buf, len);
+    } else if(rnd < 20){
+      if(!tchdbputcat(hdb, buf, len, buf, len)){
+        eprint(hdb, "tchdbputcat");
+        err = true;
+      }
+      if(map) tcmapputcat(map, buf, len, buf, len);
+    } else if(rnd < 25){
+      if(!tchdbputasync(hdb, buf, len, buf, len)){
+        eprint(hdb, "tchdbputasync");
+        err = true;
+      }
+      if(map) tcmapput(map, buf, len, buf, len);
+    } else if(rnd < 30){
+      if(!tchdbout(hdb, buf, len) && tchdbecode(hdb) && tchdbecode(hdb) != TCENOREC){
+        eprint(hdb, "tchdbout");
+        err = true;
+      }
+      if(map) tcmapout(map, buf, len);
+    } else if(rnd < 31){
+      if(myrand(10) == 0 && !tchdbiterinit(hdb) && tchdbecode(hdb) != TCENOREC){
+        eprint(hdb, "tchdbiterinit");
+        err = true;
+      }
+      for(int j = 0; !err && j < 10; j++){
+        int ksiz;
+        char *kbuf = tchdbiternext(hdb, &ksiz);
+        if(kbuf){
+          free(kbuf);
+        } else if(tchdbecode(hdb) != TCEINVALID && tchdbecode(hdb) != TCENOREC){
+          eprint(hdb, "tchdbiternext");
+          err = true;
+        }
+      }
+    } else {
+      int vsiz;
+      char *vbuf = tchdbget(hdb, buf, len, &vsiz);
+      if(vbuf){
+        if(map){
+          int msiz;
+          const char *mbuf = tcmapget(map, buf, len, &msiz);
+          if(msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
+            eprint(hdb, "(validation)");
+            err = true;
+          }
+        }
+        free(vbuf);
+      } else {
+        if(tchdbecode(hdb) != TCENOREC){
+          eprint(hdb, "tchdbget");
+          err = true;
+        }
+        if(map && tcmapget(map, buf, len, &vsiz)){
+          eprint(hdb, "(validation)");
+          err = true;
+        }
+      }
+    }
+    if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
+    }
+  }
+  if(map){
+    tcmapiterinit(map);
+    int ksiz;
+    const char *kbuf;
+    while(!err && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
+      int vsiz;
+      char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
+      if(vbuf){
+        int msiz;
+        const char *mbuf = tcmapget(map, kbuf, ksiz, &msiz);
+        if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
+          eprint(hdb, "(validation)");
+          err = true;
+        }
+        free(vbuf);
+      } else {
+        eprint(hdb, "(validation)");
+        err = true;
+      }
+    }
+    tcmapdel(map);
   }
   return err ? "error" : NULL;
 }

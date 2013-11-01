@@ -48,6 +48,13 @@ typedef struct {                         // type of structure for wicked thread
   TCMAP *map;
 } TARGWICKED;
 
+typedef struct {                         // type of structure for typical thread
+  TCBDB *bdb;
+  int rnum;
+  bool nc;
+  int id;
+} TARGTYPICAL;
+
 
 /* global variables */
 const char *g_progname;                  // program name
@@ -65,15 +72,19 @@ static int runwrite(int argc, char **argv);
 static int runread(int argc, char **argv);
 static int runremove(int argc, char **argv);
 static int runwicked(int argc, char **argv);
+static int runtypical(int argc, char **argv);
 static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
                      int bnum, int apow, int fpow, int opts, int omode);
 static int procread(const char *path, int tnum, int omode, bool wb);
 static int procremove(const char *path, int tnum, int omode);
 static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc);
+static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmemb,
+                       int bnum, int apow, int fpow, int opts, int omode, bool nc);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
 static void *threadremove(void *targ);
 static void *threadwicked(void *targ);
+static void *threadtypical(void *targ);
 
 
 /* main routine */
@@ -93,6 +104,8 @@ int main(int argc, char **argv){
     rv = runremove(argc, argv);
   } else if(!strcmp(argv[1], "wicked")){
     rv = runwicked(argc, argv);
+  } else if(!strcmp(argv[1], "typical")){
+    rv = runtypical(argc, argv);
   } else {
     usage();
   }
@@ -102,7 +115,7 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: test cases of the hash database API of Tokyo Cabinet\n", g_progname);
+  fprintf(stderr, "%s: test cases of the B+ tree database API of Tokyo Cabinet\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s write [-tl] [-td|-tb] [-nl|-nb] path tnum rnum"
@@ -111,6 +124,8 @@ static void usage(void){
   fprintf(stderr, "  %s remove [-nl|-nb] path tnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum\n",
           g_progname);
+  fprintf(stderr, "  %s typical [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum"
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -336,6 +351,70 @@ static int runwicked(int argc, char **argv){
   int rnum = atoi(rstr);
   if(tnum < 1 || rnum < 1) usage();
   int rv = procwicked(path, tnum, rnum, opts, omode, nc);
+  return rv;
+}
+
+
+/* parse arguments of typical command */
+static int runtypical(int argc, char **argv){
+  char *path = NULL;
+  char *tstr = NULL;
+  char *rstr = NULL;
+  char *lmstr = NULL;
+  char *nmstr = NULL;
+  char *bstr = NULL;
+  char *astr = NULL;
+  char *fstr = NULL;
+  int opts = 0;
+  int omode = 0;
+  bool nc = false;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-tl")){
+        opts |= BDBTLARGE;
+      } else if(!strcmp(argv[i], "-td")){
+        opts |= BDBTDEFLATE;
+      } else if(!strcmp(argv[i], "-tb")){
+        opts |= BDBTTCBS;
+      } else if(!strcmp(argv[i], "-nl")){
+        omode |= BDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= BDBOLCKNB;
+      } else if(!strcmp(argv[i], "-nc")){
+        nc = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else if(!tstr){
+      tstr = argv[i];
+    } else if(!rstr){
+      rstr = argv[i];
+    } else if(!lmstr){
+      lmstr = argv[i];
+    } else if(!nmstr){
+      nmstr = argv[i];
+    } else if(!bstr){
+      bstr = argv[i];
+    } else if(!astr){
+      astr = argv[i];
+    } else if(!fstr){
+      fstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path || !tstr || !rstr) usage();
+  int tnum = atoi(tstr);
+  int rnum = atoi(rstr);
+  if(tnum < 1 || rnum < 1) usage();
+  int lmemb = lmstr ? atoi(lmstr) : -1;
+  int nmemb = nmstr ? atoi(nmstr) : -1;
+  int bnum = bstr ? atoi(bstr) : -1;
+  int apow = astr ? atoi(astr) : -1;
+  int fpow = fstr ? atoi(fstr) : -1;
+  int rv = proctypical(path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc);
   return rv;
 }
 
@@ -619,6 +698,73 @@ static int procwicked(const char *path, int tnum, int rnum, int opts, int omode,
     if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
   }
   tcmapdel(map);
+  iprintf("record number: %llu\n", (unsigned long long)tcbdbrnum(bdb));
+  iprintf("size: %llu\n", (unsigned long long)tcbdbfsiz(bdb));
+  mprint(bdb);
+  if(!tcbdbclose(bdb)){
+    eprint(bdb, "tcbdbclose");
+    err = true;
+  }
+  tcbdbdel(bdb);
+  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+/* perform typical command */
+static int proctypical(const char *path, int tnum, int rnum, int lmemb, int nmemb,
+                       int bnum, int apow, int fpow, int opts, int omode, bool nc){
+  iprintf("<Typical Access Test>\n  path=%s  tnum=%d  rnum=%d  lmemb=%d  nmemb=%d"
+          "  bnum=%d  apow=%d  fpow=%d  opts=%d  omode=%d  nc=%d\n\n",
+          path, tnum, rnum, lmemb, nmemb, bnum, apow, fpow, opts, omode, nc);
+  bool err = false;
+  double stime = tctime();
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbsetmutex(bdb)){
+    eprint(bdb, "tcbdbsetmutex");
+    err = true;
+  }
+  if(!tcbdbtune(bdb, lmemb, nmemb, bnum, apow, fpow, opts)){
+    eprint(bdb, "tcbdbtune");
+    err = true;
+  }
+  if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | BDBOTRUNC | omode)){
+    eprint(bdb, "tcbdbopen");
+    err = true;
+  }
+  TARGTYPICAL targs[tnum];
+  pthread_t threads[tnum];
+  if(tnum == 1){
+    targs[0].bdb = bdb;
+    targs[0].rnum = rnum;
+    targs[0].nc = nc;
+    targs[0].id = 0;
+    if(threadtypical(targs) != NULL) err = true;
+  } else {
+    for(int i = 0; i < tnum; i++){
+      targs[i].bdb = bdb;
+      targs[i].rnum = rnum;
+      targs[i].nc = nc;
+      targs[i].id = i;
+      if(pthread_create(threads + i, NULL, threadtypical, targs + i) != 0){
+        eprint(bdb, "pthread_create");
+        targs[i].id = -1;
+        err = true;
+      }
+    }
+    for(int i = 0; i < tnum; i++){
+      if(targs[i].id == -1) continue;
+      void *rv;
+      if(pthread_join(threads[i], &rv) != 0){
+        eprint(bdb, "pthread_join");
+        err = true;
+      } else if(rv){
+        err = true;
+      }
+    }
+  }
   iprintf("record number: %llu\n", (unsigned long long)tcbdbrnum(bdb));
   iprintf("size: %llu\n", (unsigned long long)tcbdbfsiz(bdb));
   mprint(bdb);
@@ -960,6 +1106,179 @@ static void *threadwicked(void *targ){
     }
   }
   tcbdbcurdel(cur);
+  return err ? "error" : NULL;
+}
+
+
+/* thread the typical function */
+static void *threadtypical(void *targ){
+  TCBDB *bdb = ((TARGTYPICAL *)targ)->bdb;
+  int rnum = ((TARGTYPICAL *)targ)->rnum;
+  bool nc = ((TARGTYPICAL *)targ)->nc;
+  int id = ((TARGTYPICAL *)targ)->id;
+  bool err = false;
+  TCMAP *map = (!nc && id == 0) ? tcmapnew2(rnum + 1) : NULL;
+  int base = id * rnum;
+  BDBCUR *cur = tcbdbcurnew(bdb);
+  for(int i = 1; !err && i <= rnum; i++){
+    char buf[RECBUFSIZ];
+    int len = sprintf(buf, "%08d", base + myrand(i));
+    int rnd = myrand(100);
+    if(rnd < 10){
+      if(!tcbdbput(bdb, buf, len, buf, len)){
+        eprint(bdb, "tcbdbput");
+        err = true;
+      }
+      if(map) tcmapput(map, buf, len, buf, len);
+    } else if(rnd < 15){
+      if(!tcbdbputkeep(bdb, buf, len, buf, len) && tcbdbecode(bdb) != TCEKEEP){
+        eprint(bdb, "tcbdbputkeep");
+        err = true;
+      }
+      if(map) tcmapputkeep(map, buf, len, buf, len);
+    } else if(rnd < 20){
+      if(!tcbdbputcat(bdb, buf, len, buf, len)){
+        eprint(bdb, "tcbdbputcat");
+        err = true;
+      }
+      if(map) tcmapputcat(map, buf, len, buf, len);
+    } else if(rnd < 25){
+      if(!tcbdbout(bdb, buf, len) && tcbdbecode(bdb) && tcbdbecode(bdb) != TCENOREC){
+        eprint(bdb, "tcbdbout");
+        err = true;
+      }
+      if(map) tcmapout(map, buf, len);
+    } else if(rnd < 27){
+      switch(myrand(3)){
+      case 0:
+        if(!tcbdbcurfirst(cur) && tcbdbecode(bdb) != TCENOREC){
+          eprint(bdb, "tcbdbcurfirst");
+          err = true;
+        }
+        for(int j = 0; !err && j < 10; j++){
+          int ksiz;
+          char *kbuf = tcbdbcurkey(cur, &ksiz);
+          if(kbuf){
+            int vsiz;
+            char *vbuf = tcbdbcurval(cur, &vsiz);
+            if(vbuf){
+              free(vbuf);
+            } else if(tcbdbecode(bdb) != TCENOREC){
+              eprint(bdb, "tcbdbcurval");
+              err = true;
+            }
+            free(kbuf);
+          } else if(tcbdbecode(bdb) != TCENOREC){
+            eprint(bdb, "tcbdbcurkey");
+            err = true;
+          }
+          tcbdbcurnext(cur);
+        }
+        break;
+      case 1:
+        if(!tcbdbcurlast(cur) && tcbdbecode(bdb) != TCENOREC){
+          eprint(bdb, "tcbdbcurlast");
+          err = true;
+        }
+        for(int j = 0; !err && j < 10; j++){
+          int ksiz;
+          char *kbuf = tcbdbcurkey(cur, &ksiz);
+          if(kbuf){
+            int vsiz;
+            char *vbuf = tcbdbcurval(cur, &vsiz);
+            if(vbuf){
+              free(vbuf);
+            } else if(tcbdbecode(bdb) != TCENOREC){
+              eprint(bdb, "tcbdbcurval");
+              err = true;
+            }
+            free(kbuf);
+          } else if(tcbdbecode(bdb) != TCENOREC){
+            eprint(bdb, "tcbdbcurkey");
+            err = true;
+          }
+          tcbdbcurprev(cur);
+        }
+        break;
+      case 2:
+        if(!tcbdbcurjump(cur, buf, len) && tcbdbecode(bdb) != TCENOREC){
+          eprint(bdb, "tcbdbcurjump");
+          err = true;
+        }
+        for(int j = 0; !err && j < 10; j++){
+          int ksiz;
+          char *kbuf = tcbdbcurkey(cur, &ksiz);
+          if(kbuf){
+            int vsiz;
+            char *vbuf = tcbdbcurval(cur, &vsiz);
+            if(vbuf){
+              free(vbuf);
+            } else if(tcbdbecode(bdb) != TCENOREC){
+              eprint(bdb, "tcbdbcurval");
+              err = true;
+            }
+            free(kbuf);
+          } else if(tcbdbecode(bdb) != TCENOREC){
+            eprint(bdb, "tcbdbcurkey");
+            err = true;
+          }
+          tcbdbcurnext(cur);
+        }
+        break;
+      }
+    } else {
+      int vsiz;
+      char *vbuf = tcbdbget(bdb, buf, len, &vsiz);
+      if(vbuf){
+        if(map){
+          int msiz;
+          const char *mbuf = tcmapget(map, buf, len, &msiz);
+          if(msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
+            eprint(bdb, "(validation)");
+            err = true;
+          }
+        }
+        free(vbuf);
+      } else {
+        if(tcbdbecode(bdb) != TCENOREC){
+          eprint(bdb, "tcbdbget");
+          err = true;
+        }
+        if(map && tcmapget(map, buf, len, &vsiz)){
+          eprint(bdb, "(validation)");
+          err = true;
+        }
+      }
+    }
+    if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
+    }
+  }
+  tcbdbcurdel(cur);
+  if(map){
+    tcmapiterinit(map);
+    int ksiz;
+    const char *kbuf;
+    while(!err && (kbuf = tcmapiternext(map, &ksiz)) != NULL){
+      int vsiz;
+      char *vbuf = tcbdbget(bdb, kbuf, ksiz, &vsiz);
+      if(vbuf){
+        int msiz;
+        const char *mbuf = tcmapget(map, kbuf, ksiz, &msiz);
+        if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
+          eprint(bdb, "(validation)");
+          err = true;
+        }
+        free(vbuf);
+      } else {
+        eprint(bdb, "(validation)");
+        err = true;
+      }
+    }
+    tcmapdel(map);
+  }
   return err ? "error" : NULL;
 }
 

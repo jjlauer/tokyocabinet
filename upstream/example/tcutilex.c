@@ -1,6 +1,5 @@
 #include <tcutil.h>
 #include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -16,7 +15,7 @@ int main(int argc, char **argv){
     tcxstrcat2(xstr, "step");
     tcxstrcat2(xstr, "jump");
     /* print the size and the content */
-    printf("%d:%s\n", tcxstrsize(xstr), tcxstrptr(xstr));
+    printf("%d:%s\n", tcxstrsize(xstr), (char *)tcxstrptr(xstr));
     /* delete the object */
     tcxstrdel(xstr);
   }

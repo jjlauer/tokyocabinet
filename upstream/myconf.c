@@ -28,6 +28,11 @@ int _tc_dummyfunc(void){
 }
 
 
+int _tc_dummyfuncv(int a, ...){
+  return 0;
+}
+
+
 
 /*************************************************************************************************
  * for ZLIB
@@ -62,11 +67,11 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
   zs.zfree = Z_NULL;
   zs.opaque = Z_NULL;
   switch(mode){
-  case _TC_ZMRAW:
+  case _TCZMRAW:
     if(deflateInit2(&zs, 5, Z_DEFLATED, -15, 7, Z_DEFAULT_STRATEGY) != Z_OK)
       return NULL;
     break;
-  case _TC_ZMGZIP:
+  case _TCZMGZIP:
     if(deflateInit2(&zs, 6, Z_DEFLATED, 15 + 16, 9, Z_DEFAULT_STRATEGY) != Z_OK)
       return NULL;
     break;
@@ -120,7 +125,7 @@ static char *_tc_deflate_impl(const char *ptr, int size, int *sp, int mode){
   memcpy(buf + bsiz, obuf, osiz);
   bsiz += osiz;
   buf[bsiz] = '\0';
-  if(mode == _TC_ZMRAW) bsiz++;
+  if(mode == _TCZMRAW) bsiz++;
   *sp = bsiz;
   deflateEnd(&zs);
   return buf;
@@ -137,10 +142,10 @@ static char *_tc_inflate_impl(const char *ptr, int size, int *sp, int mode){
   zs.zfree = Z_NULL;
   zs.opaque = Z_NULL;
   switch(mode){
-  case _TC_ZMRAW:
+  case _TCZMRAW:
     if(inflateInit2(&zs, -15) != Z_OK) return NULL;
     break;
-  case _TC_ZMGZIP:
+  case _TCZMGZIP:
     if(inflateInit2(&zs, 15 + 16) != Z_OK) return NULL;
     break;
   default:
