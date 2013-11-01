@@ -32,13 +32,13 @@ static int myrand(int range);
 static int runxstr(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runmap(int argc, char **argv);
-static int runwicked(int argc, char **argv);
 static int runmisc(int argc, char **argv);
+static int runwicked(int argc, char **argv);
 static int procxstr(int rnum);
 static int proclist(int rnum, int anum);
 static int procmap(int rnum, int bnum);
-static int procwicked(int rnum);
 static int procmisc(int rnum);
+static int procwicked(int rnum);
 
 
 /* main routine */
@@ -53,10 +53,10 @@ int main(int argc, char **argv){
     rv = runlist(argc, argv);
   } else if(!strcmp(argv[1], "map")){
     rv = runmap(argc, argv);
-  } else if(!strcmp(argv[1], "wicked")){
-    rv = runwicked(argc, argv);
   } else if(!strcmp(argv[1], "misc")){
     rv = runmisc(argc, argv);
+  } else if(!strcmp(argv[1], "wicked")){
+    rv = runwicked(argc, argv);
   } else {
     usage();
   }
@@ -163,26 +163,6 @@ static int runmap(int argc, char **argv){
 }
 
 
-/* parse arguments of wicked command */
-static int runwicked(int argc, char **argv){
-  char *rstr = NULL;
-  for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      usage();
-    } else if(!rstr){
-      rstr = argv[i];
-    } else {
-      usage();
-    }
-  }
-  if(!rstr) usage();
-  int rnum = atoi(rstr);
-  if(rnum < 1) usage();
-  int rv = procwicked(rnum);
-  return rv;
-}
-
-
 /* parse arguments of misc command */
 static int runmisc(int argc, char **argv){
   char *rstr = NULL;
@@ -199,6 +179,26 @@ static int runmisc(int argc, char **argv){
   int rnum = atoi(rstr);
   if(rnum < 1) usage();
   int rv = procmisc(rnum);
+  return rv;
+}
+
+
+/* parse arguments of wicked command */
+static int runwicked(int argc, char **argv){
+  char *rstr = NULL;
+  for(int i = 2; i < argc; i++){
+    if(argv[i][0] == '-'){
+      usage();
+    } else if(!rstr){
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!rstr) usage();
+  int rnum = atoi(rstr);
+  if(rnum < 1) usage();
+  int rv = procwicked(rnum);
   return rv;
 }
 
@@ -264,6 +264,242 @@ static int procmap(int rnum, int bnum){
   }
   tcmapdel(map);
   iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("ok\n\n");
+  return 0;
+}
+
+
+/* perform misc command */
+static int procmisc(int rnum){
+  iprintf("<Miscellaneous Test>\n  rnum=%d\n\n", rnum);
+  double stime = tctime();
+  bool err = false;
+  for(int i = 1; i <= rnum && !err; i++){
+    const char *str = "5%2+3-1=4 \"Yes/No\" <a&b>";
+    int slen = strlen(str);
+    char *buf, *dec;
+    int bsiz, dsiz;
+    TCXSTR *xstr;
+    TCLIST *list;
+    TCMAP *map;
+    buf = tcmemdup(str, slen);
+    xstr = tcxstrfrommalloc(buf, slen);
+    buf = tcxstrtomalloc(xstr);
+    if(strcmp(buf, str)) err = true;
+    free(buf);
+    if(tclmax(1, 2) != 2) err = true;
+    if(tclmin(1, 2) != 1) err = true;
+    if(tcstricmp("abc", "ABC") != 0) err = true;
+    if(!tcstrfwm("abc", "ab")) err = true;
+    if(!tcstrifwm("abc", "AB")) err = true;
+    if(!tcstrbwm("abc", "bc")) err = true;
+    if(!tcstribwm("abc", "BC")) err = true;
+    buf = tcmemdup("abcde", 5);
+    tcstrtoupper(buf);
+    if(strcmp(buf, "ABCDE")) err = true;
+    tcstrtolower(buf);
+    if(strcmp(buf, "abcde")) err = true;
+    free(buf);
+    buf = tcmemdup("  ab  cd  ", 10);
+    tcstrtrim(buf);
+    if(strcmp(buf, "ab  cd")) err = true;
+    tcstrsqzspc(buf);
+    if(strcmp(buf, "ab cd")) err = true;
+    tcstrsubchr(buf, "cd", "C");
+    if(strcmp(buf, "ab C")) err = true;
+    if(tcstrcntutf(buf) != 4) err = true;
+    tcstrcututf(buf, 2);
+    if(strcmp(buf, "ab")) err = true;
+    free(buf);
+    if(i % 10 == 1){
+      list = tcstrsplit(",a,b..c,d,", ",.");
+      if(tclistnum(list) != 7) err = true;
+      tclistdel(list);
+    }
+    buf = tcurlencode(str, slen);
+    if(strcmp(buf, "5%252%2B3-1%3D4%20%22Yes%2FNo%22%20%3Ca%26b%3E")) err = true;
+    dec = tcurldecode(buf, &dsiz);
+    if(dsiz != slen || strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    if(i % 10 == 1){
+      map = tcurlbreak("http://mikio:oikim@estraier.net:1978/foo/bar/baz.cgi?ab=cd&ef=jkl#quux");
+      const char *elem;
+      if(!(elem = tcmapget2(map, "self")) ||
+         strcmp(elem, "http://mikio:oikim@estraier.net:1978/foo/bar/baz.cgi?ab=cd&ef=jkl#quux"))
+        err = true;
+      if(!(elem = tcmapget2(map, "scheme")) || strcmp(elem, "http")) err = true;
+      if(!(elem = tcmapget2(map, "host")) || strcmp(elem, "estraier.net")) err = true;
+      if(!(elem = tcmapget2(map, "port")) || strcmp(elem, "1978")) err = true;
+      if(!(elem = tcmapget2(map, "authority")) || strcmp(elem, "mikio:oikim")) err = true;
+      if(!(elem = tcmapget2(map, "path")) || strcmp(elem, "/foo/bar/baz.cgi")) err = true;
+      if(!(elem = tcmapget2(map, "file")) || strcmp(elem, "baz.cgi")) err = true;
+      if(!(elem = tcmapget2(map, "query")) || strcmp(elem, "ab=cd&ef=jkl")) err = true;
+      if(!(elem = tcmapget2(map, "fragment")) || strcmp(elem, "quux")) err = true;
+      tcmapdel(map);
+      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "http://A:B@C.D:1/E/F/G.H?I=J#K");
+      if(strcmp(buf, "http://A:B@c.d:1/E/F/G.H?I=J#K")) err = true;
+      free(buf);
+      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "/E/F/G.H?I=J#K");
+      if(strcmp(buf, "http://a:b@c.d:1/E/F/G.H?I=J#K")) err = true;
+      free(buf);
+      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "G.H?I=J#K");
+      if(strcmp(buf, "http://a:b@c.d:1/e/f/G.H?I=J#K")) err = true;
+      free(buf);
+      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "?I=J#K");
+      if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?I=J#K")) err = true;
+      free(buf);
+      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "#K");
+      if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?i=j#K")) err = true;
+      free(buf);
+    }
+    buf = tcbaseencode(str, slen);
+    if(strcmp(buf, "NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+")) err = true;
+    dec = tcbasedecode(buf, &dsiz);
+    if(dsiz != slen || strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    buf = tcquoteencode(str, slen);
+    if(strcmp(buf, "5%2+3-1=3D4 \"Yes/No\" <a&b>")) err = true;
+    dec = tcquotedecode(buf, &dsiz);
+    if(dsiz != slen || strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    buf = tcmimeencode(str, "UTF-8", true);
+    if(strcmp(buf, "=?UTF-8?B?NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+?=")) err = true;
+    char encname[32];
+    dec = tcmimedecode(buf, encname);
+    if(strcmp(dec, str) || strcmp(encname, "UTF-8")) err = true;
+    free(dec);
+    free(buf);
+    buf = tcpackencode(str, slen, &bsiz);
+    dec = tcpackdecode(buf, bsiz, &dsiz);
+    if(dsiz != slen || strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    buf = tcbsencode(str, slen, &bsiz);
+    dec = tcbsdecode(buf, bsiz, &dsiz);
+    if(dsiz != slen || strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    int idx;
+    buf = tcbwtencode(str, slen, &idx);
+    if(memcmp(buf, "4\"o 5a23s-%+=> 1b/\"<&YNe", slen) || idx != 13) err = true;
+    dec = tcbwtdecode(buf, slen, idx);
+    if(memcmp(dec, str, slen)) err = true;
+    free(dec);
+    free(buf);
+    if(_tc_deflate){
+      if((buf = tcdeflate(str, slen, &bsiz)) != NULL){
+        if((dec = tcinflate(buf, bsiz, &dsiz)) != NULL){
+          if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
+          free(dec);
+        } else {
+          err = true;
+        }
+        free(buf);
+      } else {
+        err = true;
+      }
+      if((buf = tcgzipencode(str, slen, &bsiz)) != NULL){
+        if((dec = tcgzipdecode(buf, bsiz, &dsiz)) != NULL){
+          if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
+          free(dec);
+        } else {
+          err = true;
+        }
+        free(buf);
+      } else {
+        err = true;
+      }
+      if(tcgetcrc("hoge", 4) % 10000 != 7034) err = true;
+    }
+    buf = tcxmlescape(str);
+    if(strcmp(buf, "5%2+3-1=4 &quot;Yes/No&quot; &lt;a&amp;b&gt;")) err = true;
+    dec = tcxmlunescape(buf);
+    if(strcmp(dec, str)) err = true;
+    free(dec);
+    free(buf);
+    if(i % 10 == 1){
+      list = tcxmlbreak("<abc de=\"foo&amp;\" gh='&lt;bar&gt;'>xyz<br>\na<!--<mikio>--></abc>");
+      for(int j = 0; j < tclistnum(list); j++){
+        const char *elem = tclistval2(list, j);
+        TCMAP *attrs = tcxmlattrs(elem);
+        tcmapdel(attrs);
+      }
+      tclistdel(list);
+    }
+    if(i % 10 == 1){
+      for(int16_t j = 1; j <= 0x2000; j *= 2){
+        for(int16_t num = j - 1; num <= j + 1; num++){
+          int16_t nnum = TCHTOIS(num);
+          if(num != TCITOHS(nnum)) err = true;
+        }
+      }
+      for(int32_t j = 1; j <= 0x20000000; j *= 2){
+        for(int32_t num = j - 1; num <= j + 1; num++){
+          int32_t nnum = TCHTOIL(num);
+          if(num != TCITOHL(nnum)) err = true;
+          char buf[TC_VNUMBUFSIZ];
+          int step, nstep;
+          TC_SETVNUMBUF(step, buf, num);
+          TC_READVNUMBUF(buf, nnum, nstep);
+          if(num != nnum || step != nstep) err = true;
+        }
+      }
+      for(int64_t j = 1; j <= 0x2000000000000000; j *= 2){
+        for(int64_t num = j - 1; num <= j + 1; num++){
+          int64_t nnum = TCHTOILL(num);
+          if(num != TCITOHLL(nnum)) err = true;
+          char buf[TC_VNUMBUFSIZ];
+          int step, nstep;
+          TC_SETVNUMBUF64(step, buf, num);
+          TC_READVNUMBUF64(buf, nnum, nstep);
+          if(num != nnum || step != nstep) err = true;
+        }
+      }
+      char *bitmap = TCBITMAPNEW(100);
+      for(int j = 0; j < 100; j++){
+        if(j % 3 == 0) TCBITMAPON(bitmap, j);
+        if(j % 5 == 0) TCBITMAPOFF(bitmap, j);
+      }
+      for(int j = 0; j < 100; j++){
+        if(j % 5 == 0){
+          if(TCBITMAPCHECK(bitmap, j)) err = true;
+        } else if(j % 3 == 0){
+          if(!TCBITMAPCHECK(bitmap, j)) err = true;
+        }
+      }
+      TCBITMAPDEL(bitmap);
+      buf = tcmalloc(i / 8 + 2);
+      TCBITSTRM strm;
+      TCBITSTRMINITW(strm, buf);
+      for(int j = 0; j < i; j++){
+        int sign = j % 3 == 0 || j % 7 == 0;
+        TCBITSTRMCAT(strm, sign);
+      }
+      TCBITSTRMSETEND(strm);
+      int bnum = TCBITSTRMNUM(strm);
+      if(bnum != i) err = true;
+      TCBITSTRMINITR(strm, buf, bsiz);
+      for(int j = 0; j < i; j++){
+        int sign;
+        TCBITSTRMREAD(strm, sign);
+        if(sign != (j % 3 == 0 || j % 7 == 0)) err = true;
+      }
+      free(buf);
+    }
+    if(rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
+    }
+  }
+  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  if(err){
+    iprintf("error\n\n");
+    return 1;
+  }
   iprintf("ok\n\n");
   return 0;
 }
@@ -513,195 +749,6 @@ static int procwicked(int rnum){
   }
   if(rnum % 50 > 0) iprintf(" (%08d)\n", rnum);
   iprintf("time: %.3f\n", (tctime() - stime) / 1000);
-  iprintf("ok\n\n");
-  return 0;
-}
-
-
-/* perform misc command */
-static int procmisc(int rnum){
-  iprintf("<Miscellaneous Test>\n  rnum=%d\n\n", rnum);
-  double stime = tctime();
-  bool err = false;
-  for(int i = 1; i <= rnum && !err; i++){
-    const char *str = "5%2+3-1=4 \"Yes/No\" <a&b>";
-    int slen = strlen(str);
-    char *buf, *dec;
-    int bsiz, dsiz;
-    TCXSTR *xstr;
-    TCLIST *list;
-    TCMAP *map;
-    buf = tcmemdup(str, slen);
-    xstr = tcxstrfrommalloc(buf, slen);
-    buf = tcxstrtomalloc(xstr);
-    if(strcmp(buf, str)) err = true;
-    free(buf);
-    if(tclmax(1, 2) != 2) err = true;
-    if(tclmin(1, 2) != 1) err = true;
-    if(tcstricmp("abc", "ABC") != 0) err = true;
-    if(!tcstrfwm("abc", "ab")) err = true;
-    if(!tcstrifwm("abc", "AB")) err = true;
-    if(!tcstrbwm("abc", "bc")) err = true;
-    if(!tcstribwm("abc", "BC")) err = true;
-    buf = tcmemdup("abcde", 5);
-    tcstrtoupper(buf);
-    if(strcmp(buf, "ABCDE")) err = true;
-    tcstrtolower(buf);
-    if(strcmp(buf, "abcde")) err = true;
-    free(buf);
-    buf = tcmemdup("  ab  cd  ", 10);
-    tcstrtrim(buf);
-    if(strcmp(buf, "ab  cd")) err = true;
-    tcstrsqzspc(buf);
-    if(strcmp(buf, "ab cd")) err = true;
-    tcstrsubchr(buf, "cd", "C");
-    if(strcmp(buf, "ab C")) err = true;
-    if(tcstrcntutf(buf) != 4) err = true;
-    tcstrcututf(buf, 2);
-    if(strcmp(buf, "ab")) err = true;
-    free(buf);
-    if(i % 10 == 1){
-      list = tcstrsplit(",a,b..c,d,", ",.");
-      if(tclistnum(list) != 7) err = true;
-      tclistdel(list);
-    }
-    buf = tcurlencode(str, slen);
-    if(strcmp(buf, "5%252%2B3-1%3D4%20%22Yes%2FNo%22%20%3Ca%26b%3E")) err = true;
-    dec = tcurldecode(buf, &dsiz);
-    if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
-    if(i % 10 == 1){
-      map = tcurlbreak("http://mikio:oikim@estraier.net:1978/foo/bar/baz.cgi?ab=cd&ef=jkl#quux");
-      const char *elem;
-      if(!(elem = tcmapget2(map, "self")) ||
-         strcmp(elem, "http://mikio:oikim@estraier.net:1978/foo/bar/baz.cgi?ab=cd&ef=jkl#quux"))
-        err = true;
-      if(!(elem = tcmapget2(map, "scheme")) || strcmp(elem, "http")) err = true;
-      if(!(elem = tcmapget2(map, "host")) || strcmp(elem, "estraier.net")) err = true;
-      if(!(elem = tcmapget2(map, "port")) || strcmp(elem, "1978")) err = true;
-      if(!(elem = tcmapget2(map, "authority")) || strcmp(elem, "mikio:oikim")) err = true;
-      if(!(elem = tcmapget2(map, "path")) || strcmp(elem, "/foo/bar/baz.cgi")) err = true;
-      if(!(elem = tcmapget2(map, "file")) || strcmp(elem, "baz.cgi")) err = true;
-      if(!(elem = tcmapget2(map, "query")) || strcmp(elem, "ab=cd&ef=jkl")) err = true;
-      if(!(elem = tcmapget2(map, "fragment")) || strcmp(elem, "quux")) err = true;
-      tcmapdel(map);
-      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "http://A:B@C.D:1/E/F/G.H?I=J#K");
-      if(strcmp(buf, "http://A:B@c.d:1/E/F/G.H?I=J#K")) err = true;
-      free(buf);
-      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "/E/F/G.H?I=J#K");
-      if(strcmp(buf, "http://a:b@c.d:1/E/F/G.H?I=J#K")) err = true;
-      free(buf);
-      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "G.H?I=J#K");
-      if(strcmp(buf, "http://a:b@c.d:1/e/f/G.H?I=J#K")) err = true;
-      free(buf);
-      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "?I=J#K");
-      if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?I=J#K")) err = true;
-      free(buf);
-      buf = tcurlresolve("http://a:b@c.d:1/e/f/g.h?i=j#k", "#K");
-      if(strcmp(buf, "http://a:b@c.d:1/e/f/g.h?i=j#K")) err = true;
-      free(buf);
-    }
-    buf = tcbaseencode(str, slen);
-    if(strcmp(buf, "NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+")) err = true;
-    dec = tcbasedecode(buf, &dsiz);
-    if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
-    buf = tcquoteencode(str, slen);
-    if(strcmp(buf, "5%2+3-1=3D4 \"Yes/No\" <a&b>")) err = true;
-    dec = tcquotedecode(buf, &dsiz);
-    if(dsiz != slen || strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
-    buf = tcmimeencode(str, "UTF-8", true);
-    if(strcmp(buf, "=?UTF-8?B?NSUyKzMtMT00ICJZZXMvTm8iIDxhJmI+?=")) err = true;
-    char encname[32];
-    dec = tcmimedecode(buf, encname);
-    if(strcmp(dec, str) || strcmp(encname, "UTF-8")) err = true;
-    free(dec);
-    free(buf);
-    if(_tc_deflate){
-      if((buf = tcdeflate(str, slen, &bsiz)) != NULL){
-        if((dec = tcinflate(buf, bsiz, &dsiz)) != NULL){
-          if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
-          free(dec);
-        } else {
-          err = true;
-        }
-        free(buf);
-      } else {
-        err = true;
-      }
-      if((buf = tcgzipencode(str, slen, &bsiz)) != NULL){
-        if((dec = tcgzipdecode(buf, bsiz, &dsiz)) != NULL){
-          if(slen != dsiz || memcmp(str, dec, dsiz)) err = true;
-          free(dec);
-        } else {
-          err = true;
-        }
-        free(buf);
-      } else {
-        err = true;
-      }
-      if(tcgetcrc("hoge", 4) % 10000 != 7034) err = true;
-    }
-    buf = tcxmlescape(str);
-    if(strcmp(buf, "5%2+3-1=4 &quot;Yes/No&quot; &lt;a&amp;b&gt;")) err = true;
-    dec = tcxmlunescape(buf);
-    if(strcmp(dec, str)) err = true;
-    free(dec);
-    free(buf);
-    if(i % 10 == 1){
-      list = tcxmlbreak("<abc de=\"foo&amp;\" gh='&lt;bar&gt;'>xyz<br>\na<!--<mikio>--></abc>");
-      for(int j = 0; j < tclistnum(list); j++){
-        const char *elem = tclistval2(list, j);
-        TCMAP *attrs = tcxmlattrs(elem);
-        tcmapdel(attrs);
-      }
-      tclistdel(list);
-    }
-    if(i % 10 == 1){
-      for(int16_t j = 1; j <= 0x2000; j *= 2){
-        for(int16_t num = j - 1; num <= j + 1; num++){
-          int16_t nnum = TCHTOIS(num);
-          if(num != TCITOHS(nnum)) err = true;
-        }
-      }
-      for(int32_t j = 1; j <= 0x20000000; j *= 2){
-        for(int32_t num = j - 1; num <= j + 1; num++){
-          int32_t nnum = TCHTOIL(num);
-          if(num != TCITOHL(nnum)) err = true;
-          char buf[TC_VNUMBUFSIZ];
-          int step, nstep;
-          TC_SETVNUMBUF(step, buf, num);
-          TC_READVNUMBUF(buf, nnum, nstep);
-          if(num != nnum || step != nstep) err = true;
-        }
-      }
-      for(int64_t j = 1; j <= 0x2000000000000000; j *= 2){
-        for(int64_t num = j - 1; num <= j + 1; num++){
-          int64_t nnum = TCHTOILL(num);
-          if(num != TCITOHLL(nnum)) err = true;
-          char buf[TC_VNUMBUFSIZ];
-          int step, nstep;
-          TC_SETVNUMBUF64(step, buf, num);
-          TC_READVNUMBUF64(buf, nnum, nstep);
-          if(num != nnum || step != nstep) err = true;
-        }
-      }
-    }
-    if(rnum > 250 && i % (rnum / 250) == 0){
-      putchar('.');
-      fflush(stdout);
-      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
-    }
-  }
-  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
-  if(err){
-    iprintf("error\n\n");
-    return 1;
-  }
   iprintf("ok\n\n");
   return 0;
 }

@@ -263,7 +263,7 @@ int tclistnum(const TCLIST *list);
 /* Get the pointer to the region of an element of a list object.
    `list' specifies the list object.
    `index' specifies the index of the element.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the value.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -303,7 +303,7 @@ void tclistpushmalloc(TCLIST *list, char *ptr, int size);
 
 /* Remove an element of the end of a list object.
    `list' specifies the list object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the removed element.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -337,7 +337,7 @@ void tclistunshift2(TCLIST *list, const char *str);
 
 /* Remove an element of the top of a list object.
    `list' specifies the list object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the removed element.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -376,7 +376,7 @@ void tclistinsert2(TCLIST *list, int index, const char *str);
 /* Remove an element at the specified location of a list object.
    `list' specifies the list object.
    `index' specifies the index of the element to be removed.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the removed element.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -450,7 +450,7 @@ void tclistclear(TCLIST *list);
 
 /* Serialize a list object into a byte array.
    `list' specifies the list object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the result serial region.
    Because the region of the return value is allocated with the `malloc' call, it should be
@@ -594,7 +594,7 @@ bool tcmapout2(TCMAP *map, const void *kstr);
    `map' specifies the map object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the region of the value of the
    corresponding record.  `NULL' is returned when no record corresponds.
@@ -638,7 +638,7 @@ void tcmapiterinit(TCMAP *map);
 
 /* Get the next key of the iterator of a map object.
    `map' specifies the map object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the region of the next key, else, it is
    `NULL'.  `NULL' is returned when no record can be fetched from the iterator.
@@ -658,7 +658,7 @@ const char *tcmapiternext2(TCMAP *map);
 
 /* Get the value binded to the key fetched from the iterator of a map object.
    `kbuf' specifies the pointer to the region of the iteration key.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the value of the corresponding record.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -702,7 +702,7 @@ void tcmapclear(TCMAP *map);
 
 /* Serialize map list object into a byte array.
    `map' specifies the map object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the result serial region.
    Because the region of the return value is allocated with the `malloc' call, it should be
@@ -724,7 +724,7 @@ TCMAP *tcmapload(const char *ptr, int size);
    `size' specifies the size of the region.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the region of the value of the
    corresponding record.  `NULL' is returned when no record corresponds.
@@ -956,7 +956,7 @@ double tctime(void);
    `path' specifies the path of the file.  If it is `NULL', the standard input is specified.
    `limit' specifies the limiting size of reading data.  If it is not more than 0, the limitation
    is not specified.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.  If it is `NULL', it is not used.
    The return value is the pointer to the allocated region of the read data, or `NULL' if the
    file could not be opened.
@@ -1009,7 +1009,7 @@ char *tcurlencode(const char *ptr, int size);
 
 /* Decode a string encoded with URL encoding.
    `str' specifies the encoded string.
-   `sp' specifies the pointer to a variable to which the size of the region of the return
+   `sp' specifies the pointer to a variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the result.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -1054,7 +1054,7 @@ char *tcbaseencode(const char *ptr, int size);
 
 /* Decode a string encoded with Base64 encoding.
    `str' specifies the encoded string.
-   `sp' specifies the pointer to a variable to which the size of the region of the return
+   `sp' specifies the pointer to a variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the result.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -1064,7 +1064,7 @@ char *tcbaseencode(const char *ptr, int size);
 char *tcbasedecode(const char *str, int *sp);
 
 
-/* Encode a serial object with quoted-printable encoding.
+/* Encode a serial object with Quoted-printable encoding.
    `ptr' specifies the pointer to the region.
    `size' specifies the size of the region.
    The return value is the result string.
@@ -1073,9 +1073,9 @@ char *tcbasedecode(const char *str, int *sp);
 char *tcquoteencode(const char *ptr, int size);
 
 
-/* Decode a string encoded with quoted-printable encoding.
+/* Decode a string encoded with Quoted-printable encoding.
    `str' specifies the encoded string.
-   `sp' specifies the pointer to a variable to which the size of the region of the return
+   `sp' specifies the pointer to a variable into which the size of the region of the return
    value is assigned.
    The return value is the pointer to the region of the result.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -1089,7 +1089,7 @@ char *tcquotedecode(const char *str, int *sp);
    `str' specifies the string.
    `encname' specifies the string of the name of the character encoding.
    The return value is the result string.
-   `base' specifies whether to use Base64 encoding.  If it is false, quoted-printable is used.
+   `base' specifies whether to use Base64 encoding.  If it is false, Quoted-printable is used.
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
 char *tcmimeencode(const char *str, const char *encname, bool base);
@@ -1105,10 +1105,58 @@ char *tcmimeencode(const char *str, const char *encname, bool base);
 char *tcmimedecode(const char *str, char *enp);
 
 
-/* Compress a serial object with deflate encoding.
+/* Compress a serial object with Packbits encoding.
    `ptr' specifies the pointer to the region.
    `size' specifies the size of the region.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the result object, else, it is `NULL'.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcpackencode(const char *ptr, int size, int *sp);
+
+
+/* Decompress a serial object compressed with Packbits encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `sp' specifies the pointer to a variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the result object, else, it is `NULL'.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when it
+   is no longer in use. */
+char *tcpackdecode(const char *ptr, int size, int *sp);
+
+
+/* Compress a serial object with TCBS encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the result object, else, it is `NULL'.
+   Because the region of the return value is allocated with the `malloc' call, it should be
+   released with the `free' call when it is no longer in use. */
+char *tcbsencode(const char *ptr, int size, int *sp);
+
+
+/* Decompress a serial object compressed with TCBS encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `sp' specifies the pointer to a variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the result object, else, it is `NULL'.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when it
+   is no longer in use. */
+char *tcbsdecode(const char *ptr, int size, int *sp);
+
+
+/* Compress a serial object with Deflate encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the result object, else, it is `NULL'.
    Because the region of the return value is allocated with the `malloc' call, it should be
@@ -1116,10 +1164,10 @@ char *tcmimedecode(const char *str, char *enp);
 char *tcdeflate(const char *ptr, int size, int *sp);
 
 
-/* Decompress a serial object compressed with deflate encoding.
+/* Decompress a serial object compressed with Deflate encoding.
    `ptr' specifies the pointer to the region.
    `size' specifies the size of the region.
-   `sp' specifies the pointer to a variable to which the size of the region of the return
+   `sp' specifies the pointer to a variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the result object, else, it is `NULL'.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -1132,7 +1180,7 @@ char *tcinflate(const char *ptr, int size, int *sp);
 /* Compress a serial object with GZIP encoding.
    `ptr' specifies the pointer to the region.
    `size' specifies the size of the region.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the result object, else, it is `NULL'.
    Because the region of the return value is allocated with the `malloc' call, it should be
@@ -1143,7 +1191,7 @@ char *tcgzipencode(const char *ptr, int size, int *sp);
 /* Decompress a serial object compressed with GZIP encoding.
    `ptr' specifies the pointer to the region.
    `size' specifies the size of the region.
-   `sp' specifies the pointer to a variable to which the size of the region of the return
+   `sp' specifies the pointer to a variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the result object, else, it is `NULL'.
    Because an additional zero code is appended at the end of the region of the return value,
@@ -1198,12 +1246,125 @@ TCMAP *tcxmlattrs(const char *str);
 
 
 /*************************************************************************************************
+ * bit operation utilities
+ *************************************************************************************************/
+
+
+typedef struct {                         // type of structure for a bit stream object
+  uint8_t *sp;                           // start pointer
+  uint8_t *cp;                           // current pointer
+  int idx;                               // bit index
+  int size;                              // size of used region
+} TCBITSTRM;
+
+
+/* Create a bitmap object. */
+#define TCBITMAPNEW(TC_num) \
+  tccalloc(((TC_num) >> 3) + 1, 1);
+
+
+/* Delete a bitmap object */
+#define TCBITMAPDEL(TC_bitmap) \
+  do { \
+    free((TC_bitmap)); \
+  } while(false);
+
+
+/* Turn on a field of a bitmap object. */
+#define TCBITMAPON(TC_bitmap, TC_idx) \
+  do { \
+    (TC_bitmap)[(TC_idx)>>3] |= 0x1 << ((TC_idx) & 0x7); \
+  } while(false);
+
+
+/* Turn off a field of a bitmap object. */
+#define TCBITMAPOFF(TC_bitmap, TC_idx) \
+  do { \
+    (TC_bitmap)[(TC_idx)>>3] &= ~(0x1 << ((TC_idx) & 0x7)); \
+  } while(false);
+
+
+/* Check a field of a bitmap object. */
+#define TCBITMAPCHECK(TC_bitmap, TC_idx) \
+  ((TC_bitmap)[(TC_idx)>>3] & 0x1 << ((TC_idx) & 0x7))
+
+
+/* Initialize a bit stream object as writer. */
+#define TCBITSTRMINITW(TC_bitstrm, TC_ptr) \
+  do { \
+    (TC_bitstrm).sp = (uint8_t *)(TC_ptr); \
+    (TC_bitstrm).cp = (TC_bitstrm).sp; \
+    *(TC_bitstrm).cp = 0; \
+    (TC_bitstrm).idx = 3; \
+    (TC_bitstrm).size = 1; \
+  } while(false);
+
+
+/* Concatenate a bit to a bit stream object. */
+#define TCBITSTRMCAT(TC_bitstrm, sign) \
+  do { \
+    if((TC_bitstrm).idx >= 8){ \
+      *(++(TC_bitstrm).cp) = 0; \
+      (TC_bitstrm).idx = 0; \
+      (TC_bitstrm).size++; \
+    } \
+    *(TC_bitstrm).cp |= (sign << (TC_bitstrm).idx); \
+    (TC_bitstrm).idx++; \
+  } while(false);
+
+
+/* Set the end mark to a bit stream object. */
+#define TCBITSTRMSETEND(TC_bitstrm) \
+  do { \
+    if((TC_bitstrm).idx >= 8){ \
+      *(++(TC_bitstrm).cp) = 0; \
+      (TC_bitstrm).idx = 0; \
+      (TC_bitstrm).size++; \
+    } \
+    *(TC_bitstrm).sp |= (TC_bitstrm).idx & 7; \
+  } while(false);
+
+
+/* Get the size of the used region of a bit stream object. */
+#define TCBITSTRMSIZE(TC_bitstrm) \
+  ((TC_bitstrm).size)
+
+
+/* Initialize a bit stream object as reader. */
+#define TCBITSTRMINITR(TC_bitstrm, TC_ptr, TC_size) \
+  do { \
+    (TC_bitstrm).sp = (uint8_t *)(TC_ptr); \
+    (TC_bitstrm).cp = (TC_bitstrm).sp; \
+    (TC_bitstrm).idx = 3; \
+    (TC_bitstrm).size = (TC_size); \
+  } while(false);
+
+
+/* Read a bit from a bit stream object. */
+#define TCBITSTRMREAD(TC_bitstrm, TC_sign) \
+  do { \
+    if((TC_bitstrm).idx >= 8){ \
+      (TC_bitstrm).cp++; \
+      (TC_bitstrm).idx = 0; \
+    } \
+    (TC_sign) = (*((TC_bitstrm).cp) & (1 << (TC_bitstrm).idx)) > 0; \
+    (TC_bitstrm).idx++; \
+  } while(false);
+
+
+/* Get the number of bits of a bit stream object. */
+#define TCBITSTRMNUM(TC_bitstrm) \
+  ((((TC_bitstrm).size - 1) << 3) + (*(TC_bitstrm).sp & 7) - 3)
+
+
+
+/*************************************************************************************************
  * features for experts
  *************************************************************************************************/
 
 
-#define _TC_VERSION    "0.2.9"
-#define _TC_LIBVER     103
+#define _TC_VERSION    "0.3.4"
+#define _TC_LIBVER     106
 #define _TC_FORMATVER  "0.1"
 
 
@@ -1211,6 +1372,41 @@ TCMAP *tcxmlattrs(const char *str);
    `message' specifies an error message.
    This function does not return. */
 void *tcmyfatal(const char *message);
+
+
+/* Lock the global mutex object.
+   If successful, the return value is true, else, it is false. */
+bool tcglobalmutexlock(void);
+
+
+/* Unlock the global mutex object.
+   If successful, the return value is true, else, it is false. */
+bool tcglobalmutexunlock(void);
+
+
+/* Encode a serial object with BWT encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `idxp' specifies the pointer to the variable into which the index of the original string in
+   the rotation array is assigned.
+   The return value is the pointer to the result object.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when it
+   is no longer in use. */
+char *tcbwtencode(const char *ptr, int size, int *idxp);
+
+
+/* Decode a serial object encoded with BWT encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `idx' specifies the index of the original string in the rotation array is assigned.
+   The return value is the pointer to the result object.
+   Because an additional zero code is appended at the end of the region of the return value,
+   the return value can be treated as a character string.  Because the region of the return
+   value is allocated with the `malloc' call, it should be released with the `free' call when it
+   is no longer in use. */
+char *tcbwtdecode(const char *ptr, int size, int idx);
 
 
 /* Print debug information with a formatted string as with `printf'. */
@@ -1225,9 +1421,9 @@ void *tcmyfatal(const char *message);
 /* Print hexadecimal pattern of a binary region. */
 #define tcprinthex(TC_ptr, TC_size) \
   do { \
-    for(int TC_i = 0; TC_i < TC_size; TC_i++){ \
+    for(int TC_i = 0; TC_i < (TC_size); TC_i++){ \
       if(TC_i > 0) putchar(' '); \
-      printf("%02X", ((unsigned char *)TC_ptr)[TC_i]); \
+      printf("%02X", ((unsigned char *)(TC_ptr))[TC_i]); \
     } \
     putchar('\n'); \
   } while(0);
@@ -1236,7 +1432,7 @@ void *tcmyfatal(const char *message);
 /* Print an extensible string object. */
 #define tcprintxstr(TC_xstr) \
   do { \
-    fwrite(tcxstrptr(TC_xstr), tcxstrsize(TC_xstr), 1, stdout); \
+    fwrite(tcxstrptr((TC_xstr)), tcxstrsize((TC_xstr)), 1, stdout); \
     putchar('\n'); \
   } while(0);
 
@@ -1244,10 +1440,10 @@ void *tcmyfatal(const char *message);
 /* Print all elements of a list object. */
 #define tcprintlist(TC_list) \
   do { \
-    for(int TC_i = 0; TC_i < tclistnum(TC_list); TC_i++){   \
+    for(int TC_i = 0; TC_i < tclistnum((TC_list)); TC_i++){ \
       int TC_size; \
-      const char *TC_ptr = tclistval(TC_list, TC_i, &TC_size); \
-      printf("%p\t", (void *)TC_list); \
+      const char *TC_ptr = tclistval((TC_list), TC_i, &TC_size); \
+      printf("%p\t", (void *)(TC_list)); \
       fwrite(TC_ptr, TC_size, 1, stdout); \
       putchar('\n'); \
     } \
@@ -1258,13 +1454,13 @@ void *tcmyfatal(const char *message);
 /* Print all records of a list object. */
 #define tcprintmap(TC_map) \
   do { \
-    TCLIST *TC_keys = tcmapkeys(TC_map); \
-    for(int TC_i = 0; TC_i < tclistnum(TC_keys); TC_i++){   \
+    TCLIST *TC_keys = tcmapkeys((TC_map)); \
+    for(int TC_i = 0; TC_i < tclistnum(TC_keys); TC_i++){ \
       int TC_ksiz; \
       const char *TC_kbuf = tclistval(TC_keys, TC_i, &TC_ksiz); \
       int TC_vsiz; \
-      const char *TC_vbuf = tcmapget(TC_map, TC_kbuf, TC_ksiz, &TC_vsiz); \
-      printf("%p\t", (void *)TC_map); \
+      const char *TC_vbuf = tcmapget((TC_map), TC_kbuf, TC_ksiz, &TC_vsiz); \
+      printf("%p\t", (void *)(TC_map)); \
       fwrite(TC_kbuf, TC_ksiz, 1, stdout); \
       putchar('\t'); \
       fwrite(TC_vbuf, TC_vsiz, 1, stdout); \

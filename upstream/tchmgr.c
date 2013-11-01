@@ -87,13 +87,13 @@ static void usage(void){
   fprintf(stderr, "%s: the command line utility of the hash database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s create [-tl] [-td] path [bnum] [apow] [fpow]\n", g_progname);
+  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum] [apow] [fpow]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
   fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-nl] path key\n", g_progname);
   fprintf(stderr, "  %s list [-nl|-nb] [-pv] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td] [-tz] [-nl|-nb] path [bnum] [apow] [fpow]\n",
+  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum] [apow] [fpow]\n",
           g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
@@ -160,6 +160,8 @@ static int runcreate(int argc, char **argv){
         opts |= HDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
         opts |= HDBTDEFLATE;
+      } else if(!strcmp(argv[i], "-tb")){
+        opts |= HDBTTCBS;
       } else {
         usage();
       }
@@ -394,6 +396,9 @@ static int runoptimize(int argc, char **argv){
       } else if(!strcmp(argv[i], "-td")){
         if(opts == UINT8_MAX) opts = 0;
         opts |= HDBTDEFLATE;
+      } else if(!strcmp(argv[i], "-tb")){
+        if(opts == UINT8_MAX) opts = 0;
+        opts |= HDBTTCBS;
       } else if(!strcmp(argv[i], "-tz")){
         if(opts == UINT8_MAX) opts = 0;
       } else if(!strcmp(argv[i], "-nl")){

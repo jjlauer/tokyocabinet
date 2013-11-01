@@ -30,6 +30,8 @@ static int runurl(int argc, char **argv);
 static int runbase(int argc, char **argv);
 static int runquote(int argc, char **argv);
 static int runmime(int argc, char **argv);
+static int runpack(int argc, char **argv);
+static int runtcbs(int argc, char **argv);
 static int runzlib(int argc, char **argv);
 static int runxml(int argc, char **argv);
 static int runconf(int argc, char **argv);
@@ -37,6 +39,8 @@ static int procurl(const char *ibuf, int isiz, bool dec, bool br, const char *ba
 static int procbase(const char *ibuf, int isiz, bool dec);
 static int procquote(const char *ibuf, int isiz, bool dec);
 static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, bool qb, bool on);
+static int procpack(const char *ibuf, int isiz, bool dec, bool bwt);
+static int proctcbs(const char *ibuf, int isiz, bool dec);
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz);
 static int procxml(const char *ibuf, int isiz, bool dec, bool br);
 static int procconf(void);
@@ -55,6 +59,10 @@ int main(int argc, char **argv){
     rv = runquote(argc, argv);
   } else if(!strcmp(argv[1], "mime")){
     rv = runmime(argc, argv);
+  } else if(!strcmp(argv[1], "pack")){
+    rv = runpack(argc, argv);
+  } else if(!strcmp(argv[1], "tcbs")){
+    rv = runtcbs(argc, argv);
   } else if(!strcmp(argv[1], "zlib")){
     rv = runzlib(argc, argv);
   } else if(!strcmp(argv[1], "xml")){
@@ -77,6 +85,8 @@ static void usage(void){
   fprintf(stderr, "  %s base [-d] file\n", g_progname);
   fprintf(stderr, "  %s quote [-d] file\n", g_progname);
   fprintf(stderr, "  %s mime [-d] [-en name] [-q] file\n", g_progname);
+  fprintf(stderr, "  %s pack [-d] [-bwt] file\n", g_progname);
+  fprintf(stderr, "  %s tcbs [-d] file\n", g_progname);
   fprintf(stderr, "  %s zlib [-d] [-gz] file\n", g_progname);
   fprintf(stderr, "  %s xml [-d] [-br] file\n", g_progname);
   fprintf(stderr, "  %s conf\n", g_progname);
@@ -258,6 +268,81 @@ static int runmime(int argc, char **argv){
 }
 
 
+/* parse arguments of pack command */
+static int runpack(int argc, char **argv){
+  char *path = NULL;
+  bool dec = false;
+  bool bwt = false;
+  for(int i = 2; i < argc; i++){
+    if(argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-d")){
+        dec = true;
+      } else if(!strcmp(argv[i], "-bwt")){
+        bwt = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = procpack(ibuf, isiz, dec, bwt);
+  if(path && path[0] == '@') printf("\n");
+  free(ibuf);
+  return rv;
+}
+
+
+/* parse arguments of tcbs command */
+static int runtcbs(int argc, char **argv){
+  char *path = NULL;
+  bool dec = false;
+  for(int i = 2; i < argc; i++){
+    if(argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-d")){
+        dec = true;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  char *ibuf;
+  int isiz;
+  if(path && path[0] == '@'){
+    isiz = strlen(path) - 1;
+    ibuf = tcmemdup(path + 1, isiz);
+  } else {
+    ibuf = tcreadfile(path, -1, &isiz);
+  }
+  if(!ibuf){
+    eprintf("%s: cannot open", path ? path : "(stdin)");
+    return 1;
+  }
+  int rv = proctcbs(ibuf, isiz, dec);
+  if(path && path[0] == '@') printf("\n");
+  free(ibuf);
+  return rv;
+}
+
+
 /* parse arguments of zlib command */
 static int runzlib(int argc, char **argv){
   char *path = NULL;
@@ -428,6 +513,62 @@ static int procmime(const char *ibuf, int isiz, bool dec, const char *ename, boo
 }
 
 
+/* perform pack command */
+static int procpack(const char *ibuf, int isiz, bool dec, bool bwt){
+  if(dec){
+    int osiz;
+    char *obuf = tcpackdecode(ibuf, isiz, &osiz);
+    if(bwt && osiz > 0){
+      int idx, step;
+      TC_READVNUMBUF(obuf, idx, step);
+      char *tbuf = tcbwtdecode(obuf + step, osiz - step, idx);
+      fwrite(tbuf, osiz - step, 1, stdout);
+      free(tbuf);
+    } else {
+      fwrite(obuf, osiz, 1, stdout);
+    }
+    free(obuf);
+  } else {
+    char *tbuf = NULL;
+    if(bwt){
+      int idx;
+      tbuf = tcbwtencode(ibuf, isiz, &idx);
+      char vnumbuf[sizeof(int)+1];
+      int step;
+      TC_SETVNUMBUF(step, vnumbuf, idx);
+      tbuf = tcrealloc(tbuf, isiz + step + 1);
+      memmove(tbuf + step, tbuf, isiz);
+      memcpy(tbuf, vnumbuf, step);
+      isiz += step;
+      ibuf = tbuf;
+    }
+    int osiz;
+    char *obuf = tcpackencode(ibuf, isiz, &osiz);
+    fwrite(obuf, osiz, 1, stdout);
+    free(obuf);
+    free(tbuf);
+  }
+  return 0;
+}
+
+
+/* perform tcbs command */
+static int proctcbs(const char *ibuf, int isiz, bool dec){
+  if(dec){
+    int osiz;
+    char *obuf = tcbsdecode(ibuf, isiz, &osiz);
+    fwrite(obuf, osiz, 1, stdout);
+    free(obuf);
+  } else {
+    int osiz;
+    char *obuf = tcbsencode(ibuf, isiz, &osiz);
+    fwrite(obuf, osiz, 1, stdout);
+    free(obuf);
+  }
+  return 0;
+}
+
+
 /* perform zlib command */
 static int proczlib(const char *ibuf, int isiz, bool dec, bool gz){
   if(dec){
@@ -526,6 +667,8 @@ static int procconf(void){
   printf("myconf(libdir): %s\n", _TC_LIBDIR);
   printf("myconf(bindir): %s\n", _TC_BINDIR);
   printf("myconf(libexecdir): %s\n", _TC_LIBEXECDIR);
+  printf("myconf(bigend): %d\n", TCBIGEND);
+  printf("myconf(usezlib): %d\n", TCUSEZLIB);
   printf("sizeof(bool): %d\n", sizeof(bool));
   printf("sizeof(char): %d\n", sizeof(char));
   printf("sizeof(short): %d\n", sizeof(short));

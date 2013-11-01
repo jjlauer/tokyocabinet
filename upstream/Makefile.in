@@ -81,7 +81,7 @@ all : $(LIBRARYFILES) $(COMMANDFILES)
 
 clean :
 	rm -rf $(LIBRARYFILES) $(LIBOBJFILES) $(COMMANDFILES) \
-	  *.o a.out check.out gmon.out leak.log casket casket-* *~
+	  *.o a.out check.in check.out gmon.out leak.log casket casket-* *~ hoge moge
 
 
 version :
@@ -147,29 +147,53 @@ distclean : clean
 check :
 	rm -rf casket*
 	$(RUNENV) $(RUNCMD) ./tchmgr version
-	$(RUNENV) $(RUNCMD) ./tcucodec conf
 	$(RUNENV) $(RUNCMD) ./tcutest xstr 50000
 	$(RUNENV) $(RUNCMD) ./tcutest list 50000
 	$(RUNENV) $(RUNCMD) ./tcutest map 50000
 	$(RUNENV) $(RUNCMD) ./tcutest misc 500
 	$(RUNENV) $(RUNCMD) ./tcutest wicked 50000
+	$(RUNENV) $(RUNCMD) ./tcucodec url Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec url -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec base Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec base -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec quote Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec quote -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec mime Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec mime -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec pack -bwt Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec pack -d -bwt check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec tcbs Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec tcbs -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec zlib Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec zlib -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec xml Makefile > check.in
+	$(RUNENV) $(RUNCMD) ./tcucodec xml -d check.in > check.out
+	$(RUNENV) $(RUNCMD) ./tcucodec conf
 	$(RUNENV) $(RUNCMD) ./tchtest write casket 50000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest read casket
 	$(RUNENV) $(RUNCMD) ./tchtest remove casket
-	$(RUNENV) $(RUNCMD) ./tchtest write -tl -td casket 50000 5000 5 5
-	$(RUNENV) $(RUNCMD) ./tchtest read -nb casket
-	$(RUNENV) $(RUNCMD) ./tchtest remove casket
-	$(RUNENV) $(RUNCMD) ./tchtest write -as casket 50000 50000 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest write -mt -tl -td casket 50000 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest read -mt -nb casket
+	$(RUNENV) $(RUNCMD) ./tchtest remove -mt casket
+	$(RUNENV) $(RUNCMD) ./tchtest write -as -tb casket 50000 50000 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest read -nl casket
 	$(RUNENV) $(RUNCMD) ./tchtest remove casket
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -pn 500 casket 50000 5000 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -tl -td -pn 5000 casket 50000 500 5 15
 	$(RUNENV) $(RUNCMD) ./tchtest rcat -nl -pn 500 -rl casket 5000 500 5 5
+	$(RUNENV) $(RUNCMD) ./tchtest rcat -tb -pn 500 casket 5000 500 5 5
 	$(RUNENV) $(RUNCMD) ./tchtest misc casket 5000
 	$(RUNENV) $(RUNCMD) ./tchtest misc -tl -td casket 5000
+	$(RUNENV) $(RUNCMD) ./tchtest misc -mt -tb casket 500
 	$(RUNENV) $(RUNCMD) ./tchmgr list casket > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -tl -td casket 50000
+	$(RUNENV) $(RUNCMD) ./tchtest wicked -mt -tb casket 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest write -tl casket 5 5000 500 5
+	$(RUNENV) $(RUNCMD) ./tchmttest read casket 5
+	$(RUNENV) $(RUNCMD) ./tchmttest wicked casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tl -td casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tb casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmgr create casket 3 1 1
 	$(RUNENV) $(RUNCMD) ./tchmgr put casket one first
 	$(RUNENV) $(RUNCMD) ./tchmgr put casket two second
@@ -233,6 +257,10 @@ tchtest : tchtest.o $(LIBOBJFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
 
+tchmttest : tchmttest.o $(LIBOBJFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
 tchmgr : tchmgr.o $(LIBOBJFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
@@ -245,7 +273,7 @@ tchdb.o : tchdb.h tcutil.h myconf.h
 
 tcutest.o tcucodec.o : tcutil.h myconf.h
 
-tchtest.o tchmgr.o : tcutil.h tchdb.h myconf.h
+tchtest.o tchmttest.o tchmgr.o : tcutil.h tchdb.h myconf.h
 
 
 

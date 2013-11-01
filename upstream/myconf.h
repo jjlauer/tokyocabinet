@@ -85,6 +85,12 @@
 #define TCUSEZLIB      1
 #endif
 
+#if defined(_MYNOPTHREAD)
+#define TCUSEPTHREAD   0
+#else
+#define TCUSEPTHREAD   1
+#endif
+
 #define sizeof(a)      ((int)sizeof(a))
 
 int _tc_dummyfunc(void);
@@ -132,6 +138,9 @@ int _tc_dummyfunc(void);
 #include <fcntl.h>
 #include <dirent.h>
 
+#if TCUSEPTHREAD
+#include <pthread.h>
+#endif
 
 
 /*************************************************************************************************
@@ -165,6 +174,43 @@ extern char *(*_tc_deflate)(const char *, int, int *, int);
 extern char *(*_tc_inflate)(const char *, int, int *, int);
 
 extern unsigned int (*_tc_getcrc)(const char *, int);
+
+
+
+/*************************************************************************************************
+ * for POSIX thread disability
+ *************************************************************************************************/
+
+
+#if ! TCUSEPTHREAD
+
+#define pthread_mutex_t               int
+#undef PTHREAD_MUTEX_INITIALIZER
+#define PTHREAD_MUTEX_INITIALIZER     0
+#define pthread_mutex_init(a, b)      0
+#define pthread_mutex_destroy(a)      0
+#define pthread_mutex_lock(a)         0
+#define pthread_mutex_unlock(a)       0
+
+#define pthread_rwlock_t              int
+#define pthread_rwlock_init(a, b)     0
+#define pthread_rwlock_destroy(a)     0
+#define pthread_rwlock_rdlock(a)      0
+#define pthread_rwlock_wrlock(a)      0
+#define pthread_rwlock_unlock(a)      0
+
+#define pthread_key_create(a, b)      0
+#define pthread_key_delete(a)         0
+#define pthread_setspecific(a, b)     0
+#define pthread_getspecific(a)        0
+
+#define pthread_create(TC_th, TC_attr, TC_func, TC_arg) \
+  (*(TC_th) = 0, (TC_func)(TC_arg), 0)
+#define pthread_join(TC_th, TC_rv) \
+  (*(TC_rv) = NULL, 0)
+#define pthread_detach(TC_th)         0
+
+#endif
 
 
 
@@ -232,7 +278,7 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
         break; \
       } \
       TC_num += _TC_base * (((signed char *)(TC_buf))[_TC_i] + 1) * -1; \
-      _TC_base *= 128; \
+      _TC_base <<= 7; \
       _TC_i++; \
     } \
     (TC_step) = _TC_i + 1; \
@@ -250,7 +296,7 @@ extern unsigned int (*_tc_getcrc)(const char *, int);
         break; \
       } \
       TC_num += _TC_base * (((signed char *)(TC_buf))[_TC_i] + 1) * -1; \
-      _TC_base *= 128; \
+      _TC_base <<= 7; \
       _TC_i++; \
     } \
     (TC_step) = _TC_i + 1; \

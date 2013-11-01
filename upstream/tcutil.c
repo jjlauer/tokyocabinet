@@ -43,7 +43,7 @@ void *tcmalloc(size_t size){
 /* Allocate a nullified region on memory. */
 void *tccalloc(size_t nmemb, size_t size){
   assert(nmemb > 0 && size < INT_MAX && size > 0 && size < INT_MAX);
-  char *p = tccalloc(nmemb, size);
+  char *p = calloc(nmemb, size);
   if(!p) tcmyfatal("out of memory");
   return p;
 }
@@ -1906,11 +1906,11 @@ char *tcreadfile(const char *path, int limit, int *sp){
   if(fd == 0){
     TCXSTR *xstr = tcxstrnew();
     char buf[TC_IOBUFSIZ];
-    limit = limit > 0 ? tclmin(TC_IOBUFSIZ, limit) : TC_IOBUFSIZ;
+    limit = limit > 0 ? limit : INT_MAX;
     int rsiz;
-    while((rsiz = read(fd, buf, limit)) > 0){
+    while((rsiz = read(fd, buf, tclmin(TC_IOBUFSIZ, limit))) > 0){
       tcxstrcat(xstr, buf, rsiz);
-      if(limit > 0 && tcxstrsize(xstr) >= limit) break;
+      limit -= rsiz;
     }
     *sp = tcxstrsize(xstr);
     return tcxstrtomalloc(xstr);
@@ -1983,7 +1983,6 @@ TCLIST *tcreaddir(const char *path){
 /* Remove a file or a directory and its sub ones recursively. */
 bool tcremovelink(const char *path){
   assert(path);
-  printf("[%s]\n", path);
   struct stat sbuf;
   if(lstat(path, &sbuf) == -1) return false;
   if(unlink(path) == 0) return true;
@@ -2438,7 +2437,7 @@ char *tcbasedecode(const char *str, int *sp){
 }
 
 
-/* Encode a serial object with quoted-printable encoding. */
+/* Encode a serial object with Quoted-printable encoding. */
 char *tcquoteencode(const char *ptr, int size){
   assert(ptr && size >= 0);
   const unsigned char *rp = (const unsigned char *)ptr;
@@ -2460,7 +2459,7 @@ char *tcquoteencode(const char *ptr, int size){
 }
 
 
-/* Decode a string encoded with quoted-printable encoding. */
+/* Decode a string encoded with Quoted-printable encoding. */
 char *tcquotedecode(const char *str, int *sp){
   assert(str && sp);
   char *buf = tcmalloc(strlen(str) + 1);
@@ -2555,7 +2554,75 @@ char *tcmimedecode(const char *str, char *enp){
 }
 
 
-/* Compress a serial object with deflate encoding. */
+/* Compress a serial object with Packbits encoding. */
+char *tcpackencode(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  char *buf = tcmalloc(size * 2 + 1);
+  char *wp = buf;
+  const char *end = ptr + size;
+  while(ptr < end){
+    char *sp = wp;
+    const char *rp = ptr + 1;
+    int step = 1;
+    while(rp < end && step < 0x7f && *rp == *ptr){
+      step++;
+      rp++;
+    }
+    if(step <= 1 && rp < end){
+      wp = sp + 1;
+      *(wp++) = *ptr;
+      while(rp < end && step < 0x7f && *rp != *(rp - 1)){
+        *(wp++) = *rp;
+        step++;
+        rp++;
+      }
+      if(rp < end && *(rp - 1) == *rp){
+        wp--;
+        rp--;
+        step--;
+      }
+      *sp = step == 1 ? 1 : -step;
+    } else {
+      *(wp++) = step;
+      *(wp++) = *ptr;
+    }
+    ptr += step;
+  }
+  *sp = wp - buf;
+  return buf;
+}
+
+
+/* Decompress a serial object compressed with Packbits encoding. */
+char *tcpackdecode(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  int asiz = size * 3;
+  char *buf = tcmalloc(asiz + 1);
+  int wi = 0;
+  const char *end = ptr + size;
+  while(ptr < end){
+    int step = abs(*ptr);
+    if(wi + step >= asiz){
+      asiz = asiz * 2 + step;
+      buf = tcrealloc(buf, asiz + 1);
+    }
+    if(*(ptr++) >= 0){
+      memset(buf + wi, *ptr, step);
+      ptr++;
+    } else {
+      step = tclmin(step, end - ptr);
+      memcpy(buf + wi, ptr, step);
+      ptr += step;
+    }
+    wi += step;
+  }
+  buf[wi] = '\0';
+  *sp = wi;
+  return buf;
+}
+
+
+/* Compress a serial object with Deflate encoding. */
 char *tcdeflate(const char *ptr, int size, int *sp){
   assert(ptr && sp);
   if(!_tc_deflate) return NULL;
@@ -2563,7 +2630,7 @@ char *tcdeflate(const char *ptr, int size, int *sp){
 }
 
 
-/* Decompress a serial object compressed with deflate encoding. */
+/* Decompress a serial object compressed with Deflate encoding. */
 char *tcinflate(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0);
   if(!_tc_inflate) return NULL;
@@ -2807,6 +2874,32 @@ TCMAP *tcxmlattrs(const char *str){
  *************************************************************************************************/
 
 
+#define TC_BSENCUNIT    8192             // unit size of TCBS encoding
+#define TC_BWTCNTMIN    64               // minimum element number of counting sort
+#define TC_BWTCNTLV     4                // maximum recursion level of counting sort
+#define TC_BWTBUFNUM    16384            // number of elements of BWT buffer
+
+typedef struct {                         // type of structure for a BWT character
+  int fchr;                              // character code of the first character
+  int tchr;                              // character code of the last character
+} TCBWTREC;
+
+
+/* private function prototypes */
+static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level);
+static void tcbwtsortstrinsert(const char **arrays, int anum, int len, int skip);
+static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip);
+static void tcbwtsortchrcount(unsigned char *str, int len);
+static void tcbwtsortchrinsert(unsigned char *str, int len);
+static void tcbwtsortreccount(TCBWTREC *arrays, int anum);
+static void tcbwtsortrecinsert(TCBWTREC *array, int anum);
+static int tcbwtsearchrec(TCBWTREC *array, int anum, int tchr);
+static void tcmtfencode(char *ptr, int size);
+static void tcmtfdecode(char *ptr, int size);
+static int tcgammaencode(const char *ptr, int size, char *obuf);
+static int tcgammadecode(const char *ptr, int size, char *obuf);
+
+
 /* Show error message on the standard error output and exit. */
 void *tcmyfatal(const char *message){
   assert(message);
@@ -2817,6 +2910,667 @@ void *tcmyfatal(const char *message){
   }
   exit(1);
   return NULL;
+}
+
+
+/* Global mutex object. */
+static pthread_mutex_t tcglobalmutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+/* Lock the global mutex object. */
+bool tcglobalmutexlock(void){
+  if(!TCUSEPTHREAD) memset(&tcglobalmutex, 0, sizeof(tcglobalmutex));
+  return pthread_mutex_lock(&tcglobalmutex) == 0;
+}
+
+
+/* Unlock the global mutex object. */
+bool tcglobalmutexunlock(void){
+  return pthread_mutex_unlock(&tcglobalmutex) == 0;
+}
+
+
+/* Compress a serial object with TCBS encoding. */
+char *tcbsencode(const char *ptr, int size, int *sp){
+  assert(ptr && size >= 0 && sp);
+  char *result = tcmalloc((size * 7) / 3 + (size / TC_BSENCUNIT + 1) * sizeof(uint16_t) +
+                          TC_BSENCUNIT * 2 + 0x20);
+  char *pv = result + size + 0x10;
+  char *wp = pv;
+  char *tp = pv + size + 0x10;
+  const char *end = ptr + size;
+  while(ptr < end){
+    int usiz = tclmin(TC_BSENCUNIT, end - ptr);
+    memcpy(tp, ptr, usiz);
+    memcpy(tp + usiz, ptr, usiz);
+    char *sp = wp;
+    uint16_t idx = 0;
+    wp += sizeof(idx);
+    const char *arrays[usiz+1];
+    for(int i = 0; i < usiz; i++){
+      arrays[i] = tp + i;
+    }
+    const char *fp = arrays[0];
+    if(usiz >= TC_BWTCNTMIN){
+      tcbwtsortstrcount(arrays, usiz, usiz, 0);
+    } else if(usiz > 1){
+      tcbwtsortstrinsert(arrays, usiz, usiz, 0);
+    }
+    for(int i = 0; i < usiz; i++){
+      int tidx = arrays[i] - fp;
+      if(tidx == 0){
+        idx = i;
+        *(wp++) = ptr[usiz-1];
+      } else {
+        *(wp++) = ptr[tidx-1];
+      }
+    }
+    idx = TCHTOIS(idx);
+    memcpy(sp, &idx, sizeof(idx));
+    ptr += TC_BSENCUNIT;
+  }
+  size = wp - pv;
+  tcmtfencode(pv, size);
+  int nsiz = tcgammaencode(pv, size, result);
+  *sp = nsiz;
+  return result;
+}
+
+
+/* Decompress a serial object compressed with TCBS encoding. */
+char *tcbsdecode(const char *ptr, int size, int *sp){
+  char *result = tcmalloc(size * 9 + 0x100);
+  char *wp = result + size + 0x20;
+  int nsiz = tcgammadecode(ptr, size, wp);
+  tcmtfdecode(wp, nsiz);
+  ptr = wp;
+  wp = result;
+  const char *end = ptr + nsiz;
+  while(ptr < end){
+    uint16_t idx;
+    memcpy(&idx, ptr, sizeof(idx));
+    idx = TCITOHS(idx);
+    ptr += sizeof(idx);
+    int usiz = tclmin(TC_BSENCUNIT, end - ptr);
+    if(idx >= usiz) idx = 0;
+    char rbuf[usiz+1];
+    memcpy(rbuf, ptr, usiz);
+    if(usiz >= TC_BWTCNTMIN){
+      tcbwtsortchrcount((unsigned char *)rbuf, usiz);
+    } else if(usiz > 0){
+      tcbwtsortchrinsert((unsigned char *)rbuf, usiz);
+    }
+    int fnums[0x100], tnums[0x100];
+    memset(fnums, 0, sizeof(fnums));
+    memset(tnums, 0, sizeof(tnums));
+    TCBWTREC array[usiz+1];
+    TCBWTREC *rp = array;
+    for(int i = 0; i < usiz; i++){
+      int fc = *(unsigned char *)(rbuf + i);
+      rp->fchr = (fc << 23) + fnums[fc]++;
+      int tc = *(unsigned char *)(ptr + i);
+      rp->tchr = (tc << 23) + tnums[tc]++;
+      rp++;
+    }
+    unsigned int fchr = array[idx].fchr;
+    if(usiz >= TC_BWTCNTMIN){
+      tcbwtsortreccount(array, usiz);
+    } else if(usiz > 1){
+      tcbwtsortrecinsert(array, usiz);
+    }
+    for(int i = 0; i < usiz; i++){
+      if(array[i].fchr == fchr){
+        idx = i;
+        break;
+      }
+    }
+    for(int i = 0; i < usiz; i++){
+      *(wp++) = array[idx].fchr >> 23;
+      idx = tcbwtsearchrec(array, usiz, array[idx].fchr);
+    }
+    ptr += usiz;
+  }
+  *wp = '\0';
+  *sp = wp - result;
+  return result;
+}
+
+
+/* Encode a serial object with BWT encoding. */
+char *tcbwtencode(const char *ptr, int size, int *idxp){
+  assert(ptr && size >= 0 && idxp);
+  if(size < 1){
+    *idxp = 0;
+    return tcmemdup("", 0);
+  }
+  char *result = tcmalloc(size * 3 + 1);
+  char *tp = result + size + 1;
+  memcpy(tp, ptr, size);
+  memcpy(tp + size, ptr, size);
+  const char *abuf[TC_BWTBUFNUM];
+  const char **arrays = abuf;
+  if(size > TC_BWTBUFNUM) arrays = tcmalloc(sizeof(*arrays) * size);
+  for(int i = 0; i < size; i++){
+    arrays[i] = tp + i;
+  }
+  const char *fp = arrays[0];
+  if(size >= TC_BWTCNTMIN){
+    tcbwtsortstrcount(arrays, size, size, -1);
+  } else if(size > 1){
+    tcbwtsortstrinsert(arrays, size, size, 0);
+  }
+  for(int i = 0; i < size; i++){
+    int idx = arrays[i] - fp;
+    if(idx == 0){
+      *idxp = i;
+      result[i] = ptr[size-1];
+    } else {
+      result[i] = ptr[idx-1];
+    }
+  }
+  if(arrays != abuf) free(arrays);
+  result[size] = '\0';
+  return result;
+}
+
+
+/* Decode a serial object encoded with BWT encoding. */
+char *tcbwtdecode(const char *ptr, int size, int idx){
+  assert(ptr && size >= 0);
+  if(size < 1 || idx < 0) return tcmemdup("", 0);
+  if(idx >= size) idx = 0;
+  char *result = tcmalloc(size + 1);
+  memcpy(result, ptr, size);
+  if(size >= TC_BWTCNTMIN){
+    tcbwtsortchrcount((unsigned char *)result, size);
+  } else {
+    tcbwtsortchrinsert((unsigned char *)result, size);
+  }
+  int fnums[0x100], tnums[0x100];
+  memset(fnums, 0, sizeof(fnums));
+  memset(tnums, 0, sizeof(tnums));
+  TCBWTREC abuf[TC_BWTBUFNUM];
+  TCBWTREC *array = abuf;
+  if(size > TC_BWTBUFNUM) array = tcmalloc(sizeof(*array) * size);
+  TCBWTREC *rp = array;
+  for(int i = 0; i < size; i++){
+    int fc = *(unsigned char *)(result + i);
+    rp->fchr = (fc << 23) + fnums[fc]++;
+    int tc = *(unsigned char *)(ptr + i);
+    rp->tchr = (tc << 23) + tnums[tc]++;
+    rp++;
+  }
+  unsigned int fchr = array[idx].fchr;
+  if(size >= TC_BWTCNTMIN){
+    tcbwtsortreccount(array, size);
+  } else if(size > 1){
+    tcbwtsortrecinsert(array, size);
+  }
+  for(int i = 0; i < size; i++){
+    if(array[i].fchr == fchr){
+      idx = i;
+      break;
+    }
+  }
+  char *wp = result;
+  for(int i = 0; i < size; i++){
+    *(wp++) = array[idx].fchr >> 23;
+    idx = tcbwtsearchrec(array, size, array[idx].fchr);
+  }
+  *wp = '\0';
+  if(array != abuf) free(array);
+  return result;
+}
+
+
+/* Sort BWT string arrays by dicrionary order by counting sort.
+   `array' specifies an array of string arrays.
+   `anum' specifies the number of the array.
+   `len' specifies the size of each string.
+   `level' specifies the level of recursion. */
+static void tcbwtsortstrcount(const char **arrays, int anum, int len, int level){
+  assert(arrays && anum >= 0 && len >= 0);
+  const char *nbuf[TC_BWTBUFNUM];
+  const char **narrays = nbuf;
+  if(anum > TC_BWTBUFNUM) narrays = tcmalloc(sizeof(*narrays) * anum);
+  int count[0x100], accum[0x100];
+  memset(count, 0, sizeof(count));
+  int skip = level < 0 ? 0 : level;
+  for(int i = 0; i < anum; i++){
+    count[((unsigned char *)arrays[i])[skip]]++;
+  }
+  memcpy(accum, count, sizeof(count));
+  for(int i = 1; i < 0x100; i++){
+    accum[i] = accum[i-1] + accum[i];
+  }
+  for(int i = 0; i < anum; i++){
+    narrays[--accum[((unsigned char *)arrays[i])[skip]]] = arrays[i];
+  }
+  int off = 0;
+  if(level >= 0 && level < TC_BWTCNTLV){
+    for(int i = 0; i < 0x100; i++){
+      int c = count[i];
+      if(c > 1){
+        if(c >= TC_BWTCNTMIN){
+          tcbwtsortstrcount(narrays + off, c, len, level + 1);
+        } else {
+          tcbwtsortstrinsert(narrays + off, c, len, skip + 1);
+        }
+      }
+      off += c;
+    }
+  } else {
+    for(int i = 0; i < 0x100; i++){
+      int c = count[i];
+      if(c > 1){
+        if(c >= TC_BWTCNTMIN){
+          tcbwtsortstrheap(narrays + off, c, len, skip + 1);
+        } else {
+          tcbwtsortstrinsert(narrays + off, c, len, skip + 1);
+        }
+      }
+      off += c;
+    }
+  }
+  memcpy(arrays, narrays, anum * sizeof(*narrays));
+  if(narrays != nbuf) free(narrays);
+}
+
+
+/* Sort BWT string arrays by dicrionary order by insertion sort.
+   `array' specifies an array of string arrays.
+   `anum' specifies the number of the array.
+   `len' specifies the size of each string.
+   `skip' specifies the number of skipped bytes. */
+static void tcbwtsortstrinsert(const char **arrays, int anum, int len, int skip){
+  assert(arrays && anum >= 0 && len >= 0);
+  for(int i = 1; i < anum; i++){
+    int cmp = 0;
+    const unsigned char *ap = (unsigned char *)arrays[i-1];
+    const unsigned char *bp = (unsigned char *)arrays[i];
+    for(int j = skip; j < len; j++){
+      if(ap[j] != bp[j]){
+        cmp = ap[j] - bp[j];
+        break;
+      }
+    }
+    if(cmp > 0){
+      const char *swap = arrays[i];
+      int j;
+      for(j = i; j > 0; j--){
+        int cmp = 0;
+        const unsigned char *ap = (unsigned char *)arrays[j-1];
+        const unsigned char *bp = (unsigned char *)swap;
+        for(int k = skip; k < len; k++){
+          if(ap[k] != bp[k]){
+            cmp = ap[k] - bp[k];
+            break;
+          }
+        }
+        if(cmp < 0) break;
+        arrays[j] = arrays[j-1];
+      }
+      arrays[j] = swap;
+    }
+  }
+}
+
+
+/* Sort BWT string arrays by dicrionary order by heap sort.
+   `array' specifies an array of string arrays.
+   `anum' specifies the number of the array.
+   `len' specifies the size of each string.
+   `skip' specifies the number of skipped bytes. */
+static void tcbwtsortstrheap(const char **arrays, int anum, int len, int skip){
+  assert(arrays && anum >= 0 && len >= 0);
+  anum--;
+  int bottom = (anum >> 1) + 1;
+  int top = anum;
+  while(bottom > 0){
+    bottom--;
+    int mybot = bottom;
+    int i = mybot << 1;
+    while(i <= top){
+      if(i < top){
+        int cmp = 0;
+        const unsigned char *ap = (unsigned char *)arrays[i+1];
+        const unsigned char *bp = (unsigned char *)arrays[i];
+        for(int j = skip; j < len; j++){
+          if(ap[j] != bp[j]){
+            cmp = ap[j] - bp[j];
+            break;
+          }
+        }
+        if(cmp > 0) i++;
+      }
+      int cmp = 0;
+      const unsigned char *ap = (unsigned char *)arrays[mybot];
+      const unsigned char *bp = (unsigned char *)arrays[i];
+      for(int j = skip; j < len; j++){
+        if(ap[j] != bp[j]){
+          cmp = ap[j] - bp[j];
+          break;
+        }
+      }
+      if(cmp >= 0) break;
+      const char *swap = arrays[mybot];
+      arrays[mybot] = arrays[i];
+      arrays[i] = swap;
+      mybot = i;
+      i = mybot << 1;
+    }
+  }
+  while(top > 0){
+    const char *swap = arrays[0];
+    arrays[0] = arrays[top];
+    arrays[top] = swap;
+    top--;
+    int mybot = bottom;
+    int i = mybot << 1;
+    while(i <= top){
+      if(i < top){
+        int cmp = 0;
+        const unsigned char *ap = (unsigned char *)arrays[i+1];
+        const unsigned char *bp = (unsigned char *)arrays[i];
+        for(int j = 0; j < len; j++){
+          if(ap[j] != bp[j]){
+            cmp = ap[j] - bp[j];
+            break;
+          }
+        }
+        if(cmp > 0) i++;
+      }
+      int cmp = 0;
+      const unsigned char *ap = (unsigned char *)arrays[mybot];
+      const unsigned char *bp = (unsigned char *)arrays[i];
+      for(int j = 0; j < len; j++){
+        if(ap[j] != bp[j]){
+          cmp = ap[j] - bp[j];
+          break;
+        }
+      }
+      if(cmp >= 0) break;
+      swap = arrays[mybot];
+      arrays[mybot] = arrays[i];
+      arrays[i] = swap;
+      mybot = i;
+      i = mybot << 1;
+    }
+  }
+}
+
+
+/* Sort BWT characters by code number by counting sort.
+   `str' specifies a string.
+   `len' specifies the length of the string. */
+static void tcbwtsortchrcount(unsigned char *str, int len){
+  assert(str && len >= 0);
+  unsigned char nbuf[TC_BWTBUFNUM];
+  unsigned char *nstr = nbuf;
+  if(len > TC_BWTBUFNUM) nstr = tcmalloc(sizeof(*nstr) * len);
+  int count[0x100], accum[0x100];
+  memset(count, 0, sizeof(count));
+  for(int i = 0; i < len; i++){
+    count[str[i]]++;
+  }
+  memcpy(accum, count, sizeof(count));
+  for(int i = 1; i < 0x100; i++){
+    accum[i] = accum[i-1] + accum[i];
+  }
+  for(int i = 0; i < 0x100; i++){
+    accum[i] -= count[i];
+  }
+  for(int i = 0; i < len; i++){
+    nstr[accum[str[i]]++] = str[i];
+  }
+  memcpy(str, nstr, len * sizeof(*nstr));
+  if(nstr != nbuf) free(nstr);
+}
+
+
+/* Sort BWT characters by code number by insertion sort.
+   `str' specifies a string.
+   `len' specifies the length of the string. */
+static void tcbwtsortchrinsert(unsigned char *str, int len){
+  assert(str && len >= 0);
+  for(int i = 1; i < len; i++){
+    if(str[i-1] - str[i] > 0){
+      unsigned char swap = str[i];
+      int j;
+      for(j = i; j > 0; j--){
+        if(str[j-1] - swap < 0) break;
+        str[j] = str[j-1];
+      }
+      str[j] = swap;
+    }
+  }
+}
+
+
+/* Sort BWT records by code number by counting sort.
+   `array' specifies an array of records.
+   `anum' specifies the number of the array. */
+static void tcbwtsortreccount(TCBWTREC *array, int anum){
+  assert(array && anum >= 0);
+  TCBWTREC nbuf[TC_BWTBUFNUM];
+  TCBWTREC *narray = nbuf;
+  if(anum > TC_BWTBUFNUM) narray = tcmalloc(sizeof(*narray) * anum);
+  int count[0x100], accum[0x100];
+  memset(count, 0, sizeof(count));
+  for(int i = 0; i < anum; i++){
+    count[array[i].tchr>>23]++;
+  }
+  memcpy(accum, count, sizeof(count));
+  for(int i = 1; i < 0x100; i++){
+    accum[i] = accum[i-1] + accum[i];
+  }
+  for(int i = 0; i < 0x100; i++){
+    accum[i] -= count[i];
+  }
+  for(int i = 0; i < anum; i++){
+    narray[accum[array[i].tchr>>23]++] = array[i];
+  }
+  memcpy(array, narray, anum * sizeof(*narray));
+  if(narray != nbuf) free(narray);
+}
+
+
+/* Sort BWT records by code number by insertion sort.
+   `array' specifies an array of records..
+   `anum' specifies the number of the array. */
+static void tcbwtsortrecinsert(TCBWTREC *array, int anum){
+  assert(array && anum >= 0);
+  for(int i = 1; i < anum; i++){
+    if(array[i-1].tchr - array[i].tchr > 0){
+      TCBWTREC swap = array[i];
+      int j;
+      for(j = i; j > 0; j--){
+        if(array[j-1].tchr - swap.tchr < 0) break;
+        array[j] = array[j-1];
+      }
+      array[j] = swap;
+    }
+  }
+}
+
+
+/* Search the element of BWT records.
+   `array' specifies an array of records.
+   `anum' specifies the number of the array.
+   `tchr' specifies the last code number. */
+static int tcbwtsearchrec(TCBWTREC *array, int anum, int tchr){
+  assert(array && anum >= 0);
+  int bottom = 0;
+  int top = anum;
+  int mid;
+  do {
+    mid = (bottom + top) >> 1;
+    if(array[mid].tchr == tchr){
+      return mid;
+    } else if(array[mid].tchr < tchr){
+      bottom = mid + 1;
+      if(bottom >= anum) break;
+    } else {
+      top = mid - 1;
+    }
+  } while(bottom <= top);
+  return -1;
+}
+
+
+/* Initialization table for MTF encoder. */
+const unsigned char tcmtftable[] = {
+  0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+  0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
+  0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
+  0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,
+  0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,
+  0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x5b,0x5c,0x5d,0x5e,0x5f,
+  0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x6b,0x6c,0x6d,0x6e,0x6f,
+  0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x7b,0x7c,0x7d,0x7e,0x7f,
+  0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x8b,0x8c,0x8d,0x8e,0x8f,
+  0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0x9b,0x9c,0x9d,0x9e,0x9f,
+  0xa0,0xa1,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xab,0xac,0xad,0xae,0xaf,
+  0xb0,0xb1,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xbb,0xbc,0xbd,0xbe,0xbf,
+  0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xcb,0xcc,0xcd,0xce,0xcf,
+  0xd0,0xd1,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xdb,0xdc,0xdd,0xde,0xdf,
+  0xe0,0xe1,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xeb,0xec,0xed,0xee,0xef,
+  0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
+};
+
+
+/* Encode a region with MTF encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region. */
+static void tcmtfencode(char *ptr, int size){
+  unsigned char table1[0x100], table2[0x100], *table, *another;
+  assert(ptr && size >= 0);
+  memcpy(table1, tcmtftable, sizeof(tcmtftable));
+  table = table1;
+  another = table2;
+  const char *end = ptr + size;
+  char *wp = ptr;
+  while(ptr < end){
+    unsigned char c = *ptr;
+    unsigned char *tp = table;
+    unsigned char *tend = table + 0x100;
+    while(tp < tend && *tp != c){
+      tp++;
+    }
+    int idx = tp - table;
+    *(wp++) = idx;
+    if(idx > 0){
+      memcpy(another, &c, 1);
+      memcpy(another + 1, table, idx);
+      memcpy(another + 1 + idx, table + idx + 1, 255 - idx);
+      unsigned char *swap = table;
+      table = another;
+      another = swap;
+    }
+    ptr++;
+  }
+}
+
+
+/* Decode a region compressed with MTF encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region. */
+static void tcmtfdecode(char *ptr, int size){
+  assert(ptr && size >= 0);
+  unsigned char table1[0x100], table2[0x100], *table, *another;
+  assert(ptr && size >= 0);
+  memcpy(table1, tcmtftable, sizeof(tcmtftable));
+  table = table1;
+  another = table2;
+  const char *end = ptr + size;
+  char *wp = ptr;
+  while(ptr < end){
+    int idx = *(unsigned char *)ptr;
+    unsigned char c = table[idx];
+    *(wp++) = c;
+    if(idx > 0){
+      memcpy(another, &c, 1);
+      memcpy(another + 1, table, idx);
+      memcpy(another + 1 + idx, table + idx + 1, 255 - idx);
+      unsigned char *swap = table;
+      table = another;
+      another = swap;
+    }
+    ptr++;
+  }
+}
+
+
+/* Encode a region with Elias gamma encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `ptr' specifies the pointer to the output buffer. */
+static int tcgammaencode(const char *ptr, int size, char *obuf){
+  assert(ptr && size >= 0 && obuf);
+  TCBITSTRM strm;
+  TCBITSTRMINITW(strm, obuf);
+  const char *end = ptr + size;
+  while(ptr < end){
+    unsigned int c = *(unsigned char *)ptr;
+    if(!c){
+      TCBITSTRMCAT(strm, 1);
+    } else {
+      c++;
+      int plen = 8;
+      while(plen > 0 && !(c & (1 << plen))){
+        plen--;
+      }
+      int jlen = plen;
+      while(jlen-- > 0){
+        TCBITSTRMCAT(strm, 0);
+      }
+      while(plen >= 0){
+        int sign = (c & (1 << plen)) > 0;
+        TCBITSTRMCAT(strm, sign);
+        plen--;
+      }
+    }
+    ptr++;
+  }
+  TCBITSTRMSETEND(strm);
+  return TCBITSTRMSIZE(strm);
+}
+
+
+/* Decode a region compressed with Elias gamma encoding.
+   `ptr' specifies the pointer to the region.
+   `size' specifies the size of the region.
+   `ptr' specifies the pointer to the output buffer. */
+static int tcgammadecode(const char *ptr, int size, char *obuf){
+  assert(ptr && size >= 0 && obuf);
+  char *wp = obuf;
+  TCBITSTRM strm;
+  TCBITSTRMINITR(strm, ptr, size);
+  int bnum = TCBITSTRMNUM(strm);
+  while(bnum > 0){
+    int sign;
+    TCBITSTRMREAD(strm, sign);
+    bnum--;
+    if(sign){
+      *(wp++) = 0;
+    } else {
+      int plen = 1;
+      while(bnum > 0){
+        TCBITSTRMREAD(strm, sign);
+        bnum--;
+        if(sign) break;
+        plen++;
+      }
+      unsigned int c = 1;
+      while(bnum > 0 && plen-- > 0){
+        TCBITSTRMREAD(strm, sign);
+        bnum--;
+        c = (c << 1) + (sign > 0);
+      }
+      *(wp++) = c - 1;
+    }
+  }
+  return wp - obuf;;
 }
 
 

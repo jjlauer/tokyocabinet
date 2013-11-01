@@ -32,6 +32,9 @@
 
 
 typedef struct {                         // type of structure for a hash database
+  void *mmtx;                            // mutex for method
+  pthread_mutex_t *fmtx;                 // mutex for file I/O
+  pthread_key_t *eckey;                  // key for thread specific error code
   uint8_t type;                          // database type
   uint8_t flags;                         // additional flags
   uint64_t bnum;                         // number of the bucket array
@@ -52,13 +55,15 @@ typedef struct {                         // type of structure for a hash databas
   uint64_t *ba64;                        // 64-bit bucket array
   uint32_t align;                        // record alignment
   uint32_t runit;                        // record reading unit
+  bool zmode;                            // whether compression is used
   int32_t fbpmax;                        // maximum number of the free block pool
   int32_t fbpsiz;                        // size of the free block pool
   void *fbpool;                          // free block pool
-  int32_t fbpnum;                        // number of free block pool
-  int32_t fbpmis;                        // number of missing retrieval of free block pool
+  int32_t fbpnum;                        // number of the free block pool
+  int32_t fbpmis;                        // number of missing retrieval of the free block pool
   TCXSTR *drpool;                        // delayed record pool
-  TCXSTR *drpdef;                        // deferred records of delayed record pool
+  TCXSTR *drpdef;                        // deferred records of the delayed record pool
+  uint64_t drpoff;                       // offset of the delayed record pool
   int ecode;                             // last happened error code
   bool fatal;                            // whether a fatal error occured
   uint64_t inode;                        // inode number
@@ -81,6 +86,7 @@ typedef struct {                         // type of structure for a hash databas
 
 enum {                                   // enumeration for error codes
   TCESUCCESS,                            // success
+  TCETHREAD,                             // threading error
   TCEINVALID,                            // invalid operation
   TCENOFILE,                             // file not found
   TCENOPERM,                             // no permission
@@ -117,7 +123,8 @@ enum {                                   // enumeration for additional flags
 
 enum {                                   // enumeration for tuning options
   HDBTLARGE = 1 << 0,                    // use 64-bit bucket array
-  HDBTDEFLATE = 1 << 1,                  // compress each record with deflate
+  HDBTDEFLATE = 1 << 1,                  // compress each record with Deflate
+  HDBTTCBS = 1 << 2,                     // compress each record with TCBS
 };
 
 enum {                                   // enumeration for open modes
@@ -153,6 +160,14 @@ void tchdbdel(TCHDB *hdb);
 int tchdbecode(TCHDB *hdb);
 
 
+/* Set mutual exclusion control of a hash database object for threading.
+   `hdb' specifies the hash database object.
+   If successful, the return value is true, else, it is false.
+   Note that the mutual exclusion control of the database should be set before the database is
+   opened. */
+bool tchdbsetmutex(TCHDB *hdb);
+
+
 /* Set the tuning parameters of a hash database object.
    `hdb' specifies the hash database object.
    `bnum' specifies the number of elements of the bucket array.  If it is not more than 0, the
@@ -164,7 +179,7 @@ int tchdbecode(TCHDB *hdb);
    is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
    `opts' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `HDBTDEFLATE' specifies that each record
-   is compressed with deflate encoding.
+   is compressed with Deflate encoding.
    If successful, the return value is true, else, it is false.
    Note that the tuning parameters of the database should be set before the database is opened. */
 bool tchdbtune(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
@@ -293,10 +308,10 @@ bool tchdbout2(TCHDB *hdb, const char *kstr);
    `hdb' specifies the hash database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
-   If successful, the return value is the pointer to the region of the value of the
-   corresponding record.  `NULL' is returned when no record corresponds.
+   If successful, the return value is the pointer to the region of the value of the corresponding
+   record.  `NULL' is returned when no record corresponds.
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string.  Because the region of the return
    value is allocated with the `malloc' call, it should be released with the `free' call when
@@ -328,6 +343,15 @@ char *tchdbget2(TCHDB *hdb, const char *kstr);
 int tchdbget3(TCHDB *hdb, const char *kbuf, int ksiz, char *vbuf, int max);
 
 
+/* Get the size of the value of a record in a hash database object.
+   `hdb' specifies the hash database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   If successful, the return value is the size of the value of the corresponding record, else,
+   it is -1. */
+int tchdbvsiz(TCHDB *hdb, const char *kbuf, int ksiz);
+
+
 /* Initialize the iterator of a hash database object.
    `hdb' specifies the hash database object.
    If successful, the return value is true, else, it is false.
@@ -337,7 +361,7 @@ bool tchdbiterinit(TCHDB *hdb);
 
 /* Get the next key of the iterator of a hash database object.
    `hdb' specifies the hash database object.
-   `sp' specifies the pointer to the variable to which the size of the region of the return
+   `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
    If successful, the return value is the pointer to the region of the next key, else, it is
    `NULL'.  `NULL' is returned when no record is to be get out of the iterator.
@@ -391,7 +415,7 @@ bool tchdbsync(TCHDB *hdb);
    is negative, the current setting is not changed.
    `opts' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database
    can be larger than 2GB by using 64-bit bucket array, `HDBTDEFLATE' specifies that each record
-   is compressed with deflate encoding.  If it is `UINT8_MAX', the default setting is not changed.
+   is compressed with Deflate encoding.  If it is `UINT8_MAX', the default setting is not changed.
    If successful, the return value is true, else, it is false.
    This function is useful to reduce the size of the database file with data fragmentation by
    successive updating. */
