@@ -1,3 +1,17 @@
+2010-01-01  Mikio Hirabayashi  <hirarin@gmail.com>
+
+	* tchdb.c (tchdbnew, tchdbsetmutex): a useless lock object was removed.
+
+	* tcutil.c (tcsysinfo): CPU information was added.
+
+	* tchmgr.c (runput, procput): addint and adddouble ouput the result now.
+
+	* tcbmgr.c (runput, procput): addint and adddouble ouput the result now.
+
+	* tcfmgr.c (runput, procput): addint and adddouble ouput the result now.
+
+	- Release: 1.4.42
+
 2009-12-07  Mikio Hirabayashi  <hirarin@gmail.com>
 
 	* tctdb.c (tctdbidxputtoken, tctdbidxputqgram): domain overflow checking was added.

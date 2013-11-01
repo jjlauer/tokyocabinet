@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The hash database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2010 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -226,7 +226,6 @@ void tchdbdel(TCHDB *hdb){
   if(hdb->mmtx){
     pthread_key_delete(*(pthread_key_t *)hdb->eckey);
     pthread_mutex_destroy(hdb->wmtx);
-    pthread_mutex_destroy(hdb->tmtx);
     pthread_mutex_destroy(hdb->dmtx);
     for(int i = UINT8_MAX; i >= 0; i--){
       pthread_rwlock_destroy((pthread_rwlock_t *)hdb->rmtxs + i);
@@ -234,7 +233,6 @@ void tchdbdel(TCHDB *hdb){
     pthread_rwlock_destroy(hdb->mmtx);
     TCFREE(hdb->eckey);
     TCFREE(hdb->wmtx);
-    TCFREE(hdb->tmtx);
     TCFREE(hdb->dmtx);
     TCFREE(hdb->rmtxs);
     TCFREE(hdb->mmtx);
@@ -264,7 +262,6 @@ bool tchdbsetmutex(TCHDB *hdb){
   TCMALLOC(hdb->mmtx, sizeof(pthread_rwlock_t));
   TCMALLOC(hdb->rmtxs, (UINT8_MAX + 1) * sizeof(pthread_rwlock_t));
   TCMALLOC(hdb->dmtx, sizeof(pthread_mutex_t));
-  TCMALLOC(hdb->tmtx, sizeof(pthread_mutex_t));
   TCMALLOC(hdb->wmtx, sizeof(pthread_mutex_t));
   TCMALLOC(hdb->eckey, sizeof(pthread_key_t));
   bool err = false;
@@ -274,7 +271,6 @@ bool tchdbsetmutex(TCHDB *hdb){
     if(pthread_rwlock_init((pthread_rwlock_t *)hdb->rmtxs + i, NULL) != 0) err = true;
   }
   if(pthread_mutex_init(hdb->dmtx, &rma) != 0) err = true;
-  if(pthread_mutex_init(hdb->tmtx, NULL) != 0) err = true;
   if(pthread_mutex_init(hdb->wmtx, NULL) != 0) err = true;
   if(pthread_key_create(hdb->eckey, NULL) != 0) err = true;
   if(err){
@@ -282,13 +278,11 @@ bool tchdbsetmutex(TCHDB *hdb){
     pthread_mutexattr_destroy(&rma);
     TCFREE(hdb->eckey);
     TCFREE(hdb->wmtx);
-    TCFREE(hdb->tmtx);
     TCFREE(hdb->dmtx);
     TCFREE(hdb->rmtxs);
     TCFREE(hdb->mmtx);
     hdb->eckey = NULL;
     hdb->wmtx = NULL;
-    hdb->tmtx = NULL;
     hdb->dmtx = NULL;
     hdb->rmtxs = NULL;
     hdb->mmtx = NULL;
@@ -2044,7 +2038,6 @@ static void tchdbclear(TCHDB *hdb){
   hdb->mmtx = NULL;
   hdb->rmtxs = NULL;
   hdb->dmtx = NULL;
-  hdb->tmtx = NULL;
   hdb->wmtx = NULL;
   hdb->eckey = NULL;
   hdb->rpath = NULL;
@@ -5055,7 +5048,6 @@ void tchdbprintmeta(TCHDB *hdb){
   wp += sprintf(wp, " mmtx=%p", (void *)hdb->mmtx);
   wp += sprintf(wp, " rmtxs=%p", (void *)hdb->rmtxs);
   wp += sprintf(wp, " dmtx=%p", (void *)hdb->dmtx);
-  wp += sprintf(wp, " tmtx=%p", (void *)hdb->tmtx);
   wp += sprintf(wp, " wmtx=%p", (void *)hdb->wmtx);
   wp += sprintf(wp, " eckey=%p", (void *)hdb->eckey);
   wp += sprintf(wp, " rpath=%s", hdb->rpath ? hdb->rpath : "-");

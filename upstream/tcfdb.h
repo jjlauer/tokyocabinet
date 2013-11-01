@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The fixed-length database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2010 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -76,7 +76,7 @@ typedef struct {                         /* type of structure for a fixed-length
 
 enum {                                   /* enumeration for additional flags */
   FDBFOPEN = 1 << 0,                     /* whether opened */
-  FDBFFATAL = 1 << 1                     /* whetehr with fatal error */
+  FDBFFATAL = 1 << 1                     /* whether with fatal error */
 };
 
 enum {                                   /* enumeration for open modes */

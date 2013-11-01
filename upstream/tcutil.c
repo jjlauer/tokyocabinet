@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The utility API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2010 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -6701,7 +6701,6 @@ TCMAP *tcsysinfo(void){
   lines = tcreadfilelines("/proc/meminfo");
   if(lines){
     int ln = tclistnum(lines);
-    char numbuf[TCNUMBUFSIZ];
     for(int i = 0; i < ln; i++){
       const char *line = TCLISTVALPTR(lines, i);
       const char *rp = strchr(line, ':');
@@ -6712,18 +6711,26 @@ TCMAP *tcsysinfo(void){
       }
       if(tcstrifwm(line, "MemTotal:")){
         int64_t size = tcatoix(rp);
-        sprintf(numbuf, "%lld", (long long)size);
-        tcmapput2(info, "total", numbuf);
+        if(size > 0) tcmapprintf(info, "total", "%lld", (long long)size);
       } else if(tcstrifwm(line, "MemFree:")){
         int64_t size = tcatoix(rp);
-        sprintf(numbuf, "%lld", (long long)size);
-        tcmapput2(info, "free", numbuf);
+        if(size > 0) tcmapprintf(info, "free", "%lld", (long long)size);
       } else if(tcstrifwm(line, "Cached:")){
         int64_t size = tcatoix(rp);
-        sprintf(numbuf, "%lld", (long long)size);
-        tcmapput2(info, "cached", numbuf);
+        if(size > 0) tcmapprintf(info, "cached", "%lld", (long long)size);
       }
     }
+    tclistdel(lines);
+  }
+  lines = tcreadfilelines("/proc/cpuinfo");
+  if(lines){
+    int cnum = 0;
+    int ln = tclistnum(lines);
+    for(int i = 0; i < ln; i++){
+      const char *line = TCLISTVALPTR(lines, i);
+      if(tcstrifwm(line, "processor")) cnum++;
+    }
+    if(cnum > 0) tcmapprintf(info, "corenum", "%lld", (long long)cnum);
     tclistdel(lines);
   }
   return info;

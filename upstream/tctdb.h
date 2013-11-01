@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The table database API of Tokyo Cabinet
- *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2010 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -62,7 +62,7 @@ typedef struct {                         /* type of structure for a table databa
 
 enum {                                   /* enumeration for additional flags */
   TDBFOPEN = HDBFOPEN,                   /* whether opened */
-  TDBFFATAL = HDBFFATAL                  /* whetehr with fatal error */
+  TDBFFATAL = HDBFFATAL                  /* whether with fatal error */
 };
 
 enum {                                   /* enumeration for tuning options */

@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The command line utility of the hash database API
- *                                                      Copyright (C) 2006-2009 Mikio Hirabayashi
+ *                                                      Copyright (C) 2006-2010 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
  * the GNU Lesser General Public License as published by the Free Software Foundation; either
@@ -594,6 +594,8 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
     return 1;
   }
   bool err = false;
+  int inum;
+  double dnum;
   switch(dmode){
     case -1:
       if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz)){
@@ -608,15 +610,21 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
       }
       break;
     case 10:
-      if(tchdbaddint(hdb, kbuf, ksiz, tcatoi(vbuf)) == INT_MIN){
+      inum = tchdbaddint(hdb, kbuf, ksiz, tcatoi(vbuf));
+      if(inum == INT_MIN){
         printerr(hdb);
         err = true;
+      } else {
+        printf("%d\n", inum);
       }
       break;
     case 11:
-      if(isnan(tchdbadddouble(hdb, kbuf, ksiz, tcatof(vbuf)))){
+      dnum = tchdbadddouble(hdb, kbuf, ksiz, tcatof(vbuf));
+      if(isnan(dnum)){
         printerr(hdb);
         err = true;
+      } else {
+        printf("%.6f\n", dnum);
       }
       break;
     default:
@@ -833,7 +841,7 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
 static int procversion(void){
   printf("Tokyo Cabinet version %s (%d:%s) for %s\n",
          tcversion, _TC_LIBVER, _TC_FORMATVER, TCSYSNAME);
-  printf("Copyright (C) 2006-2009 Mikio Hirabayashi\n");
+  printf("Copyright (C) 2006-2010 Mikio Hirabayashi\n");
   return 0;
 }
 
