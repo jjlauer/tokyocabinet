@@ -1,0 +1,36 @@
+2007-08-22  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	- Release: 0.2.9
+
+2007-08-18  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdboptimize): a bug causing data corruption was fixed.
+
+	- Release: 0.2.8
+
+2007-08-15  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdboptimize): new function.
+
+	- Release: 0.2.7
+
+2007-08-14  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbsavefbp, tchdbloadfbp): a bug related to 64-bit support was fixed.
+
+	* tchdb.c (tchdbreadrec, tchdbwriterec): a bug related to 64-bit support was fixed.
+
+	- Release: 0.2.6
+
+2007-08-13  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbsavefbp, tchdbloadfbp): new functions.
+
+	- Release: 0.2.5
+
+2007-08-12  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	- The initial version.
+
+	- Release: 0.2.4
+
