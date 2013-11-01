@@ -7,32 +7,33 @@
 #================================================================
 
 # Package name
-AC_INIT(tokyocabinet, 1.3.27)
+AC_INIT(tokyocabinet, 1.4.40)
 
 # Package information
-MYLIBVER=7
-MYLIBREV=4
+MYLIBVER=9
+MYLIBREV=3
 MYFORMATVER="1.0"
 
 # Targets
-MYHEADERFILES="tcutil.h tchdb.h tcbdb.h tcfdb.h tcadb.h"
+MYHEADERFILES="tcutil.h tchdb.h tcbdb.h tcfdb.h tctdb.h tcadb.h"
 MYLIBRARYFILES="libtokyocabinet.a"
-MYLIBOBJFILES="tcutil.o tchdb.o tcbdb.o tcfdb.o tcadb.o myconf.o md5.o"
+MYLIBOBJFILES="tcutil.o tchdb.o tcbdb.o tcfdb.o tctdb.o tcadb.o myconf.o md5.o"
 MYCOMMANDFILES="tcutest tcumttest tcucodec tchtest tchmttest tchmgr"
 MYCOMMANDFILES="$MYCOMMANDFILES tcbtest tcbmttest tcbmgr tcftest tcfmttest tcfmgr"
-MYCOMMANDFILES="$MYCOMMANDFILES tcatest tcamgr"
+MYCOMMANDFILES="$MYCOMMANDFILES tcttest tctmttest tctmgr tcatest tcamttest tcamgr"
 MYCGIFILES="tcawmgr.cgi"
 MYMAN1FILES="tcutest.1 tcumttest.1 tcucodec.1 tchtest.1 tchmttest.1 tchmgr.1"
 MYMAN1FILES="$MYMAN1FILES tcbtest.1 tcbmttest.1 tcbmgr.1 tcftest.1 tcfmttest.1 tcfmgr.1"
-MYMAN1FILES="$MYMAN1FILES tcatest.1 tcamgr.1"
+MYMAN1FILES="$MYMAN1FILES tcttest.1 tctmttest.1 tctmgr.1 tcatest.1 tcamttest.1 tcamgr.1"
 MYMAN3FILES="tokyocabinet.3 tcutil.3 tcxstr.3 tclist.3 tcmap.3 tctree.3 tcmdb.3 tcmpool.3"
-MYMAN3FILES="$MYMAN3FILES tchdb.3 tcbdb.3 tcfdb.3 tcadb.3"
+MYMAN3FILES="$MYMAN3FILES tchdb.3 tcbdb.3 tcfdb.3 tctdb.3 tcadb.3"
 MYDOCUMENTFILES="COPYING ChangeLog THANKS doc"
 MYPCFILES="tokyocabinet.pc"
 
 # Building flags
 MYCFLAGS="-std=c99 -Wall -fPIC -fsigned-char -O2"
-MYCPPFLAGS="-I. -I\$(INCLUDEDIR) -I$HOME/include -I/usr/local/include -DNDEBUG -D_GNU_SOURCE=1"
+MYCPPFLAGS="-I. -I\$(INCLUDEDIR) -I$HOME/include -I/usr/local/include"
+MYCPPFLAGS="$MYCPPFLAGS -DNDEBUG -D_GNU_SOURCE=1 -D_REENTRANT -D__EXTENSIONS__"
 MYLDFLAGS="-L. -L\$(LIBDIR) -L$HOME/lib -L/usr/local/lib"
 MYCMDLDFLAGS=""
 MYRUNPATH="\$(LIBDIR)"
@@ -40,9 +41,8 @@ MYLDLIBPATHENV="LD_LIBRARY_PATH"
 MYPOSTCMD="true"
 
 # Building paths
-pathtmp="$PATH"
-PATH="$HOME/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
-PATH="$PATH:/usr/ccs/bin:/usr/ucb:/usr/xpg4/bin:/usr/xpg6/bin:$pathtmp"
+PATH="$PATH:$HOME/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+PATH="$PATH:/opt/SUNWspro/bin:/usr/ccs/bin:/usr/xpg4/bin:/usr/xpg6/bin:/usr/ucb"
 CPATH="$HOME/include:/usr/local/include:$CPATH"
 LIBRARY_PATH="$HOME/lib:/usr/local/lib:$LIBRARY_PATH"
 LD_LIBRARY_PATH="$HOME/lib:/usr/local/lib:$LD_LIBRARY_PATH"
@@ -103,6 +103,7 @@ AC_ARG_ENABLE(fastest,
   AC_HELP_STRING([--enable-fastest], [build for fastest run]))
 if test "$enable_fastest" = "yes"
 then
+  MYLIBOBJFILES="tokyocabinet_all.o"
   MYCFLAGS="-std=c99 -Wall -fPIC -pedantic -fsigned-char -O3"
   MYCFLAGS="$MYCFLAGS -fomit-frame-pointer -fforce-addr -minline-all-stringops"
   MYCPPFLAGS="$MYCPPFLAGS -D_MYFASTEST"
@@ -136,6 +137,15 @@ then
   enables="$enables (uyield)"
 fi
 
+# Disable the unified buffer cache assumption
+AC_ARG_ENABLE(ubc,
+  AC_HELP_STRING([--disable-ubc], [build without the unified buffer cache assumption]))
+if test "$enable_ubc" = "no"
+then
+  MYCPPFLAGS="$MYCPPFLAGS -D_MYNOUBC"
+  enables="$enables (no-ubc)"
+fi
+
 # Disable ZLIB compression
 AC_ARG_ENABLE(zlib,
   AC_HELP_STRING([--disable-zlib], [build without ZLIB compression]))
@@ -145,7 +155,7 @@ then
   enables="$enables (no-zlib)"
 fi
 
-# Enable BZIP2 compression
+# Disable BZIP2 compression
 AC_ARG_ENABLE(bzip,
   AC_HELP_STRING([--disable-bzip], [build without BZIP2 compression]))
 if test "$enable_bzip" = "no"
@@ -196,6 +206,7 @@ if test -n "$with_zlib"
 then
   MYCPPFLAGS="$MYCPPFLAGS -I$with_zlib/include"
   MYLDFLAGS="$MYLDFLAGS -L$with_zlib/lib"
+  MYRUNPATH="$MYRUNPATH:$with_zlib/lib"
   CPATH="$CPATH:$with_zlib/include"
   LIBRARY_PATH="$LIBRARY_PATH:$with_zlib/lib"
   LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$with_zlib/lib"
@@ -208,6 +219,7 @@ if test -n "$with_bzip"
 then
   MYCPPFLAGS="$MYCPPFLAGS -I$with_bzip/include"
   MYLDFLAGS="$MYLDFLAGS -L$with_bzip/lib"
+  MYRUNPATH="$MYRUNPATH:$with_bzip/lib"
   CPATH="$CPATH:$with_bzip/include"
   LIBRARY_PATH="$LIBRARY_PATH:$with_bzip/lib"
   LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$with_bzip/lib"
@@ -224,13 +236,18 @@ printf '#================================================================\n'
 # Checking Commands and Libraries
 #================================================================
 
+# C compiler
+AC_PROG_CC
+
 # Reset variables
+if test "$GCC" != "yes"
+then
+  AC_MSG_WARN([another compiler except for GCC was detected])
+  MYCFLAGS=""
+fi
 test -n "$CFLAGS" && MYCFLAGS="$CFLAGS $MYCFLAGS"
 test -n "$CPPFLAGS" && MYCPPFLAGS="$CPPFLAGS $MYCPPFLAGS"
 test -n "$LDFLAGS" && MYLDFLAGS="$LDFLAGS $MYLDFLAGS"
-
-# C compiler
-AC_PROG_CC
 
 # Byte order
 AC_C_BIGENDIAN(MYCPPFLAGS="$MYCPPFLAGS -D_MYBIGEND")
@@ -241,6 +258,7 @@ AC_CHECK_LIB(m, main)
 if test "$enable_pthread" != "no"
 then
   AC_CHECK_LIB(pthread, main)
+  AC_CHECK_LIB(rt, main)
 fi
 if test "$enable_zlib" != "no"
 then
@@ -250,11 +268,11 @@ if test "$enable_bzip" != "no"
 then
   AC_CHECK_LIB(bz2, main)
 fi
-if test "$enable_exlzma" == "yes"
+if test "$enable_exlzma" = "yes"
 then
   AC_CHECK_LIB(lzma, main)
 fi
-if test "$enable_exlzo" == "yes"
+if test "$enable_exlzo" = "yes"
 then
   AC_CHECK_LIB(lzo2, main)
 fi
@@ -279,11 +297,11 @@ if test "$enable_bzip" != "no"
 then
   AC_CHECK_HEADER(bzlib.h, true, AC_MSG_ERROR([bzlib.h is required]))
 fi
-if test "$enable_exlzma" == "yes"
+if test "$enable_exlzma" = "yes"
 then
   AC_CHECK_HEADER(lzmalib.h, true, AC_MSG_ERROR([lzmalib.h is required]))
 fi
-if test "$enable_exlzo" == "yes"
+if test "$enable_exlzo" = "yes"
 then
   AC_CHECK_HEADER(lzo/lzo1x.h, true, AC_MSG_ERROR([lzo/lzo1x.h is required]))
 fi

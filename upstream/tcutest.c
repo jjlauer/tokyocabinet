@@ -17,11 +17,12 @@
 #include <tcutil.h>
 #include "myconf.h"
 
-#define RECBUFSIZ      32                // buffer for records
+#define RECBUFSIZ      48                // buffer for records
 
 
 /* global variables */
 const char *g_progname;                  // program name
+unsigned int g_randseed;                 // random seed
 
 
 /* function prototypes */
@@ -29,8 +30,11 @@ int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
 static void iputchar(int c);
-static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op);
+static void sysprint(void);
 static int myrand(int range);
+static void *pdprocfunc(const void *vbuf, int vsiz, int *sp, void *op);
+static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op);
+static int intcompar(const void *ap, const void *bp);
 static int runxstr(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runmap(int argc, char **argv);
@@ -52,7 +56,9 @@ static int procwicked(int rnum);
 /* main routine */
 int main(int argc, char **argv){
   g_progname = argv[0];
-  srand((unsigned int)(tctime() * 1000) % UINT_MAX);
+  const char *ebuf = getenv("TCRNDSEED");
+  g_randseed = ebuf ? tcatoix(ebuf) : tctime() * 1000;
+  srand(g_randseed);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "xstr")){
@@ -74,6 +80,13 @@ int main(int argc, char **argv){
   } else {
     usage();
   }
+  if(rv != 0){
+    printf("FAILED: TCRNDSEED=%u PID=%d", g_randseed, (int)getpid());
+    for(int i = 0; i < argc; i++){
+      printf(" %s", argv[i]);
+    }
+    printf("\n\n");
+  }
   return rv;
 }
 
@@ -85,10 +98,14 @@ static void usage(void){
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s xstr rnum\n", g_progname);
   fprintf(stderr, "  %s list [-rd] rnum [anum]\n", g_progname);
-  fprintf(stderr, "  %s map [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad] rnum [bnum]\n", g_progname);
-  fprintf(stderr, "  %s tree [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad] rnum\n", g_progname);
-  fprintf(stderr, "  %s mdb [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad] rnum [bnum]\n", g_progname);
-  fprintf(stderr, "  %s ndb [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad] rnum\n", g_progname);
+  fprintf(stderr, "  %s map [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad|-dpr] rnum [bnum]\n",
+          g_progname);
+  fprintf(stderr, "  %s tree [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad|-dpr] rnum\n",
+          g_progname);
+  fprintf(stderr, "  %s mdb [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad|-dpr] rnum [bnum]\n",
+          g_progname);
+  fprintf(stderr, "  %s ndb [-rd] [-tr] [-rnd] [-dk|-dc|-dai|-dad|-dpr] rnum\n",
+          g_progname);
   fprintf(stderr, "  %s misc rnum\n", g_progname);
   fprintf(stderr, "  %s wicked rnum\n", g_progname);
   fprintf(stderr, "\n");
@@ -113,6 +130,42 @@ static void iputchar(int c){
 }
 
 
+/* print system information */
+static void sysprint(void){
+  TCMAP *info = tcsysinfo();
+  if(info){
+    tcmapiterinit(info);
+    const char *kbuf;
+    while((kbuf = tcmapiternext2(info)) != NULL){
+      iprintf("sys_%s: %s\n", kbuf, tcmapiterval2(kbuf));
+    }
+    tcmapdel(info);
+  }
+}
+
+
+/* get a random number */
+static int myrand(int range){
+  if(range < 2) return 0;
+  int high = (unsigned int)rand() >> 4;
+  int low = range * (rand() / (RAND_MAX + 1.0));
+  low &= (unsigned int)INT_MAX >> 4;
+  return (high + low) % range;
+}
+
+
+/* duplication callback function */
+static void *pdprocfunc(const void *vbuf, int vsiz, int *sp, void *op){
+  if(myrand(4) == 0) return (void *)-1;
+  if(myrand(2) == 0) return NULL;
+  int len = myrand(RECBUFSIZ);
+  char buf[RECBUFSIZ];
+  memset(buf, '*', len);
+  *sp = len;
+  return tcmemdup(buf, len);
+}
+
+
 /* iterator function */
 static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, void *op){
   unsigned int sum = 0;
@@ -126,9 +179,9 @@ static bool iterfunc(const void *kbuf, int ksiz, const void *vbuf, int vsiz, voi
 }
 
 
-/* get a random number */
-static int myrand(int range){
-  return (int)((double)range * rand() / (RAND_MAX + 1.0));
+/* compare two integers */
+static int intcompar(const void *ap, const void *bp){
+  return *(int *)ap - *(int *)bp;
 }
 
 
@@ -145,7 +198,7 @@ static int runxstr(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
   int rv = procxstr(rnum);
   return rv;
@@ -173,9 +226,9 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
-  int anum = astr ? tcatoi(astr) : -1;
+  int anum = astr ? tcatoix(astr) : -1;
   int rv = proclist(rnum, anum, rd);
   return rv;
 }
@@ -205,6 +258,8 @@ static int runmap(int argc, char **argv){
         dmode = 10;
       } else if(!strcmp(argv[i], "-dad")){
         dmode = 11;
+      } else if(!strcmp(argv[i], "-dpr")){
+        dmode = 12;
       } else {
         usage();
       }
@@ -217,9 +272,9 @@ static int runmap(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
+  int bnum = bstr ? tcatoix(bstr) : -1;
   int rv = procmap(rnum, bnum, rd, tr, rnd, dmode);
   return rv;
 }
@@ -248,6 +303,8 @@ static int runtree(int argc, char **argv){
         dmode = 10;
       } else if(!strcmp(argv[i], "-dad")){
         dmode = 11;
+      } else if(!strcmp(argv[i], "-dpr")){
+        dmode = 12;
       } else {
         usage();
       }
@@ -258,7 +315,7 @@ static int runtree(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
   int rv = proctree(rnum, rd, tr, rnd, dmode);
   return rv;
@@ -289,6 +346,8 @@ static int runmdb(int argc, char **argv){
         dmode = 10;
       } else if(!strcmp(argv[i], "-dad")){
         dmode = 11;
+      } else if(!strcmp(argv[i], "-dpr")){
+        dmode = 12;
       } else {
         usage();
       }
@@ -301,9 +360,9 @@ static int runmdb(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
+  int bnum = bstr ? tcatoix(bstr) : -1;
   int rv = procmdb(rnum, bnum, rd, tr, rnd, dmode);
   return rv;
 }
@@ -332,6 +391,8 @@ static int runndb(int argc, char **argv){
         dmode = 10;
       } else if(!strcmp(argv[i], "-dad")){
         dmode = 11;
+      } else if(!strcmp(argv[i], "-dpr")){
+        dmode = 12;
       } else {
         usage();
       }
@@ -342,7 +403,7 @@ static int runndb(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
   int rv = procndb(rnum, rd, tr, rnd, dmode);
   return rv;
@@ -362,7 +423,7 @@ static int runmisc(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
   int rv = procmisc(rnum);
   return rv;
@@ -382,7 +443,7 @@ static int runwicked(int argc, char **argv){
     }
   }
   if(!rstr) usage();
-  int rnum = tcatoi(rstr);
+  int rnum = tcatoix(rstr);
   if(rnum < 1) usage();
   int rv = procwicked(rnum);
   return rv;
@@ -391,7 +452,7 @@ static int runwicked(int argc, char **argv){
 
 /* perform xstr command */
 static int procxstr(int rnum){
-  iprintf("<Extensible String Writing Test>\n  rnum=%d\n\n", rnum);
+  iprintf("<Extensible String Writing Test>\n  seed=%u  rnum=%d\n\n", g_randseed, rnum);
   double stime = tctime();
   TCXSTR *xstr = tcxstrnew();
   for(int i = 1; i <= rnum; i++){
@@ -404,6 +465,7 @@ static int procxstr(int rnum){
     }
   }
   iprintf("size: %u\n", tcxstrsize(xstr));
+  sysprint();
   tcxstrdel(xstr);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -413,7 +475,8 @@ static int procxstr(int rnum){
 
 /* perform list command */
 static int proclist(int rnum, int anum, bool rd){
-  iprintf("<List Writing Test>\n  rnum=%d  anum=%d  rd=%d\n\n", rnum, anum, rd);
+  iprintf("<List Writing Test>\n  seed=%u  rnum=%d  anum=%d  rd=%d\n\n",
+          g_randseed, rnum, anum, rd);
   double stime = tctime();
   TCLIST *list = (anum > 0) ? tclistnew2(anum) : tclistnew();
   for(int i = 1; i <= rnum; i++){
@@ -439,6 +502,7 @@ static int proclist(int rnum, int anum, bool rd){
     }
   }
   iprintf("record number: %u\n", tclistnum(list));
+  sysprint();
   tclistdel(list);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -448,29 +512,32 @@ static int proclist(int rnum, int anum, bool rd){
 
 /* perform map command */
 static int procmap(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
-  iprintf("<Map Writing Test>\n  rnum=%d  bnum=%d  rd=%d  tr=%d  rnd=%d  dmode=%d\n\n",
-          rnum, bnum, rd, tr, rnd, dmode);
+  iprintf("<Map Writing Test>\n  seed=%u  rnum=%d  bnum=%d  rd=%d  tr=%d  rnd=%d  dmode=%d\n\n",
+          g_randseed, rnum, bnum, rd, tr, rnd, dmode);
   double stime = tctime();
   TCMAP *map = (bnum > 0) ? tcmapnew2(bnum) : tcmapnew();
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     switch(dmode){
-    case -1:
-      tcmapputkeep(map, buf, len, buf, len);
-      break;
-    case 1:
-      tcmapputcat(map, buf, len, buf, len);
-      break;
-    case 10:
-      tcmapaddint(map, buf, len, myrand(3));
-      break;
-    case 11:
-      tcmapadddouble(map, buf, len, myrand(3));
-      break;
-    default:
-      tcmapput(map, buf, len, buf, len);
-      break;
+      case -1:
+        tcmapputkeep(map, buf, len, buf, len);
+        break;
+      case 1:
+        tcmapputcat(map, buf, len, buf, len);
+        break;
+      case 10:
+        tcmapaddint(map, buf, len, myrand(3));
+        break;
+      case 11:
+        tcmapadddouble(map, buf, len, myrand(3));
+        break;
+      case 12:
+        tcmapputproc(map, buf, len, buf, len, pdprocfunc, NULL);
+        break;
+      default:
+        tcmapput(map, buf, len, buf, len);
+        break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       iputchar('.');
@@ -511,6 +578,7 @@ static int procmap(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
   }
   iprintf("record number: %llu\n", (unsigned long long)tcmaprnum(map));
   iprintf("size: %llu\n", (unsigned long long)tcmapmsiz(map));
+  sysprint();
   tcmapdel(map);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -520,29 +588,32 @@ static int procmap(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
 
 /* perform tree command */
 static int proctree(int rnum, bool rd, bool tr, bool rnd, int dmode){
-  iprintf("<Tree Writing Test>\n  rnum=%d  rd=%d  tr=%d  rnd=%d  dmode=%d\n\n",
-          rnum, rd, tr, rnd, dmode);
+  iprintf("<Tree Writing Test>\n  seed=%u  rnum=%d  rd=%d  tr=%d  rnd=%d  dmode=%d\n\n",
+          g_randseed, rnum, rd, tr, rnd, dmode);
   double stime = tctime();
   TCTREE *tree = tctreenew();
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     switch(dmode){
-    case -1:
-      tctreeputkeep(tree, buf, len, buf, len);
-      break;
-    case 1:
-      tctreeputcat(tree, buf, len, buf, len);
-      break;
-    case 10:
-      tctreeaddint(tree, buf, len, myrand(3));
-      break;
-    case 11:
-      tctreeadddouble(tree, buf, len, myrand(3));
-      break;
-    default:
-      tctreeput(tree, buf, len, buf, len);
-      break;
+      case -1:
+        tctreeputkeep(tree, buf, len, buf, len);
+        break;
+      case 1:
+        tctreeputcat(tree, buf, len, buf, len);
+        break;
+      case 10:
+        tctreeaddint(tree, buf, len, myrand(3));
+        break;
+      case 11:
+        tctreeadddouble(tree, buf, len, myrand(3));
+        break;
+      case 12:
+        tctreeputproc(tree, buf, len, buf, len, pdprocfunc, NULL);
+        break;
+      default:
+        tctreeput(tree, buf, len, buf, len);
+        break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       iputchar('.');
@@ -583,6 +654,7 @@ static int proctree(int rnum, bool rd, bool tr, bool rnd, int dmode){
   }
   iprintf("record number: %llu\n", (unsigned long long)tctreernum(tree));
   iprintf("size: %llu\n", (unsigned long long)tctreemsiz(tree));
+  sysprint();
   tctreedel(tree);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -592,29 +664,32 @@ static int proctree(int rnum, bool rd, bool tr, bool rnd, int dmode){
 
 /* perform mdb command */
 static int procmdb(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
-  iprintf("<On-memory Hash Database Writing Test>\n  rnum=%d  bnum=%d  rd=%d  tr=%d  rnd=%d"
-          "  dmode=%d\n\n", rnum, bnum, rd, tr, rnd, dmode);
+  iprintf("<On-memory Hash Database Writing Test>\n  seed=%u  rnum=%d  bnum=%d  rd=%d  tr=%d"
+          "  rnd=%d  dmode=%d\n\n", g_randseed, rnum, bnum, rd, tr, rnd, dmode);
   double stime = tctime();
   TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     switch(dmode){
-    case -1:
-      tcmdbputkeep(mdb, buf, len, buf, len);
-      break;
-    case 1:
-      tcmdbputcat(mdb, buf, len, buf, len);
-      break;
-    case 10:
-      tcmdbaddint(mdb, buf, len, myrand(3));
-      break;
-    case 11:
-      tcmdbadddouble(mdb, buf, len, myrand(3));
-      break;
-    default:
-      tcmdbput(mdb, buf, len, buf, len);
-      break;
+      case -1:
+        tcmdbputkeep(mdb, buf, len, buf, len);
+        break;
+      case 1:
+        tcmdbputcat(mdb, buf, len, buf, len);
+        break;
+      case 10:
+        tcmdbaddint(mdb, buf, len, myrand(3));
+        break;
+      case 11:
+        tcmdbadddouble(mdb, buf, len, myrand(3));
+        break;
+      case 12:
+        tcmdbputproc(mdb, buf, len, buf, len, pdprocfunc, NULL);
+        break;
+      default:
+        tcmdbput(mdb, buf, len, buf, len);
+        break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       iputchar('.');
@@ -655,6 +730,7 @@ static int procmdb(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
   }
   iprintf("record number: %llu\n", (unsigned long long)tcmdbrnum(mdb));
   iprintf("size: %llu\n", (unsigned long long)tcmdbmsiz(mdb));
+  sysprint();
   tcmdbdel(mdb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -664,29 +740,32 @@ static int procmdb(int rnum, int bnum, bool rd, bool tr, bool rnd, int dmode){
 
 /* perform ndb command */
 static int procndb(int rnum, bool rd, bool tr, bool rnd, int dmode){
-  iprintf("<On-memory Tree Database Writing Test>\n  rnum=%d  rd=%d  tr=%d  rnd=%d  dmode=%d\n\n",
-          rnum, rd, tr, rnd, dmode);
+  iprintf("<On-memory Tree Database Writing Test>\n  seed=%u  rnum=%d  rd=%d  tr=%d"
+          "  rnd=%d  dmode=%d\n\n", g_randseed, rnum, rd, tr, rnd, dmode);
   double stime = tctime();
   TCNDB *ndb = tcndbnew();
   for(int i = 1; i <= rnum; i++){
     char buf[RECBUFSIZ];
     int len = sprintf(buf, "%08d", rnd ? myrand(rnum) + 1 : i);
     switch(dmode){
-    case -1:
-      tcndbputkeep(ndb, buf, len, buf, len);
-      break;
-    case 1:
-      tcndbputcat(ndb, buf, len, buf, len);
-      break;
-    case 10:
-      tcndbaddint(ndb, buf, len, myrand(3));
-      break;
-    case 11:
-      tcndbadddouble(ndb, buf, len, myrand(3));
-      break;
-    default:
-      tcndbput(ndb, buf, len, buf, len);
-      break;
+      case -1:
+        tcndbputkeep(ndb, buf, len, buf, len);
+        break;
+      case 1:
+        tcndbputcat(ndb, buf, len, buf, len);
+        break;
+      case 10:
+        tcndbaddint(ndb, buf, len, myrand(3));
+        break;
+      case 11:
+        tcndbadddouble(ndb, buf, len, myrand(3));
+        break;
+      case 12:
+        tcndbputproc(ndb, buf, len, buf, len, pdprocfunc, NULL);
+        break;
+      default:
+        tcndbput(ndb, buf, len, buf, len);
+        break;
     }
     if(rnum > 250 && i % (rnum / 250) == 0){
       iputchar('.');
@@ -727,6 +806,7 @@ static int procndb(int rnum, bool rd, bool tr, bool rnd, int dmode){
   }
   iprintf("record number: %llu\n", (unsigned long long)tcndbrnum(ndb));
   iprintf("size: %llu\n", (unsigned long long)tcndbmsiz(ndb));
+  sysprint();
   tcndbdel(ndb);
   iprintf("time: %.3f\n", tctime() - stime);
   iprintf("ok\n\n");
@@ -736,7 +816,7 @@ static int procndb(int rnum, bool rd, bool tr, bool rnd, int dmode){
 
 /* perform misc command */
 static int procmisc(int rnum){
-  iprintf("<Miscellaneous Test>\n  rnum=%d\n\n", rnum);
+  iprintf("<Miscellaneous Test>\n  seed=%u  rnum=%d\n\n", g_randseed, rnum);
   double stime = tctime();
   bool err = false;
   for(int i = 1; i <= rnum && !err; i++){
@@ -800,12 +880,52 @@ static int procmisc(int rnum){
           if(dary[j] != dary[j]) err = true;
         }
       }
+      tcstrutfnorm(ustr, TCUNSPACE | TCUNLOWER | TCUNNOACC | TCUNWIDTH);
+      if(tcstrucsnorm(dary, danum, TCUNSPACE | TCUNLOWER | TCUNNOACC | TCUNWIDTH) > danum)
+        err = true;
+      list = tcstrtokenize("a ab abc b bc bcd abcde \"I'm nancy\" x \"xx");
+      if(tclistnum(list) != 10) err = true;
+      int opts = myrand(TCKWMUBRCT + 1);
+      if(myrand(2) == 0) opts |= TCKWNOOVER;
+      if(myrand(2) == 0) opts |= TCKWPULEAD;
+      TCLIST *texts = tcstrkwic(ustr, list, myrand(10), opts);
+      tclistdel(texts);
+      tclistdel(list);
+      list = tclistnew3("hop", "step", "jump", "touchdown", NULL);
+      if(tclistnum(list) != 4) err = true;
+      tclistprintf(list, "%s:%010d:%7.3f", "game set", 123456789, 12345.6789);
+      tclistdel(list);
+      map = tcmapnew3("hop", "step", "jump", "touchdown", NULL);
+      if(tcmaprnum(map) != 2) err = true;
+      tcmapprintf(map, "joker", "%s:%010d:%7.3f", "game set", 123456789, 12345.6789);
+      tcmapdel(map);
       list = tcstrsplit(",a,b..c,d,", ",.");
       if(tclistnum(list) != 7) err = true;
       buf = tcstrjoin(list, ':');
       if(strcmp(buf, ":a:b::c:d:")) err = true;
       tcfree(buf);
       tclistdel(list);
+      char zbuf[RECBUFSIZ];
+      memcpy(zbuf, "abc\0def\0ghij\0kl\0m", 17);
+      list = tcstrsplit2(zbuf, 17);
+      if(tclistnum(list) != 5) err = true;
+      buf = tcstrjoin2(list, &bsiz);
+      if(bsiz != 17 || memcmp(buf, "abc\0def\0ghij\0kl\0m", 17)) err = true;
+      tcfree(buf);
+      tclistdel(list);
+      map = tcstrsplit3("abc.def,ghij.kl,", ",.");
+      if(tcmaprnum(map) != 2) err = true;
+      buf = tcstrjoin3(map, ':');
+      if(strcmp(buf, "abc:def:ghij:kl")) err = true;
+      tcfree(buf);
+      tcmapdel(map);
+      memcpy(zbuf, "abc\0def\0ghij\0kl\0m", 17);
+      map = tcstrsplit4(zbuf, 17);
+      if(tcmaprnum(map) != 2) err = true;
+      buf = tcstrjoin4(map, &bsiz);
+      if(bsiz != 15 || memcmp(buf, "abc\0def\0ghij\0kl", 15)) err = true;
+      tcfree(buf);
+      tcmapdel(map);
       if(!tcregexmatch("ABCDEFGHI", "*(b)c[d-f]*g(h)")) err = true;
       buf = tcregexreplace("ABCDEFGHI", "*(b)c[d-f]*g(h)", "[\\1][\\2][&]");
       if(strcmp(buf, "A[B][H][BCDEFGH]I")) err = true;
@@ -817,6 +937,23 @@ static int procmisc(int rnum){
         tcmd5hash(kbuf, ksiz, buf);
       }
       tcfree(buf);
+      anum = myrand(30) + 1;
+      int tary[anum], qary[anum];
+      for(int j = 0; j < anum; j++){
+        int val = myrand(anum * 2 + 1);
+        tary[j] = val;
+        qary[j] = val;
+      }
+      int tnum = myrand(anum);
+      tctopsort(tary, anum, sizeof(*tary), tnum, intcompar);
+      qsort(qary, anum, sizeof(*qary), intcompar);
+      for(int j = 0; j < tnum; j++){
+        if(tary[j] != qary[j]) err = true;
+      }
+      qsort(tary, anum, sizeof(*tary), intcompar);
+      for(int j = 0; j < anum; j++){
+        if(tary[j] != qary[j]) err = true;
+      }
       TCCHIDX *chidx = tcchidxnew(5);
       for(int i = 0; i < 10; i++){
         char kbuf[RECBUFSIZ];
@@ -824,6 +961,13 @@ static int procmisc(int rnum){
         tcchidxhash(chidx, kbuf, ksiz);
       }
       tcchidxdel(chidx);
+      char kbuf[TCNUMBUFSIZ];
+      int ksiz = sprintf(kbuf, "%d", myrand(200));
+      char *enc = tcmalloc(slen + 1);
+      tcarccipher(str, slen, kbuf, ksiz, enc);
+      tcarccipher(enc, slen, kbuf, ksiz, enc);
+      if(memcmp(enc, str, slen)) err = true;
+      tcfree(enc);
       buf = tczeromap(myrand(1024*256) + 1);
       tczerounmap(buf);
     }
@@ -862,6 +1006,14 @@ static int procmisc(int rnum){
         vbuf = tctreeget2(tree, kbuf);
         if(*(double *)vbuf < 1.0) err = true;
       }
+      for(int j = 0; j < 10; j++){
+        char kbuf[RECBUFSIZ];
+        sprintf(kbuf, "%d", myrand(10));
+        tcmapprintf(map, kbuf, "%s:%f", kbuf, (double)i * j);
+        tctreeprintf(tree, kbuf, "%s:%f", kbuf, (double)i * j);
+      }
+      if(!tcmapget4(map, "ace", "dummy")) err = true;
+      if(!tctreeget4(tree, "ace", "dummy")) err = true;
       tctreedel(tree);
       tcmapdel(map);
     }
@@ -1029,7 +1181,28 @@ static int procmisc(int rnum){
     if(strcmp(dec, str)) err = true;
     tcfree(dec);
     tcfree(buf);
+    buf = tccstrescape(str);
+    if(strcmp(buf, "5%2+3-1=4 \\x22Yes/No\\x22 <a&b>")) err = true;
+    dec = tccstrunescape(buf);
+    if(strcmp(dec, str)) err = true;
+    tcfree(dec);
+    tcfree(buf);
+    buf = tcjsonescape(str);
+    if(strcmp(buf, "5%2+3-1=4 \\u0022Yes/No\\u0022 <a&b>")) err = true;
+    dec = tcjsonunescape(buf);
+    if(strcmp(dec, str)) err = true;
+    tcfree(dec);
+    tcfree(buf);
     if(i % 10 == 1){
+      TCMAP *params = tcmapnew3("one", "=first=", "two", "&second&", "three", "#third#", NULL);
+      char *estr = tcwwwformencode(params);
+      TCMAP *nparams = tcmapnew2(1);
+      tcwwwformdecode(estr, nparams);
+      if(strcmp(estr, "one=%3Dfirst%3D&two=%26second%26&three=%23third%23") ||
+         tcmaprnum(nparams) != tcmaprnum(params) || !tcmapget2(nparams, "two")) err = true;
+      tcmapdel(nparams);
+      tcfree(estr);
+      tcmapdel(params);
       list = tcxmlbreak("<abc de=\"foo&amp;\" gh='&lt;bar&gt;'>xyz<br>\na<!--<mikio>--></abc>");
       for(int j = 0; j < tclistnum(list); j++){
         const char *elem = tclistval2(list, j);
@@ -1037,6 +1210,56 @@ static int procmisc(int rnum){
         tcmapdel(attrs);
       }
       tclistdel(list);
+    }
+    if(i % 100 == 1){
+      TCTMPL *tmpl = tctmplnew();
+      const char *str =
+        "{{ title XML }}{{UNKNOWN COMMAND}}{{CONF author 'Mikio Hirabayashi'}}\n"
+        "{{ FOREACH docs \\}}\n"
+        "{{ IF void }}===={{void}}{{ ELSE }}----{{void.void}}{{ END }}\n"
+        "{{ IF .id }}ID:{{ .id }}{{ END }}\n"
+        "{{ IF .title }}Title:{{ .title }}{{ END }}\n"
+        "{{ IF author }}Author:{{ author }}{{ END }}\n"
+        "{{ IF .coms }}{{ SET addr 'Setagaya, Tokyo' }}--\n"
+        "{{ FOREACH .coms com }}{{ com.author MD5 }}: {{ com.body }}\n"
+        "{{ END \\}}\n"
+        "{{ END \\}}\n"
+        "{{ END \\}}\n";
+      tctmplsetsep(tmpl, "{{", "}}");
+      tctmplload(tmpl, str);
+      const char *cval = tctmplconf(tmpl, "author");
+      if(!cval || strcmp(cval, "Mikio Hirabayashi")) err = true;
+      TCMPOOL *mpool = tcmpoolnew();
+      TCMAP *vars = tcmpoolmapnew(mpool);
+      tcmapput2(vars, "title", "I LOVE YOU");
+      TCLIST *docs = tcmpoollistnew(mpool);
+      for(int j = 0; j < 3; j++){
+        TCMAP *doc = tcmpoolmapnew(mpool);
+        char vbuf[TCNUMBUFSIZ];
+        sprintf(vbuf, "%d", i + j);
+        tcmapput2(doc, "id", vbuf);
+        sprintf(vbuf, "[%08d]", i + j);
+        tcmapput2(doc, "title", vbuf);
+        TCLIST *coms = tcmpoollistnew(mpool);
+        for(int k = 0; k < 3; k++){
+          TCMAP *com = tcmpoolmapnew(mpool);
+          sprintf(vbuf, "u%d", k);
+          tcmapput2(com, "author", vbuf);
+          sprintf(vbuf, "this is the %dth pen.", (j + 1) * (k + 1) + i);
+          tcmapput2(com, "body", vbuf);
+          tclistpushmap(coms, com);
+        }
+        tcmapputlist(doc, "coms", coms);
+        tclistpushmap(docs, doc);
+      }
+      tcmapputlist(vars, "docs", docs);
+      char *res = tctmpldump(tmpl, vars);
+      tcfree(res);
+      tcmpoolclear(mpool, true);
+      tcmpoolmalloc(mpool, 1);
+      tcmpoollistnew(mpool);
+      tcmpooldel(mpool);
+      tctmpldel(tmpl);
     }
     if(i % 10 == 1){
       for(int16_t j = 1; j <= 0x2000; j *= 2){
@@ -1067,7 +1290,7 @@ static int procmisc(int rnum){
           if(num != nnum || step != nstep) err = true;
         }
       }
-      char *bitmap = TCBITMAPNEW(100);
+      TCBITMAP *bitmap = TCBITMAPNEW(100);
       for(int j = 0; j < 100; j++){
         if(j % 3 == 0) TCBITMAPON(bitmap, j);
         if(j % 5 == 0) TCBITMAPOFF(bitmap, j);
@@ -1098,6 +1321,15 @@ static int procmisc(int rnum){
       }
       tcfree(buf);
     }
+    if(i % 100 == 1){
+      char path[RECBUFSIZ];
+      sprintf(path, "%d", myrand(10));
+      if(tcpathlock(path)){
+        if(!tcpathunlock(path)) err = true;
+      } else {
+        err = true;
+      }
+    }
     if(rnum > 250 && i % (rnum / 250) == 0){
       iputchar('.');
       if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
@@ -1115,23 +1347,23 @@ static int procmisc(int rnum){
 
 /* perform wicked command */
 static int procwicked(int rnum){
-  iprintf("<Wicked Writing Test>\n  rnum=%d\n\n", rnum);
+  iprintf("<Wicked Writing Test>\n  seed=%u  rnum=%d\n\n", g_randseed, rnum);
   double stime = tctime();
   TCMPOOL *mpool = tcmpoolglobal();
   TCXSTR *xstr = myrand(2) > 0 ? tcxstrnew() : tcxstrnew2("hello world");
-  tcmpoolputxstr(mpool, xstr);
+  tcmpoolpushxstr(mpool, xstr);
   TCLIST *list = myrand(2) > 0 ? tclistnew() : tclistnew2(myrand(rnum) + rnum / 2);
-  tcmpoolputlist(mpool, list);
+  tcmpoolpushlist(mpool, list);
   TCPTRLIST *ptrlist = myrand(2) > 0 ? tcptrlistnew() : tcptrlistnew2(myrand(rnum) + rnum / 2);
-  tcmpoolput(mpool, ptrlist, (void (*)(void*))tcptrlistdel);
+  tcmpoolpush(mpool, ptrlist, (void (*)(void*))tcptrlistdel);
   TCMAP *map = myrand(2) > 0 ? tcmapnew() : tcmapnew2(myrand(rnum) + rnum / 2);
-  tcmpoolputmap(mpool, map);
+  tcmpoolpushmap(mpool, map);
   TCTREE *tree = myrand(2) > 0 ? tctreenew() : tctreenew2(tccmpdecimal, NULL);
-  tcmpoolputtree(mpool, tree);
+  tcmpoolpushtree(mpool, tree);
   TCMDB *mdb = myrand(2) > 0 ? tcmdbnew() : tcmdbnew2(myrand(rnum) + rnum / 2);
-  tcmpoolput(mpool, mdb, (void (*)(void*))tcmdbdel);
+  tcmpoolpush(mpool, mdb, (void (*)(void*))tcmdbdel);
   TCNDB *ndb = myrand(2) > 0 ? tcndbnew() : tcndbnew2(tccmpdecimal, NULL);
-  tcmpoolput(mpool, ndb, (void (*)(void*))tcndbdel);
+  tcmpoolpush(mpool, ndb, (void (*)(void*))tcndbdel);
   for(int i = 1; i <= rnum; i++){
     char kbuf[RECBUFSIZ];
     int ksiz = sprintf(kbuf, "%d", myrand(i));
@@ -1139,436 +1371,493 @@ static int procwicked(int rnum){
     int vsiz = sprintf(vbuf, "%d", myrand(i));
     char *tmp;
     switch(myrand(70)){
-    case 0:
-      iputchar('0');
-      tcxstrcat(xstr, kbuf, ksiz);
-      break;
-    case 1:
-      iputchar('1');
-      tcxstrcat2(xstr, kbuf);
-      break;
-    case 2:
-      iputchar('2');
-      if(myrand(rnum / 100 + 1) == 0) tcxstrclear(xstr);
-      break;
-    case 3:
-      iputchar('3');
-      tcxstrprintf(xstr, "[%s:%d:%llu:%b:%llb]\n",
-                   kbuf, i, (long long)i * 65521, i, (unsigned long long)i * 65521);
-      break;
-    case 4:
-      iputchar('4');
-      tclistpush(list, kbuf, ksiz);
-      tcptrlistpush(ptrlist, tcmemdup(kbuf, ksiz));
-      break;
-    case 5:
-      iputchar('5');
-      tclistpush2(list, kbuf);
-      break;
-    case 6:
-      iputchar('6');
-      tmp = tcmemdup(kbuf, ksiz);
-      tclistpushmalloc(list, tmp, strlen(tmp));
-      break;
-    case 7:
-      iputchar('7');
-      if(myrand(10) == 0){
-        tcfree(tclistpop(list, &ksiz));
-        tcfree(tcptrlistpop(ptrlist));
-      }
-      break;
-    case 8:
-      iputchar('8');
-      if(myrand(10) == 0) tcfree(tclistpop2(list));
-      break;
-    case 9:
-      iputchar('9');
-      tclistunshift(list, kbuf, ksiz);
-      tcptrlistunshift(ptrlist, tcmemdup(kbuf, ksiz));
-      break;
-    case 10:
-      iputchar('A');
-      tclistunshift2(list, kbuf);
-      break;
-    case 11:
-      iputchar('B');
-      if(myrand(10) == 0){
-        tcfree(tclistshift(list, &ksiz));
-        tcfree(tcptrlistshift(ptrlist));
-      }
-      break;
-    case 12:
-      iputchar('C');
-      if(myrand(10) == 0) tcfree(tclistshift2(list));
-      break;
-    case 13:
-      iputchar('D');
-      tclistinsert(list, i / 10, kbuf, ksiz);
-      if(tcptrlistnum(ptrlist) > i / 10) tcptrlistinsert(ptrlist, i / 10, tcmemdup(kbuf, ksiz));
-      break;
-    case 14:
-      iputchar('E');
-      tclistinsert2(list, i / 10, kbuf);
-      break;
-    case 15:
-      iputchar('F');
-      if(myrand(10) == 0){
-        tcfree(tclistremove(list, i / 10, &ksiz));
-        tcfree(tcptrlistremove(ptrlist, i / 10));
-      }
-      break;
-    case 16:
-      iputchar('G');
-      if(myrand(10) == 0) tcfree(tclistremove2(list, i / 10));
-      break;
-    case 17:
-      iputchar('H');
-      tclistover(list, i / 10, kbuf, ksiz);
-      if(tcptrlistnum(ptrlist) > i / 10){
-        tcfree(tcptrlistval(ptrlist, i / 10));
-        tcptrlistover(ptrlist, i / 10, tcmemdup(kbuf, ksiz));
-      }
-      break;
-    case 18:
-      iputchar('I');
-      tclistover2(list, i / 10, kbuf);
-      break;
-    case 19:
-      iputchar('J');
-      if(myrand(rnum / 1000 + 1) == 0) tclistsort(list);
-      break;
-    case 20:
-      iputchar('K');
-      if(myrand(rnum / 1000 + 1) == 0) tclistsortci(list);
-      break;
-    case 21:
-      iputchar('L');
-      if(myrand(rnum / 1000 + 1) == 0) tclistlsearch(list, kbuf, ksiz);
-      break;
-    case 22:
-      iputchar('M');
-      if(myrand(rnum / 1000 + 1) == 0) tclistbsearch(list, kbuf, ksiz);
-      break;
-    case 23:
-      iputchar('N');
-      if(myrand(rnum / 100 + 1) == 0){
-        tclistclear(list);
-        for(int j = 0; j < tcptrlistnum(ptrlist); j++){
-          tcfree(tcptrlistval(ptrlist, j));
+      case 0:
+        iputchar('0');
+        tcxstrcat(xstr, kbuf, ksiz);
+        break;
+      case 1:
+        iputchar('1');
+        tcxstrcat2(xstr, kbuf);
+        break;
+      case 2:
+        iputchar('2');
+        if(myrand(rnum / 100 + 1) == 0) tcxstrclear(xstr);
+        break;
+      case 3:
+        iputchar('3');
+        tcxstrprintf(xstr, "[%s:%d:%llu:%b:%llb]\n",
+                     kbuf, i, (long long)i * 65521, i, (unsigned long long)i * 65521);
+        break;
+      case 4:
+        iputchar('4');
+        tclistpush(list, kbuf, ksiz);
+        tcptrlistpush(ptrlist, tcmemdup(kbuf, ksiz));
+        break;
+      case 5:
+        iputchar('5');
+        tclistpush2(list, kbuf);
+        break;
+      case 6:
+        iputchar('6');
+        tmp = tcmemdup(kbuf, ksiz);
+        tclistpushmalloc(list, tmp, strlen(tmp));
+        break;
+      case 7:
+        iputchar('7');
+        if(myrand(10) == 0){
+          tcfree(tclistpop(list, &ksiz));
+          tcfree(tcptrlistpop(ptrlist));
         }
-        tcptrlistclear(ptrlist);
-      }
-      break;
-    case 24:
-      iputchar('O');
-      if(myrand(rnum / 100 + 1) == 0){
-        int dsiz;
-        char *dbuf = tclistdump(list, &dsiz);
-        tclistdel(tclistload(dbuf, dsiz));
-        tcfree(dbuf);
-      }
-      break;
-    case 25:
-      iputchar('P');
-      if(myrand(100) == 0){
-        if(myrand(2) == 0){
-          for(int j = 0; j < tclistnum(list); j++){
-            int rsiz;
-            tclistval(list, j, &rsiz);
-            tcptrlistval(ptrlist, j);
+        break;
+      case 8:
+        iputchar('8');
+        if(myrand(10) == 0) tcfree(tclistpop2(list));
+        break;
+      case 9:
+        iputchar('9');
+        tclistunshift(list, kbuf, ksiz);
+        tcptrlistunshift(ptrlist, tcmemdup(kbuf, ksiz));
+        break;
+      case 10:
+        iputchar('A');
+        tclistunshift2(list, kbuf);
+        break;
+      case 11:
+        iputchar('B');
+        if(myrand(10) == 0){
+          tcfree(tclistshift(list, &ksiz));
+          tcfree(tcptrlistshift(ptrlist));
+        }
+        break;
+      case 12:
+        iputchar('C');
+        if(myrand(10) == 0) tcfree(tclistshift2(list));
+        break;
+      case 13:
+        iputchar('D');
+        tclistinsert(list, i / 10, kbuf, ksiz);
+        if(tcptrlistnum(ptrlist) > i / 10)
+          tcptrlistinsert(ptrlist, i / 10, tcmemdup(kbuf, ksiz));
+        break;
+      case 14:
+        iputchar('E');
+        tclistinsert2(list, i / 10, kbuf);
+        break;
+      case 15:
+        iputchar('F');
+        if(myrand(10) == 0){
+          tcfree(tclistremove(list, i / 10, &ksiz));
+          tcfree(tcptrlistremove(ptrlist, i / 10));
+        }
+        break;
+      case 16:
+        iputchar('G');
+        if(myrand(10) == 0) tcfree(tclistremove2(list, i / 10));
+        break;
+      case 17:
+        iputchar('H');
+        tclistover(list, i / 10, kbuf, ksiz);
+        if(tcptrlistnum(ptrlist) > i / 10){
+          tcfree(tcptrlistval(ptrlist, i / 10));
+          tcptrlistover(ptrlist, i / 10, tcmemdup(kbuf, ksiz));
+        }
+        break;
+      case 18:
+        iputchar('I');
+        tclistover2(list, i / 10, kbuf);
+        break;
+      case 19:
+        iputchar('J');
+        if(myrand(rnum / 1000 + 1) == 0) tclistsort(list);
+        break;
+      case 20:
+        iputchar('K');
+        if(myrand(rnum / 1000 + 1) == 0) tclistsortci(list);
+        break;
+      case 21:
+        iputchar('L');
+        if(myrand(rnum / 1000 + 1) == 0) tclistlsearch(list, kbuf, ksiz);
+        break;
+      case 22:
+        iputchar('M');
+        if(myrand(rnum / 1000 + 1) == 0) tclistbsearch(list, kbuf, ksiz);
+        break;
+      case 23:
+        iputchar('N');
+        if(myrand(rnum / 100 + 1) == 0){
+          tclistclear(list);
+          for(int j = 0; j < tcptrlistnum(ptrlist); j++){
+            tcfree(tcptrlistval(ptrlist, j));
           }
-        } else {
-          for(int j = 0; j < tclistnum(list); j++){
-            tclistval2(list, j);
+          tcptrlistclear(ptrlist);
+        }
+        break;
+      case 24:
+        iputchar('O');
+        if(myrand(rnum / 100 + 1) == 0){
+          int dsiz;
+          char *dbuf = tclistdump(list, &dsiz);
+          tclistdel(tclistload(dbuf, dsiz));
+          tcfree(dbuf);
+        }
+        break;
+      case 25:
+        iputchar('P');
+        if(myrand(100) == 0){
+          if(myrand(2) == 0){
+            for(int j = 0; j < tclistnum(list); j++){
+              int rsiz;
+              tclistval(list, j, &rsiz);
+              tcptrlistval(ptrlist, j);
+            }
+          } else {
+            for(int j = 0; j < tclistnum(list); j++){
+              tclistval2(list, j);
+            }
           }
         }
-      }
-      break;
-    case 26:
-      iputchar('Q');
-      tcmapput(map, kbuf, ksiz, vbuf, vsiz);
-      tctreeput(tree, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 27:
-      iputchar('R');
-      tcmapput2(map, kbuf, vbuf);
-      tctreeput2(tree, kbuf, vbuf);
-      break;
-    case 28:
-      iputchar('S');
-      tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
-      tctreeputkeep(tree, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 29:
-      iputchar('T');
-      tcmapputkeep2(map, kbuf, vbuf);
-      tctreeputkeep2(tree, kbuf, vbuf);
-      break;
-    case 30:
-      iputchar('U');
-      tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
-      tctreeputcat(tree, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 31:
-      iputchar('V');
-      tcmapputcat2(map, kbuf, vbuf);
-      tctreeputcat2(tree, kbuf, vbuf);
-      break;
-    case 32:
-      iputchar('W');
-      if(myrand(2) == 0){
-        tcmapput3(map, kbuf, ksiz, vbuf, vsiz);
-        tctreeput3(tree, kbuf, ksiz, vbuf, vsiz);
-      }
-      if(myrand(2) == 0){
-        tcmapput4(map, kbuf, ksiz, vbuf, vsiz, vbuf, vsiz);
-        tctreeputkeep3(tree, kbuf, ksiz, vbuf, vsiz);
-      }
-      if(myrand(2) == 0){
-        tcmapputcat3(map, kbuf, ksiz, vbuf, vsiz);
-        tctreeputcat3(tree, kbuf, ksiz, vbuf, vsiz);
-      }
-      break;
-    case 33:
-      iputchar('X');
-      if(myrand(10) == 0){
-        tcmapout(map, kbuf, ksiz);
-        tctreeout(tree, kbuf, ksiz);
-      }
-      break;
-    case 34:
-      iputchar('Y');
-      if(myrand(10) == 0){
-        tcmapout2(map, kbuf);
-        tctreeout2(tree, kbuf);
-      }
-      break;
-    case 35:
-      iputchar('Z');
-      tcmapget3(map, kbuf, ksiz, &vsiz);
-      tctreeget3(tree, kbuf, ksiz, &vsiz);
-      break;
-    case 36:
-      iputchar('a');
-      tcmapmove(map, kbuf, ksiz, true);
-      break;
-    case 37:
-      iputchar('b');
-      tcmapmove(map, kbuf, ksiz, false);
-      break;
-    case 38:
-      iputchar('c');
-      tcmapmove2(map, kbuf, true);
-      break;
-    case 39:
-      iputchar('d');
-      if(myrand(100) == 0){
-        tcmapiterinit(map);
+        break;
+      case 26:
+        iputchar('Q');
+        tcmapput(map, kbuf, ksiz, vbuf, vsiz);
+        tctreeput(tree, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 27:
+        iputchar('R');
+        tcmapput2(map, kbuf, vbuf);
+        tctreeput2(tree, kbuf, vbuf);
+        break;
+      case 28:
+        iputchar('S');
+        tcmapputkeep(map, kbuf, ksiz, vbuf, vsiz);
+        tctreeputkeep(tree, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 29:
+        iputchar('T');
+        tcmapputkeep2(map, kbuf, vbuf);
+        tctreeputkeep2(tree, kbuf, vbuf);
+        break;
+      case 30:
+        iputchar('U');
+        tcmapputcat(map, kbuf, ksiz, vbuf, vsiz);
+        tctreeputcat(tree, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 31:
+        iputchar('V');
+        tcmapputcat2(map, kbuf, vbuf);
+        tctreeputcat2(tree, kbuf, vbuf);
+        break;
+      case 32:
+        iputchar('W');
         if(myrand(2) == 0){
-          tctreeiterinit(tree);
-        } else {
-          tctreeiterinit2(tree, kbuf, ksiz);
+          tcmapput3(map, kbuf, ksiz, vbuf, vsiz);
+          tctreeput3(tree, kbuf, ksiz, vbuf, vsiz);
         }
-      }
-      break;
-    case 40:
-      iputchar('e');
-      tcmapiternext(map, &vsiz);
-      tctreeiternext(tree, &vsiz);
-      break;
-    case 41:
-      iputchar('f');
-      tcmapiternext2(map);
-      tctreeiternext2(tree);
-      break;
-    case 42:
-      iputchar('g');
-      if(myrand(100) == 0){
-        int anum;
-        switch(myrand(4)){
-        case 0:
-          tclistdel(tcmapkeys(map));
-          tclistdel(tctreekeys(tree));
-          break;
-        case 1:
-          tcfree(tcmapkeys2(map, &anum));
-          tcfree(tctreekeys2(tree, &anum));
-          break;
-        case 2:
-          tclistdel(tcmapvals(map));
-          tclistdel(tctreevals(tree));
-          break;
-        default:
-          tcfree(tcmapvals2(map, &anum));
-          tcfree(tctreevals2(tree, &anum));
-          break;
-        }
-      }
-      break;
-    case 43:
-      iputchar('h');
-      if(myrand(rnum / 100 + 1) == 0){
-        tcmapclear(map);
-        tctreeclear(tree);
-      }
-      break;
-    case 44:
-      iputchar('i');
-      if(myrand(20) == 0){
-        tcmapcutfront(map, myrand(10));
-        tctreecutfringe(tree, myrand(10));
-      }
-      break;
-    case 45:
-      iputchar('j');
-      if(myrand(rnum / 100 + 1) == 0){
-        int dsiz;
-        char *dbuf = tcmapdump(map, &dsiz);
-        tcfree(tcmaploadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
-        tcmapdel(tcmapload(dbuf, dsiz));
-        tcfree(dbuf);
-        dbuf = tctreedump(tree, &dsiz);
-        tcfree(tctreeloadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
-        tctreedel(tctreeload(dbuf, dsiz, tccmplexical, NULL));
-        tcfree(dbuf);
-      }
-      break;
-    case 46:
-      iputchar('k');
-      tcmdbput(mdb, kbuf, ksiz, vbuf, vsiz);
-      tcndbput(ndb, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 47:
-      iputchar('l');
-      tcmdbput2(mdb, kbuf, vbuf);
-      tcndbput2(ndb, kbuf, vbuf);
-      break;
-    case 48:
-      iputchar('m');
-      tcmdbputkeep(mdb, kbuf, ksiz, vbuf, vsiz);
-      tcndbputkeep(ndb, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 49:
-      iputchar('n');
-      tcmdbputkeep2(mdb, kbuf, vbuf);
-      tcndbputkeep2(ndb, kbuf, vbuf);
-      break;
-    case 50:
-      iputchar('o');
-      tcmdbputcat(mdb, kbuf, ksiz, vbuf, vsiz);
-      tcndbputcat(ndb, kbuf, ksiz, vbuf, vsiz);
-      break;
-    case 51:
-      iputchar('p');
-      tcmdbputcat2(mdb, kbuf, vbuf);
-      tcndbputcat2(ndb, kbuf, vbuf);
-      break;
-    case 52:
-      iputchar('q');
-
-      if(myrand(2) == 0){
-        tcmdbput3(mdb, kbuf, ksiz, vbuf, vsiz);
-        tcndbput3(ndb, kbuf, ksiz, vbuf, vsiz);
-      }
-      if(myrand(2) == 0){
-        tcmdbput4(mdb, kbuf, ksiz, vbuf, vsiz, vbuf, vsiz);
-        tcndbputkeep3(ndb, kbuf, ksiz, vbuf, vsiz);
-      }
-      if(myrand(2) == 0){
-        tcmdbputcat3(mdb, kbuf, ksiz, vbuf, vsiz);
-        tcndbputcat3(ndb, kbuf, ksiz, vbuf, vsiz);
-      }
-      break;
-    case 53:
-      iputchar('r');
-      if(myrand(10) == 0){
-        tcmdbout(mdb, kbuf, ksiz);
-        tcndbout(ndb, kbuf, ksiz);
-      }
-      break;
-    case 54:
-      iputchar('s');
-      if(myrand(10) == 0){
-        tcmdbout2(mdb, kbuf);
-        tcndbout2(ndb, kbuf);
-      }
-      break;
-    case 55:
-      iputchar('t');
-      tcfree(tcmdbget(mdb, kbuf, ksiz, &vsiz));
-      tcfree(tcndbget(ndb, kbuf, ksiz, &vsiz));
-      break;
-    case 56:
-      iputchar('u');
-      tcfree(tcmdbget3(mdb, kbuf, ksiz, &vsiz));
-      tcfree(tcndbget3(ndb, kbuf, ksiz, &vsiz));
-      break;
-    case 57:
-      iputchar('v');
-      if(myrand(100) == 0){
-        tcmdbiterinit(mdb);
         if(myrand(2) == 0){
-          tcndbiterinit(ndb);
-        } else {
-          tcndbiterinit2(ndb, kbuf, ksiz);
+          tcmapput4(map, kbuf, ksiz, vbuf, vsiz, vbuf, vsiz);
+          tctreeputkeep3(tree, kbuf, ksiz, vbuf, vsiz);
         }
-      }
-      break;
-    case 58:
-      iputchar('w');
-      tcfree(tcmdbiternext(mdb, &vsiz));
-      tcfree(tcndbiternext(ndb, &vsiz));
-      break;
-    case 59:
-      iputchar('x');
-      tcfree(tcmdbiternext2(mdb));
-      tcfree(tcndbiternext2(ndb));
-      break;
-    case 60:
-      iputchar('y');
-      if(myrand(rnum / 100 + 1) == 0){
-        tcmdbvanish(mdb);
-        tcndbvanish(ndb);
-      }
-      break;
-    case 61:
-      iputchar('z');
-      if(myrand(200) == 0){
-        tcmdbcutfront(mdb, myrand(100));
-        tcndbcutfringe(ndb, myrand(100));
-      }
-      break;
-    case 62:
-      iputchar('+');
-      if(myrand(200) == 0){
-        tcmdbforeach(mdb, iterfunc, NULL);
-        tcndbforeach(ndb, iterfunc, NULL);
-      }
-      break;
-    case 63:
-      iputchar('+');
-      if(myrand(100) == 0) tcmpoolmalloc(mpool, 1);
-      break;
-    case 64:
-      iputchar('+');
-      if(myrand(100) == 0) tcmpoolxstrnew(mpool);
-      break;
-    case 65:
-      iputchar('+');
-      if(myrand(100) == 0) tcmpoollistnew(mpool);
-      break;
-    case 66:
-      iputchar('+');
-      if(myrand(100) == 0) tcmpoolmapnew(mpool);
-      break;
-    case 67:
-      iputchar('+');
-      if(myrand(100) == 0) tcmpooltreenew(mpool);
-      break;
-    default:
-      iputchar('@');
-      if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
-      break;
+        if(myrand(2) == 0){
+          tcmapputcat3(map, kbuf, ksiz, vbuf, vsiz);
+          tctreeputcat3(tree, kbuf, ksiz, vbuf, vsiz);
+        }
+        break;
+      case 33:
+        iputchar('X');
+        if(myrand(10) == 0){
+          tcmapout(map, kbuf, ksiz);
+          tctreeout(tree, kbuf, ksiz);
+        }
+        break;
+      case 34:
+        iputchar('Y');
+        if(myrand(10) == 0){
+          tcmapout2(map, kbuf);
+          tctreeout2(tree, kbuf);
+        }
+        break;
+      case 35:
+        iputchar('Z');
+        tcmapget3(map, kbuf, ksiz, &vsiz);
+        tctreeget3(tree, kbuf, ksiz, &vsiz);
+        break;
+      case 36:
+        iputchar('a');
+        tcmapmove(map, kbuf, ksiz, true);
+        break;
+      case 37:
+        iputchar('b');
+        tcmapmove(map, kbuf, ksiz, false);
+        break;
+      case 38:
+        iputchar('c');
+        tcmapmove2(map, kbuf, true);
+        break;
+      case 39:
+        iputchar('d');
+        if(myrand(100) == 0){
+          if(myrand(2) == 0){
+            tcmapiterinit(map);
+            tctreeiterinit(tree);
+          } else {
+            tcmapiterinit2(map, kbuf, ksiz);
+            tctreeiterinit2(tree, kbuf, ksiz);
+          }
+        }
+        break;
+      case 40:
+        iputchar('e');
+        tcmapiternext(map, &vsiz);
+        tctreeiternext(tree, &vsiz);
+        break;
+      case 41:
+        iputchar('f');
+        tcmapiternext2(map);
+        tctreeiternext2(tree);
+        break;
+      case 42:
+        iputchar('g');
+        if(myrand(100) == 0){
+          int anum;
+          switch(myrand(4)){
+            case 0:
+              tclistdel(tcmapkeys(map));
+              tclistdel(tctreekeys(tree));
+              break;
+            case 1:
+              tcfree(tcmapkeys2(map, &anum));
+              tcfree(tctreekeys2(tree, &anum));
+              break;
+            case 2:
+              tclistdel(tcmapvals(map));
+              tclistdel(tctreevals(tree));
+              break;
+            default:
+              tcfree(tcmapvals2(map, &anum));
+              tcfree(tctreevals2(tree, &anum));
+              break;
+          }
+        }
+        break;
+      case 43:
+        iputchar('h');
+        if(myrand(rnum / 100 + 1) == 0){
+          tcmapclear(map);
+          tctreeclear(tree);
+        }
+        break;
+      case 44:
+        iputchar('i');
+        if(myrand(20) == 0){
+          tcmapcutfront(map, myrand(10));
+          tctreecutfringe(tree, myrand(10));
+        }
+        break;
+      case 45:
+        iputchar('j');
+        if(myrand(rnum / 100 + 1) == 0){
+          int dsiz;
+          char *dbuf = tcmapdump(map, &dsiz);
+          tcfree(tcmaploadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
+          tcmapdel(tcmapload(dbuf, dsiz));
+          tcfree(dbuf);
+          dbuf = tctreedump(tree, &dsiz);
+          tcfree(tctreeloadone(dbuf, dsiz, kbuf, ksiz, &vsiz));
+          tctreedel(tctreeload(dbuf, dsiz, tccmplexical, NULL));
+          tcfree(dbuf);
+        }
+        break;
+      case 46:
+        iputchar('k');
+        tcmdbput(mdb, kbuf, ksiz, vbuf, vsiz);
+        tcndbput(ndb, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 47:
+        iputchar('l');
+        tcmdbput2(mdb, kbuf, vbuf);
+        tcndbput2(ndb, kbuf, vbuf);
+        break;
+      case 48:
+        iputchar('m');
+        tcmdbputkeep(mdb, kbuf, ksiz, vbuf, vsiz);
+        tcndbputkeep(ndb, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 49:
+        iputchar('n');
+        tcmdbputkeep2(mdb, kbuf, vbuf);
+        tcndbputkeep2(ndb, kbuf, vbuf);
+        break;
+      case 50:
+        iputchar('o');
+        tcmdbputcat(mdb, kbuf, ksiz, vbuf, vsiz);
+        tcndbputcat(ndb, kbuf, ksiz, vbuf, vsiz);
+        break;
+      case 51:
+        iputchar('p');
+        tcmdbputcat2(mdb, kbuf, vbuf);
+        tcndbputcat2(ndb, kbuf, vbuf);
+        break;
+      case 52:
+        iputchar('q');
+        if(myrand(2) == 0){
+          tcmdbput3(mdb, kbuf, ksiz, vbuf, vsiz);
+          tcndbput3(ndb, kbuf, ksiz, vbuf, vsiz);
+        }
+        if(myrand(2) == 0){
+          tcmdbput4(mdb, kbuf, ksiz, vbuf, vsiz, vbuf, vsiz);
+          tcndbputkeep3(ndb, kbuf, ksiz, vbuf, vsiz);
+        }
+        if(myrand(2) == 0){
+          tcmdbputcat3(mdb, kbuf, ksiz, vbuf, vsiz);
+          tcndbputcat3(ndb, kbuf, ksiz, vbuf, vsiz);
+        }
+        break;
+      case 53:
+        iputchar('r');
+        if(myrand(10) == 0){
+          tcmdbout(mdb, kbuf, ksiz);
+          tcndbout(ndb, kbuf, ksiz);
+        }
+        break;
+      case 54:
+        iputchar('s');
+        if(myrand(10) == 0){
+          tcmdbout2(mdb, kbuf);
+          tcndbout2(ndb, kbuf);
+        }
+        break;
+      case 55:
+        iputchar('t');
+        tcfree(tcmdbget(mdb, kbuf, ksiz, &vsiz));
+        tcfree(tcndbget(ndb, kbuf, ksiz, &vsiz));
+        break;
+      case 56:
+        iputchar('u');
+        tcfree(tcmdbget3(mdb, kbuf, ksiz, &vsiz));
+        tcfree(tcndbget3(ndb, kbuf, ksiz, &vsiz));
+        break;
+      case 57:
+        iputchar('v');
+        if(myrand(100) == 0){
+          if(myrand(2) == 0){
+            tcmdbiterinit(mdb);
+            tcndbiterinit(ndb);
+          } else {
+            tcmdbiterinit2(mdb, kbuf, ksiz);
+            tcndbiterinit2(ndb, kbuf, ksiz);
+          }
+        }
+        break;
+      case 58:
+        iputchar('w');
+        tcfree(tcmdbiternext(mdb, &vsiz));
+        tcfree(tcndbiternext(ndb, &vsiz));
+        break;
+      case 59:
+        iputchar('x');
+        tcfree(tcmdbiternext2(mdb));
+        tcfree(tcndbiternext2(ndb));
+        break;
+      case 60:
+        iputchar('y');
+        if(myrand(rnum / 100 + 1) == 0){
+          tcmdbvanish(mdb);
+          tcndbvanish(ndb);
+        }
+        break;
+      case 61:
+        iputchar('z');
+        if(myrand(200) == 0){
+          tcmdbcutfront(mdb, myrand(100));
+          tcndbcutfringe(ndb, myrand(100));
+        }
+        break;
+      case 62:
+        iputchar('+');
+        if(myrand(200) == 0){
+          tcmdbforeach(mdb, iterfunc, NULL);
+          tcndbforeach(ndb, iterfunc, NULL);
+        }
+        break;
+      case 63:
+        iputchar('+');
+        if(myrand(100) == 0){
+          char *tptr = tcmpoolmalloc(mpool, 1);
+          switch(myrand(5)){
+            case 0:
+              tcfree(tptr);
+              tcmpoolpop(mpool, false);
+              break;
+            case 1:
+              tcmpoolpop(mpool, true);
+              break;
+          }
+        }
+        break;
+      case 64:
+        iputchar('+');
+        if(myrand(100) == 0){
+          TCXSTR *txstr = tcmpoolxstrnew(mpool);
+          switch(myrand(5)){
+            case 0:
+              tcxstrdel(txstr);
+              tcmpoolpop(mpool, false);
+              break;
+            case 1:
+              tcmpoolpop(mpool, true);
+              break;
+          }
+        }
+        break;
+      case 65:
+        iputchar('+');
+        if(myrand(100) == 0){
+          TCLIST *tlist = tcmpoollistnew(mpool);
+          switch(myrand(5)){
+            case 0:
+              tclistdel(tlist);
+              tcmpoolpop(mpool, false);
+              break;
+            case 1:
+              tcmpoolpop(mpool, true);
+              break;
+          }
+        }
+        break;
+      case 66:
+        iputchar('+');
+        if(myrand(100) == 0){
+          TCMAP *tmap = tcmpoolmapnew(mpool);
+          switch(myrand(5)){
+            case 0:
+              tcmapdel(tmap);
+              tcmpoolpop(mpool, false);
+              break;
+            case 1:
+              tcmpoolpop(mpool, true);
+              break;
+          }
+        }
+        break;
+      case 67:
+        iputchar('+');
+        if(myrand(100) == 0){
+          TCTREE *ttree = tcmpooltreenew(mpool);
+          switch(myrand(5)){
+            case 0:
+              tctreedel(ttree);
+              tcmpoolpop(mpool, false);
+              break;
+            case 1:
+              tcmpoolpop(mpool, true);
+              break;
+          }
+        }
+        break;
+      default:
+        iputchar('@');
+        if(myrand(10000) == 0) srand((unsigned int)(tctime() * 1000) % UINT_MAX);
+        break;
     }
     if(i % 50 == 0) iprintf(" (%08d)\n", i);
   }

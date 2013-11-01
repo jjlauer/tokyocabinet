@@ -1,10 +1,10 @@
 # downloads latest tarball, unpacks it, then commits
 # changes to ../tokyocabinet dir
 
-for i in {48..48}; do
+for i in {40..48}; do
 
-#VERSION="1.4.${i}"
-VERSION="1.3.27"
+VERSION="1.4.${i}"
+#VERSION="1.3.27"
 
 VER_MERGED=$(git tag | grep -c "$VERSION")
 
@@ -14,8 +14,8 @@ if [ ! "$VER_MERGED" = "0" ]; then
 fi
 
 # fetch new tarball
-wget http://fallabs.com/tokyocabinet/pastpkg/tokyocabinet-${VERSION}.tar.gz
-#wget http://fallabs.com/tokyocabinet/tokyocabinet-${VERSION}.tar.gz
+#wget http://fallabs.com/tokyocabinet/pastpkg/tokyocabinet-${VERSION}.tar.gz
+wget http://fallabs.com/tokyocabinet/tokyocabinet-${VERSION}.tar.gz
 
 # unpackage
 if [ ! -f tokyocabinet-${VERSION}.tar.gz ]; then

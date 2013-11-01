@@ -77,7 +77,7 @@ int main(int argc, char **argv){
   params.action = ACTLIST;
   int size;
   const char *buf = tcmapget(pmap, "action", 6, &size);
-  if(buf) params.action = tcatoi(buf);
+  if(buf) params.action = tcatoix(buf);
   if(params.action < ACTLIST) params.action = ACTLIST;
   buf = tcmapget(pmap, "key", 3, &size);
   if(buf){
@@ -104,21 +104,21 @@ int main(int argc, char **argv){
   }
   params.num = 0;
   buf = tcmapget(pmap, "num", 3, &size);
-  if(buf) params.num = tcatoi(buf);
+  if(buf) params.num = tcatoix(buf);
   if(params.num < 1) params.num = DEFSHOWNUM;
   params.page = 1;
   buf = tcmapget(pmap, "page", 4, &size);
-  if(buf) params.page = tcatoi(buf);
+  if(buf) params.page = tcatoix(buf);
   if(params.page < 1) params.page = 1;
   bool wmode;
   switch(params.action){
-  case ACTPUT:
-  case ACTOUT:
-    wmode = true;
-    break;
-  default:
-    wmode = false;
-    break;
+    case ACTPUT:
+    case ACTOUT:
+      wmode = true;
+      break;
+    default:
+      wmode = false;
+      break;
   }
   TCADB *db = tcadbnew();
   char path[strlen(DBNAME)+16];
@@ -131,20 +131,22 @@ int main(int argc, char **argv){
     }
   }
   if(tcadbsize(db) > 0){
+    if(wmode) tcadbtranbegin(db);
     switch(params.action){
-    case ACTLIST:
-    case ACTLISTVAL:
-    case ACTPUT:
-    case ACTOUT:
-      dolist(&params, db);
-      break;
-    case ACTGET:
-      doget(&params, db);
-      break;
-    default:
-      doerror(400, "no such action");
-      break;
+      case ACTLIST:
+      case ACTLISTVAL:
+      case ACTPUT:
+      case ACTOUT:
+        dolist(&params, db);
+        break;
+      case ACTGET:
+        doget(&params, db);
+        break;
+      default:
+        doerror(400, "no such action");
+        break;
     }
+    if(wmode) tcadbtrancommit(db);
   } else {
     doerror(500, "the database file could not be opened");
   }
@@ -161,7 +163,7 @@ static void readparameters(TCMAP *params){
   int len = 0;
   const char *rp;
   if((rp = getenv("REQUEST_METHOD")) != NULL && !strcmp(rp, "POST") &&
-     (rp = getenv("CONTENT_LENGTH")) != NULL && (len = tcatoi(rp)) > 0){
+     (rp = getenv("CONTENT_LENGTH")) != NULL && (len = tcatoix(rp)) > 0){
     if(len > maxlen) len = maxlen;
     buf = tccalloc(len + 1, 1);
     if(fread(buf, 1, len, stdin) != len){
@@ -172,67 +174,7 @@ static void readparameters(TCMAP *params){
     buf = tcstrdup(rp);
     len = strlen(buf);
   }
-  if(buf && len > 0){
-    if((rp = getenv("CONTENT_TYPE")) != NULL && tcstrfwm(rp, "multipart/form-data") &&
-       (rp = strstr(rp, "boundary=")) != NULL){
-      rp += 9;
-      if(*rp == '"') rp++;
-      char bstr[strlen(rp)+1];
-      strcpy(bstr, rp);
-      char *wp = strchr(bstr, ';');
-      if(wp) *wp = '\0';
-      wp = strchr(bstr, '"');
-      if(wp) *wp = '\0';
-      TCLIST *parts = tcmimeparts(buf, len, bstr);
-      int pnum = tclistnum(parts);
-      for(int i = 0; i < pnum; i++){
-        int psiz;
-        const char *part = tclistval(parts, i, &psiz);
-        TCMAP *hmap = tcmapnew2(MINIBNUM);
-        int bsiz;
-        char *body = tcmimebreak(part, psiz, hmap, &bsiz);
-        int nsiz;
-        const char *name = tcmapget(hmap, "NAME", 4, &nsiz);
-        if(name){
-          tcmapput(params, name, nsiz, body, bsiz);
-          const char *fname = tcmapget2(hmap, "FILENAME");
-          if(fname){
-            if(*fname == '/'){
-              fname = strrchr(fname, '/') + 1;
-            } else if(((*fname >= 'a' && *fname <= 'z') || (*fname >= 'A' && *fname <= 'Z')) &&
-                      fname[1] == ':' && fname[2] == '\\'){
-              fname = strrchr(fname, '\\') + 1;
-            }
-            if(*fname != '\0'){
-              char key[nsiz+10];
-              sprintf(key, "%s_filename", name);
-              tcmapput2(params, key, fname);
-            }
-          }
-        }
-        tcfree(body);
-        tcmapdel(hmap);
-      }
-      tclistdel(parts);
-    } else {
-      TCLIST *pairs = tcstrsplit(buf, "&;");
-      int num = tclistnum(pairs);
-      for(int i = 0; i < num; i++){
-        char *key = tcstrdup(tclistval2(pairs, i));
-        char *val = strchr(key, '=');
-        if(val){
-          *(val++) = '\0';
-          char *dkey = tcurldecode(key, &len);
-          char *dval = tcurldecode(val, &len);
-          tcmapput2(params, dkey, dval);
-          tcfree(dval);
-          tcfree(dkey);
-        }
-        tcfree(key);
-      }
-      tclistdel(pairs);
-    }
-  }
+  if(buf && len > 0) tcwwwformdecode2(buf, len, getenv("CONTENT_TYPE"), params);
   tcfree(buf);
 }
 
@@ -413,12 +355,12 @@ static void sethtmlheader(PARAMS *params, TCXSTR *obuf, TCADB *db){
   XP("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\n");
   XP("<meta http-equiv=\"Content-Style-Type\" content=\"text/css\" />\n");
   XP("<title>%@</title>\n", PAGETITLE);
-  XP("<style type=\"text/css\">\n");
-  XP("html { margin: 0em; padding: 0em; }\n");
+  XP("<style type=\"text/css\">html { margin: 0em; padding: 0em; }\n");
   XP("body { margin :0em; padding: 0.5em 1em; background: #eeeeee; color: #111111; }\n");
   XP("h1 { margin: 3px; padding: 0px; font-size: 125%%; }\n");
   XP("h1 a { color: #000000; }\n");
-  XP("hr { margin: 0px 0px; height: 1px; border: none; background: #999999; color: #999999; }\n");
+  XP("hr { margin: 0px 0px; height: 1px; border: none;"
+     " background: #999999; color: #999999; }\n");
   XP("form { margin: 5px; padding: 0px; }\n");
   XP("#list { margin: 5px; padding: 0px; }\n");
   XP("p { margin: 5px; padding: 0px; }\n");
@@ -506,18 +448,18 @@ static void sethtmlrecval(const char *kbuf, int ksiz, TCXSTR *obuf, TCADB *db){
     if(c >= 0x20 && c <= 0x7e){
       if(hex) tcxstrcat(obuf, " ", 1);
       switch(c){
-      case '<':
-        tcxstrcat(obuf, "&lt;", 4);
-        break;
-      case '>':
-        tcxstrcat(obuf, "&gt;", 4);
-        break;
-      case '&':
-        tcxstrcat(obuf, "&amp;", 5);
-        break;
-      default:
-        tcxstrcat(obuf, vbuf + j, 1);
-        break;
+        case '<':
+          tcxstrcat(obuf, "&lt;", 4);
+          break;
+        case '>':
+          tcxstrcat(obuf, "&gt;", 4);
+          break;
+        case '&':
+          tcxstrcat(obuf, "&amp;", 5);
+          break;
+        default:
+          tcxstrcat(obuf, vbuf + j, 1);
+          break;
       }
       width--;
       hex = false;

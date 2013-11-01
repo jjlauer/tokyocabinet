@@ -1,4 +1,4 @@
-.TH "TCBDB" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
+.TH "TCBDB" 3 "2009-10-13" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcbdb \- the B+ tree database API
@@ -26,7 +26,7 @@ To use the B+ tree database API, include `\fBtcutil.h\fR', `\fBtcbdb.h\fR', and 
 .PP
 Objects whose type is pointer to `\fBTCBDB\fR' are used to handle B+ tree databases.  A B+ tree database object is created with the function `\fBtcbdbnew\fR' and is deleted with the function `\fBtcbdbdel\fR'.  To avoid memory leak, it is important to delete every object when it is no longer in use.
 .PP
-Before operations to store or retrieve records, it is necessary to open a database file and connect the B+ tree database object to it.  The function `\fBtcbdbopen\fR' is used to open a database file and the function `\fBtcbdbclose\fR' is used to close the database file.  To avoid data missing or corruption, it is important to close every database file when it is no longer in use.
+Before operations to store or retrieve records, it is necessary to open a database file and connect the B+ tree database object to it.  The function `\fBtcbdbopen\fR' is used to open a database file and the function `\fBtcbdbclose\fR' is used to close the database file.  To avoid data missing or corruption, it is important to close every database file when it is no longer in use.  It is forbidden for multible database objects in a process to open the same database at the same time.
 
 .SH API
 .PP
@@ -107,7 +107,7 @@ The function `tcbdbsetcmpfunc' is used in order to set the custom comparison fun
 `\fIbdb\fR' specifies the B+ tree database object which is not opened.
 .RE
 .RS
-`\fIcmp\fR' specifies the pointer to the custom comparison function.
+`\fIcmp\fR' specifies the pointer to the custom comparison function.  It receives five parameters.  The first parameter is the pointer to the region of one key.  The second parameter is the size of the region of one key.  The third parameter is the pointer to the region of the other key.  The fourth parameter is the size of the region of the other key.  The fifth parameter is the pointer to the optional opaque object.  It returns positive if the former is big, negative if the latter is big, 0 if both are equivalent.
 .RE
 .RS
 `\fIcmpop\fR' specifies an arbitrary pointer to be given as a parameter of the comparison function.  If it is not needed, `NULL' can be specified.
@@ -144,7 +144,7 @@ The function `tcbdbtune' is used in order to set the tuning parameters of a B+ t
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each page is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.
+`\fIopts\fR' specifies options by bitwise-or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each page is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -195,6 +195,25 @@ Note that the mapping parameters should be set before the database is opened.
 .RE
 .RE
 .PP
+The function `tcbdbsetdfunit' is used in order to set the unit step number of auto defragmentation of a B+ tree database object.
+.PP
+.RS
+.br
+\fBbool tcbdbsetdfunit(TCBDB *\fIbdb\fB, int32_t \fIdfunit\fB);\fR
+.RS
+`\fIbdb\fR' specifies the B+ tree database object which is not opened.
+.RE
+.RS
+`\fIdfunit\fR' specifie the unit step number.  If it is not more than 0, the auto defragmentation is disabled.  It is disabled by default.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Note that the defragmentation parameter should be set before the database is opened.
+.RE
+.RE
+.PP
 The function `tcbdbopen' is used in order to open a database file and connect a B+ tree database object.
 .PP
 .RS
@@ -207,7 +226,7 @@ The function `tcbdbopen' is used in order to open a database file and connect a 
 `\fIpath\fR' specifies the path of the database file.
 .RE
 .RS
-`\fIomode\fR' specifies the connection mode: `BDBOWRITER' as a writer, `BDBOREADER' as a reader.  If the mode is `BDBOWRITER', the following may be added by bitwise or: `BDBOCREAT', which means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database regardless if one exists, `BDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or `BDBOLCKNB', which means locking is performed without blocking.
+`\fIomode\fR' specifies the connection mode: `BDBOWRITER' as a writer, `BDBOREADER' as a reader.  If the mode is `BDBOWRITER', the following may be added by bitwise-or: `BDBOCREAT', which means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database regardless if one exists, `BDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by bitwise-or: `BDBONOLCK', which means it opens the database file without file locking, or `BDBOLCKNB', which means locking is performed without blocking.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -715,7 +734,7 @@ The function `tcbdbrange' is used in order to get keys of ranged records in a B+
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the keys of the corresponding records.  This function does never fail and return an empty list even if no record corresponds.
+The return value is a list object of the keys of the corresponding records.  This function does never fail.  It returns an empty list even if no record corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -746,7 +765,7 @@ The function `tcbdbrange2' is used in order to get string keys of ranged records
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the keys of the corresponding records.  This function does never fail and return an empty list even if no record corresponds.
+The return value is a list object of the keys of the corresponding records.  This function does never fail.  It returns an empty list even if no record corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -771,7 +790,7 @@ The function `tcbdbfwmkeys' is used in order to get forward matching keys in a B
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -793,7 +812,7 @@ The function `tcbdbfwmkeys2' is used in order to get forward matching string key
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -843,7 +862,7 @@ The function `tcbdbadddouble' is used in order to add a real number to a record 
 `\fInum\fR' specifies the additional value.
 .RE
 .RS
-If successful, the return value is the summation value, else, it is `NAN'.
+If successful, the return value is the summation value, else, it is Not-a-Number.
 .RE
 .RS
 If the corresponding record exists, the value is treated as a real number and is added to.  If no record corresponds, a new record of the additional value is stored.
@@ -890,7 +909,7 @@ The function `tcbdboptimize' is used in order to optimize the file of a B+ tree 
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the current setting is not changed.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+`\fIopts\fR' specifies options by bitwise-or: `BDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `BDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `BDBTBZIP' specifies that each page is compressed with BZIP2 encoding, `BDBTTCBS' specifies that each page is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
 .RE
 .RS
 If successful, the return value is true, else, it is false.

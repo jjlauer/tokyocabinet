@@ -1,4 +1,4 @@
-.TH "TCUTIL" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
+.TH "TCUTIL" 3 "2009-10-13" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tcutil \- the utility API
@@ -337,6 +337,22 @@ The function `tclistnew2' is used in order to create a list object with expectin
 \fBTCLIST *tclistnew2(int \fIanum\fB);\fR
 .RS
 `\fIanum\fR' specifies the number of elements expected to be stored in the list.
+.RE
+.RS
+The return value is the new list object.
+.RE
+.RE
+.PP
+The function `tclistnew3' is used in order to create a list object with initial string elements.
+.PP
+.RS
+.br
+\fBTCLIST *tclistnew3(const char *\fIstr\fB, ...);\fR
+.RS
+`\fIstr\fR' specifies the string of the first element.
+.RE
+.RS
+The other arguments are other elements.  They should be trailed by a `NULL' argument.
 .RE
 .RS
 The return value is the new list object.
@@ -801,6 +817,25 @@ The function `tcmapnew2' is used in order to create a map object with specifying
 .RE
 .RS
 The return value is the new map object.
+.RE
+.RE
+.PP
+The function `tcmapnew3' is used in order to create a map object with initial string elements.
+.PP
+.RS
+.br
+\fBTCMAP *tcmapnew3(const char *\fIstr\fB, ...);\fR
+.RS
+`\fIstr\fR' specifies the string of the first element.
+.RE
+.RS
+The other arguments are other elements.  They should be trailed by a `NULL' argument.
+.RE
+.RS
+The return value is the new map object.
+.RE
+.RS
+The key and the value of each record are situated one after the other.
 .RE
 .RE
 .PP
@@ -1323,7 +1358,7 @@ The function `tctreenew2' is used in order to create a tree object with specifyi
 .br
 \fBTCTREE *tctreenew2(TCCMP \fIcmp\fB, void *\fIcmpop\fB);\fR
 .RS
-`\fIcmp\fR' specifies the pointer to the custom comparison function.
+`\fIcmp\fR' specifies the pointer to the custom comparison function.  It receives five parameters.  The first parameter is the pointer to the region of one key.  The second parameter is the size of the region of one key.  The third parameter is the pointer to the region of the other key.  The fourth parameter is the size of the region of the other key.  The fifth parameter is the pointer to the optional opaque object.  It returns positive if the former is big, negative if the latter is big, 0 if both are equivalent.
 .RE
 .RS
 `\fIcmpop\fR' specifies an arbitrary pointer to be given as a parameter of the comparison function.  If it is not needed, `NULL' can be specified.
@@ -1586,41 +1621,6 @@ The function `tctreeiterinit' is used in order to initialize the iterator of a t
 .RE
 .RS
 The iterator is used in order to access the key of every record stored in the tree object.
-.RE
-.RE
-.PP
-The function `tctreeiterinit2' is used in order to initialize the iterator of a tree object in front of records corresponding a key.
-.PP
-.RS
-.br
-\fBvoid tctreeiterinit2(TCTREE *\fItree\fB, const void *\fIkbuf\fB, int \fIksiz\fB);\fR
-.RS
-`\fItree\fR' specifies the tree object.
-.RE
-.RS
-`\fIkbuf\fR' specifies the pointer to the region of the key.
-.RE
-.RS
-`\fIksiz\fR' specifies the size of the region of the key.
-.RE
-.RS
-The iterator is set to the first record corresponding the key or the next substitute if completely matching record does not exist.
-.RE
-.RE
-.PP
-The function `tctreeiterinit3' is used in order to initialize the iterator of a tree object in front of records corresponding a key string.
-.PP
-.RS
-.br
-\fBvoid tctreeiterinit3(TCTREE *\fItree\fB, const char *\fIkstr\fB);\fR
-.RS
-`\fItree\fR' specifies the tree object.
-.RE
-.RS
-`\fIkstr\fR' specifies the string of the key.
-.RE
-.RS
-The iterator is set to the first record corresponding the key or the next substitute if completely matching record does not exist.
 .RE
 .RE
 .PP
@@ -2202,7 +2202,7 @@ The function `tcmdbfwmkeys' is used in order to get forward matching keys in an 
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
@@ -2224,7 +2224,7 @@ The function `tcmdbfwmkeys2' is used in order to get forward matching string key
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
@@ -2642,41 +2642,6 @@ The iterator is used in order to access the key of every record stored in the on
 .RE
 .RE
 .PP
-The function `tcndbiterinit2' is used in order to initialize the iterator of an on\-memory tree database object in front of a key.
-.PP
-.RS
-.br
-\fBvoid tcndbiterinit2(TCNDB *\fIndb\fB, const void *\fIkbuf\fB, int \fIksiz\fB);\fR
-.RS
-`\fIndb\fR' specifies the on\-memory tree database object.
-.RE
-.RS
-`\fIkbuf\fR' specifies the pointer to the region of the key.
-.RE
-.RS
-`\fIksiz\fR' specifies the size of the region of the key.
-.RE
-.RS
-The iterator is set to the first record corresponding the key or the next substitute if completely matching record does not exist.
-.RE
-.RE
-.PP
-The function `tcndbiterinit3' is used in order to initialize the iterator of an on\-memory tree database object in front of a key string.
-.PP
-.RS
-.br
-\fBvoid tcndbiterinit3(TCNDB *\fIndb\fB, const char *\fIkstr\fB);\fR
-.RS
-`\fIndb\fR' specifies the on\-memory tree database object.
-.RE
-.RS
-`\fIkstr\fR' specifies the string of the key.
-.RE
-.RS
-The iterator is set to the first record corresponding the key or the next substitute if completely matching record does not exist.
-.RE
-.RE
-.PP
 The function `tcndbiternext' is used in order to get the next key of the iterator of an on\-memory tree database object.
 .PP
 .RS
@@ -2730,7 +2695,7 @@ The function `tcndbfwmkeys' is used in order to get forward matching keys in an 
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -2752,7 +2717,7 @@ The function `tcndbfwmkeys2' is used in order to get forward matching string key
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.
@@ -2886,96 +2851,117 @@ Note that the deleted object and its derivatives can not be used anymore.
 .RE
 .RE
 .PP
-The function `tcmpoolput' is used in order to relegate an arbitrary object to a memory pool object.
+The function `tcmpoolpush' is used in order to relegate an arbitrary object to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolput(TCMPOOL *\fImpool\fB, void *\fIptr\fB, void (*\fIdel\fB)(void *));\fR
+\fBvoid *tcmpoolpush(TCMPOOL *\fImpool\fB, void *\fIptr\fB, void (*\fIdel\fB)(void *));\fR
 .RS
 `\fImpool\fR' specifies the memory pool object.
 .RE
 .RS
-`\fIptr\fR' specifies the pointer to the object to be relegated.
+`\fIptr\fR' specifies the pointer to the object to be relegated.  If it is `NULL', this function has no effect.
 .RE
 .RS
 `\fIdel\fR' specifies the pointer to the function to delete the object.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified object is deleted when the memory pool object is deleted.
 .RE
 .RE
 .PP
-The function `tcmpoolputptr' is used in order to relegate an allocated region to a memory pool object.
+The function `tcmpoolpushptr' is used in order to relegate an allocated region to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolputptr(TCMPOOL *\fImpool\fB, void *\fIptr\fB);\fR
+\fBvoid *tcmpoolpushptr(TCMPOOL *\fImpool\fB, void *\fIptr\fB);\fR
 .RS
-`\fIptr\fR' specifies the pointer to the region to be relegated.
+`\fImpool\fR' specifies the memory pool object.
+.RE
+.RS
+`\fIptr\fR' specifies the pointer to the region to be relegated.  If it is `NULL', this function has no effect.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified region is released when the memory pool object is deleted.
 .RE
 .RE
 .PP
-The function `tcmpoolputxstr' is used in order to relegate an extensible string object to a memory pool object.
+The function `tcmpoolpushxstr' is used in order to relegate an extensible string object to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolputxstr(TCMPOOL *\fImpool\fB, TCXSTR *\fIxstr\fB);\fR
+\fBTCXSTR *tcmpoolpushxstr(TCMPOOL *\fImpool\fB, TCXSTR *\fIxstr\fB);\fR
 .RS
 `\fImpool\fR' specifies the memory pool object.
 .RE
 .RS
-`\fIxstr\fR' specifies the extensible string object.
+`\fIxstr\fR' specifies the extensible string object.  If it is `NULL', this function has no effect.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified object is deleted when the memory pool object is deleted.
 .RE
 .RE
 .PP
-The function `tcmpoolputlist' is used in order to relegate a list object to a memory pool object.
+The function `tcmpoolpushlist' is used in order to relegate a list object to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolputlist(TCMPOOL *\fImpool\fB, TCLIST *\fIlist\fB);\fR
+\fBTCLIST *tcmpoolpushlist(TCMPOOL *\fImpool\fB, TCLIST *\fIlist\fB);\fR
 .RS
 `\fImpool\fR' specifies the memory pool object.
 .RE
 .RS
-`\fIlist\fR' specifies the list object.
+`\fIlist\fR' specifies the list object.  If it is `NULL', this function has no effect.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified object is deleted when the memory pool object is deleted.
 .RE
 .RE
 .PP
-The function `tcmpoolputmap' is used in order to relegate a map object to a memory pool object.
+The function `tcmpoolpushmap' is used in order to relegate a map object to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolputmap(TCMPOOL *\fImpool\fB, TCMAP *\fImap\fB);\fR
+\fBTCMAP *tcmpoolpushmap(TCMPOOL *\fImpool\fB, TCMAP *\fImap\fB);\fR
 .RS
 `\fImpool\fR' specifies the memory pool object.
 .RE
 .RS
-`\fImap\fR' specifies the map object.
+`\fImap\fR' specifies the map object.  If it is `NULL', this function has no effect.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified object is deleted when the memory pool object is deleted.
 .RE
 .RE
 .PP
-The function `tcmpoolputtree' is used in order to relegate a tree object to a memory pool object.
+The function `tcmpoolpushtree' is used in order to relegate a tree object to a memory pool object.
 .PP
 .RS
 .br
-\fBvoid tcmpoolputtree(TCMPOOL *\fImpool\fB, TCTREE *\fItree\fB);\fR
+\fBTCTREE *tcmpoolpushtree(TCMPOOL *\fImpool\fB, TCTREE *\fItree\fB);\fR
 .RS
 `\fImpool\fR' specifies the memory pool object.
 .RE
 .RS
-`\fItree\fR' specifies the tree object.
+`\fItree\fR' specifies the tree object.  If it is `NULL', this function has no effect.
+.RE
+.RS
+The return value is the pointer to the given object.
 .RE
 .RS
 This function assures that the specified object is deleted when the memory pool object is deleted.
@@ -3032,6 +3018,32 @@ The function `tcmpooltreenew' is used in order to create a tree object relegated
 \fBTCTREE *tcmpooltreenew(TCMPOOL *\fImpool\fB);\fR
 .RS
 The return value is the new tree object under the memory pool.
+.RE
+.RE
+.PP
+The function `tcmpoolpop' is used in order to remove the most recently installed cleanup handler of a memory pool object.
+.PP
+.RS
+.br
+\fBvoid tcmpoolpop(TCMPOOL *\fImpool\fB, bool \fIexe\fB);\fR
+.RS
+`\fImpool\fR' specifies the memory pool object.
+.RE
+.RS
+`\fIexe\fR' specifies whether to execute the destructor of the removed handler.
+.RE
+.RE
+.PP
+The function `tcmpoolclear' is used in order to remove all cleanup handler of a memory pool object.
+.PP
+.RS
+.br
+\fBvoid tcmpoolclear(TCMPOOL *\fImpool\fB, bool \fIexe\fB);\fR
+.RS
+`\fImpool\fR' specifies the memory pool object.
+.RE
+.RS
+`\fIexe\fR' specifies whether to execute the destructors of the removed handlers.
 .RE
 .RE
 .PP
@@ -3359,15 +3371,18 @@ The function `tcstrucstoutf' is used in order to convert a UCS\-2 array into a U
 .PP
 .RS
 .br
-\fBvoid tcstrucstoutf(const uint16_t *\fIary\fB, int \fInum\fB, char *\fIstr\fB);\fR
+\fBint tcstrucstoutf(const uint16_t *\fIary\fB, int \fInum\fB, char *\fIstr\fB);\fR
 .RS
-`\fIary\fR' specifies the array of UCS\-2 code codes.
+`\fIary\fR' specifies the array of UCS\-2 codes.
 .RE
 .RS
 `\fInum\fR' specifies the number of the array.
 .RE
 .RS
 `\fIstr\fR' specifies the pointer to the region into which the result UTF\-8 string is written.  The size of the buffer should be sufficient.
+.RE
+.RS
+The return value is the length of the result string.
 .RE
 .RE
 .PP
@@ -3394,7 +3409,7 @@ The function `tcstrjoin' is used in order to create a string by joining all elem
 .PP
 .RS
 .br
-\fBchar *tcstrjoin(TCLIST *\fIlist\fB, char \fIdelim\fB);\fR
+\fBchar *tcstrjoin(const TCLIST *\fIlist\fB, char \fIdelim\fB);\fR
 .RS
 `\fIlist\fR' specifies a list object.
 .RE
@@ -3409,16 +3424,48 @@ Because the region of the return value is allocated with the `malloc' call, it s
 .RE
 .RE
 .PP
-The function `tcatoi' is used in order to convert a string with a metric prefix to an integer.
+The function `tcatoi' is used in order to convert a string to an integer.
 .PP
 .RS
 .br
-\fBint64_t tcatoi(const char *str);\fR
+\fBint64_t tcatoi(const char *\fIstr\fB);\fR
 .RS
-`\fIstr\fR' specifies a string which can be trailed by a binary metric prefix.  "K", "M", "G", "T", "P", and "E" are supported.  They are case\-insensitive.
+`\fIstr\fR' specifies the string.
+.RE
+.RS
+The return value is the integer.  If the string does not contain numeric expression, 0 is returned.
+.RE
+.RS
+This function is equivalent to `atoll' except that it does not depend on the locale.
+.RE
+.RE
+.PP
+The function `tcatoix' is used in order to convert a string with a metric prefix to an integer.
+.PP
+.RS
+.br
+\fBint64_t tcatoix(const char *\fIstr\fB);\fR
+.RS
+`\fIstr\fR' specifies the string, which can be trailed by a binary metric prefix.  "K", "M", "G", "T", "P", and "E" are supported.  They are case\-insensitive.
 .RE
 .RS
 The return value is the integer.  If the string does not contain numeric expression, 0 is returned.  If the integer overflows the domain, `INT64_MAX' or `INT64_MIN' is returned according to the sign.
+.RE
+.RE
+.PP
+The function `tcatof' is used in order to convert a string to a real number.
+.PP
+.RS
+.br
+\fBdouble tcatof(const char *\fIstr\fB);\fR
+.RS
+`\fIstr\fR' specifies the string.
+.RE
+.RS
+The return value is the real number.  If the string does not contain numeric expression, 0.0 is returned.
+.RE
+.RS
+This function is equivalent to `atof' except that it does not depend on the locale.
 .RE
 .RE
 .PP
@@ -3460,13 +3507,13 @@ Because the region of the return value is allocated with the `malloc' call, it s
 .RE
 .RE
 .PP
-The function `tcmd5hash' is used in order to get the MD5 hash value of a record.
+The function `tcmd5hash' is used in order to get the MD5 hash value of a serial object.
 .PP
 .RS
 .br
 \fBvoid tcmd5hash(const void *\fIptr\fB, int \fIsize\fB, char *\fIbuf\fB);\fR
 .RS
-`\fIptr\fR' specifies the pointer to the region of the record.
+`\fIptr\fR' specifies the pointer to the region.
 .RE
 .RS
 `\fIsize\fR' specifies the size of the region.
@@ -3476,48 +3523,25 @@ The function `tcmd5hash' is used in order to get the MD5 hash value of a record.
 .RE
 .RE
 .PP
-The function `tcchidxnew' is used in order to create a consistent hashing object.
+The function `tcarccipher' is used in order to cipher or decipher a serial object with the Arcfour stream cipher.
 .PP
 .RS
 .br
-\fBTCCHIDX *tcchidxnew(int \fIrange\fB);\fR
+\fBvoid tcarccipher(const void *\fIptr\fB, int \fIsize\fB, const void *\fIkbuf\fB, int \fIksiz\fB, void *\fIobuf\fB);\fR
 .RS
-`\fIrange\fR' specifies the number of nodes.  It should be more than 0.  The range of hash values is from 0 to less than the specified number.
-.RE
-.RS
-The return value is the new consistent hashing object.
-.RE
-.RS
-Consistent hashing is useful because the addition or removal of one node does not significantly change the mapping of keys to nodes.
-.RE
-.RE
-.PP
-The function `tcchidxdel' is used in order to delete a consistent hashing object.
-.PP
-.RS
-.br
-\fBvoid tcchidxdel(TCCHIDX *\fIchidx\fB);\fR
-.RS
-`\fIchidx\fR' specifies the consistent hashing object.
-.RE
-.RE
-.PP
-The function `tcchidxhash' is used in order to get the consistent hashing value of a record.
-.PP
-.RS
-.br
-\fBint tcchidxhash(TCCHIDX *\fIchidx\fB, const void *\fIptr\fB, int \fIsize\fB);\fR
-.RS
-`\fIchidx\fR' specifies the consistent hashing object.
-.RE
-.RS
-`\fIptr\fR' specifies the pointer to the region of the record.
+`\fIptr\fR' specifies the pointer to the region.
 .RE
 .RS
 `\fIsize\fR' specifies the size of the region.
 .RE
 .RS
-The return value is the hash value of the record.
+`\fIkbuf\fR' specifies the pointer to the region of the cipher key.
+.RE
+.RS
+`\fIksiz\fR' specifies the size of the region of the cipher key.
+.RE
+.RS
+`\fIobuf\fR' specifies the pointer to the region into which the result data is written.  The size of the buffer should be equal to or more than the input region.
 .RE
 .RE
 .PP
@@ -3609,7 +3633,7 @@ The function `tcstrmktime' is used in order to get the time value of a date stri
 `\fIstr\fR' specifies the date string in decimal, hexadecimal, W3CDTF, or RFC 822 (1123).  Decimal can be trailed by "s" for in seconds, "m" for in minutes, "h" for in hours, and "d" for in days.
 .RE
 .RS
-The return value is the time value of the date or `INT64_MAX' if the format is invalid.
+The return value is the time value of the date or `INT64_MIN' if the format is invalid.
 .RE
 .RE
 .PP
@@ -3657,6 +3681,28 @@ The return value is the canonicalized absolute path of a file, or `NULL' if the 
 .RE
 .RS
 Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+.RE
+.RE
+.PP
+The function `tcstatfile' is used in order to get the status information of a file.
+.PP
+.RS
+.br
+\fBbool tcstatfile(const char *\fIpath\fB, bool *\fIisdirp\fB, int64_t *\fIsizep\fB, int64_t *\fImtimep\fB);\fR
+.RS
+`\fIpath\fR' specifies the path of the file.
+.RE
+.RS
+`\fIisdirp\fR' specifies the pointer to a variable into which whether the file is a directory is assigned.  If it is `NULL', it is ignored.
+.RE
+.RS
+`\fIsizep\fR' specifies the pointer to a variable into which the size of the file is assigned.  If it is `NULL', it is ignored.
+.RE
+.RS
+`\fIntimep\fR' specifies the pointer to a variable into which the size of the file is assigned.  If it is `NULL', it is ignored.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
 .RE
 .RE
 .PP
@@ -3922,7 +3968,7 @@ The function `tcurlbreak' is used in order to break up a URL into elements.
 `\fIstr\fR' specifies the URL string.
 .RE
 .RS
-The return value is the map object whose keys are the name of elements.  The key "self" specifies the URL itself.  The key "scheme" specifies the scheme.  The key "host" specifies the host of the server.  The key "port" specifies the port number of the server.  The key "authority" specifies the authority information.  The key "path" specifies the path of the resource.  The key "file" specifies the file name without the directory section.  The key "query" specifies the query string.  The key "fragment" specifies the fragment string.
+The return value is the map object whose keys are the name of elements.  The key "self" indicates the URL itself.  The key "scheme" indicates the scheme.  The key "host" indicates the host of the server.  The key "port" indicates the port number of the server.  The key "authority" indicates the authority information.  The key "path" indicates the path of the resource.  The key "file" indicates the file name without the directory section.  The key "query" indicates the query string.  The key "fragment" indicates the fragment string.
 .RE
 .RS
 Supported schema are HTTP, HTTPS, FTP, and FILE.  Absolute URL and relative URL are supported.  Because the object of the return value is created with the function `tcmapnew', it should be deleted with the function `tcmapdel' when it is no longer in use.
@@ -4086,7 +4132,7 @@ The function `tcmimebreak' is used in order to split a string of MIME into heade
 The return value is the pointer to the region of the body data.
 .RE
 .RS
-If the content type is defined, the header map has the key "TYPE" specifying the type.  If the character encoding is defined, the key "CHARSET" specifies the encoding name.  If the boundary string of multipart is defined, the key "BOUNDARY" specifies the string.  If the content disposition is defined, the key "DISPOSITION" specifies the direction.  If the file name is defined, the key "FILENAME" specifies the name.  If the attribute name is defined, the key "NAME" specifies the name.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
+If the content type is defined, the header map has the key "TYPE" specifying the type.  If the character encoding is defined, the key "CHARSET" indicates the encoding name.  If the boundary string of multipart is defined, the key "BOUNDARY" indicates the string.  If the content disposition is defined, the key "DISPOSITION" indicates the direction.  If the file name is defined, the key "FILENAME" indicates the name.  If the attribute name is defined, the key "NAME" indicates the name.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
 .RE
 .RE
 .PP
@@ -4462,38 +4508,6 @@ The return value is the unescaped string.
 .RE
 .RS
 This function restores only `&amp;', `&lt;', `&gt;', and `&quot;'.  Because the region of the return value is allocated with the `malloc' call, it should be released with the `free' call when it is no longer in use.
-.RE
-.RE
-.PP
-The function `tcxmlbreak' is used in order to split an XML string into tags and text sections.
-.PP
-.RS
-.br
-\fBTCLIST *tcxmlbreak(const char *\fIstr\fB);\fR
-.RS
-`\fIstr\fR' specifies the XML string.
-.RE
-.RS
-The return value is the list object whose elements are strings of tags or text sections.
-.RE
-.RS
-Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Because this function does not check validation, it can handle also HTML and SGML.
-.RE
-.RE
-.PP
-The function `tcxmlattrs' is used in order to get the map of attributes of an XML tag.
-.PP
-.RS
-.br
-\fBTCMAP *tcxmlattrs(const char *\fIstr\fB);\fR
-.RS
-`\fIstr\fR' specifies the pointer to the region of a tag string.
-.RE
-.RS
-The return value is the map object containing attribute names and their values which are unescaped.  You can get the name of the tag with the key of an empty string.
-.RE
-.RS
-Because the object of the return value is created with the function `tcmapnew', it should be deleted with the function `tcmapdel' when it is no longer in use.
 .RE
 .RE
 

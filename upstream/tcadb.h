@@ -27,15 +27,11 @@
 __TCADB_CLINKAGEBEGIN
 
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <time.h>
-#include <math.h>
 #include <tcutil.h>
 #include <tchdb.h>
 #include <tcbdb.h>
 #include <tcfdb.h>
+#include <tctdb.h>
 
 
 
@@ -45,17 +41,18 @@ __TCADB_CLINKAGEBEGIN
 
 
 typedef struct {                         /* type of structure for an abstract database */
-  char *name;                            /* name of the database */
   int omode;                             /* open mode */
   TCMDB *mdb;                            /* on-memory hash database object */
   TCNDB *ndb;                            /* on-memory tree database object */
   TCHDB *hdb;                            /* hash database object */
   TCBDB *bdb;                            /* B+ tree database object */
   TCFDB *fdb;                            /* fixed-length databae object */
+  TCTDB *tdb;                            /* table database object */
   int64_t capnum;                        /* capacity number of records */
   int64_t capsiz;                        /* capacity size of using memory */
   uint32_t capcnt;                       /* count for capacity check */
   BDBCUR *cur;                           /* cursor of B+ tree */
+  void *skel;                            /* skeleton database */
 } TCADB;
 
 enum {                                   /* enumeration for open modes */
@@ -64,7 +61,9 @@ enum {                                   /* enumeration for open modes */
   ADBONDB,                               /* on-memory tree database */
   ADBOHDB,                               /* hash database */
   ADBOBDB,                               /* B+ tree database */
-  ADBOFDB                                /* fixed-length database */
+  ADBOFDB,                               /* fixed-length database */
+  ADBOTDB,                               /* table database */
+  ADBOSKEL                               /* skeleton database */
 };
 
 
@@ -84,20 +83,24 @@ void tcadbdel(TCADB *adb);
    hash database.  If it is "+", the database will be an on-memory tree database.  If its suffix
    is ".tch", the database will be a hash database.  If its suffix is ".tcb", the database will
    be a B+ tree database.  If its suffix is ".tcf", the database will be a fixed-length database.
-   Otherwise, this function fails.  Tuning parameters can trail the name, separated by "#".  Each
-   parameter is composed of the name and the number, separated by "=".  On-memory hash database
-   supports "bnum", "capnum", and "capsiz".  On-memory tree database supports "capnum" and
-   "capsiz".  Hash database supports "mode", "bnum", "apow", "fpow", "opts", "rcnum", and "xmsiz".
-   B+ tree database supports "mode", "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum",
-   "ncnum", and "xmsiz".  Fixed-length database supports "mode", "width", and "limsiz".  "capnum"
-   specifies the capacity number of records.  "capsiz" specifies the capacity size of using
-   memory.  Records spilled the capacity are removed by the storing order.  "mode" can contain
-   "w" of writer, "r" of reader, "c" of creating, "t" of truncating, "e" of no locking, and "f"
-   of non-blocking lock.  The default mode is relevant to "wc".  "opts" can contains "l" of large
-   option, "d" of Deflate option, "b" of BZIP2 option, and "t" of TCBS option.  For example,
-   "casket.tch#bnum=1000000#opts=ld" means that the name of the database file is "casket.tch",
-   and the bucket number is 1000000, and the options are large and Deflate.
-   If successful, the return value is true, else, it is false. */
+   If its suffix is ".tct", the database will be a table database.  Otherwise, this function
+   fails.  Tuning parameters can trail the name, separated by "#".  Each parameter is composed of
+   the name and the value, separated by "=".  On-memory hash database supports "bnum", "capnum",
+   and "capsiz".  On-memory tree database supports "capnum" and "capsiz".  Hash database supports
+   "mode", "bnum", "apow", "fpow", "opts", "rcnum", "xmsiz", and "dfunit".  B+ tree database
+   supports "mode", "lmemb", "nmemb", "bnum", "apow", "fpow", "opts", "lcnum", "ncnum", "xmsiz",
+   and "dfunit".  Fixed-length database supports "mode", "width", and "limsiz".  Table database
+   supports "mode", "bnum", "apow", "fpow", "opts", "rcnum", "lcnum", "ncnum", "xmsiz", "dfunit",
+   and "idx".
+   If successful, the return value is true, else, it is false.
+   The tuning parameter "capnum" specifies the capacity number of records.  "capsiz" specifies
+   the capacity size of using memory.  Records spilled the capacity are removed by the storing
+   order.  "mode" can contain "w" of writer, "r" of reader, "c" of creating, "t" of truncating,
+   "e" of no locking, and "f" of non-blocking lock.  The default mode is relevant to "wc".
+   "opts" can contains "l" of large option, "d" of Deflate option, "b" of BZIP2 option, and "t"
+   of TCBS option.  "idx" specifies the column name of an index and its type separated by ":".
+   For example, "casket.tch#bnum=1000000#opts=ld" means that the name of the database file is
+   "casket.tch", and the bucket number is 1000000, and the options are large and Deflate. */
 bool tcadbopen(TCADB *adb, const char *name);
 
 
@@ -269,8 +272,8 @@ char *tcadbiternext2(TCADB *adb);
    `psiz' specifies the size of the region of the prefix.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the corresponding keys.  This function does never fail
-   and return an empty list even if no key corresponds.
+   The return value is a list object of the corresponding keys.  This function does never fail.
+   It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -282,8 +285,8 @@ TCLIST *tcadbfwmkeys(TCADB *adb, const void *pbuf, int psiz, int max);
    `pstr' specifies the string of the prefix.
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
-   The return value is a list object of the corresponding keys.  This function does never fail
-   and return an empty list even if no key corresponds.
+   The return value is a list object of the corresponding keys.  This function does never fail.
+   It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -291,7 +294,7 @@ TCLIST *tcadbfwmkeys2(TCADB *adb, const char *pstr, int max);
 
 
 /* Add an integer to a record in an abstract database object.
-   `adb' specifies the abstract database object connected as a writer.
+   `adb' specifies the abstract database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
    `num' specifies the additional value.
@@ -302,11 +305,11 @@ int tcadbaddint(TCADB *adb, const void *kbuf, int ksiz, int num);
 
 
 /* Add a real number to a record in an abstract database object.
-   `adb' specifies the abstract database object connected as a writer.
+   `adb' specifies the abstract database object.
    `kbuf' specifies the pointer to the region of the key.
    `ksiz' specifies the size of the region of the key.
    `num' specifies the additional value.
-   If successful, the return value is the summation value, else, it is `NAN'.
+   If successful, the return value is the summation value, else, it is Not-a-Number.
    If the corresponding record exists, the value is treated as a real number and is added to.  If
    no record corresponds, a new record of the additional value is stored. */
 double tcadbadddouble(TCADB *adb, const void *kbuf, int ksiz, double num);
@@ -316,6 +319,16 @@ double tcadbadddouble(TCADB *adb, const void *kbuf, int ksiz, double num);
    `adb' specifies the abstract database object.
    If successful, the return value is true, else, it is false. */
 bool tcadbsync(TCADB *adb);
+
+
+/* Optimize the storage of an abstract database object.
+   `adb' specifies the abstract database object.
+   `params' specifies the string of the tuning parameters, which works as with the tuning
+   of parameters the function `tcadbopen'.  If it is `NULL', it is not used.
+   If successful, the return value is true, else, it is false.
+   This function is useful to reduce the size of the database storage with data fragmentation by
+   successive updating. */
+bool tcadboptimize(TCADB *adb, const char *params);
 
 
 /* Remove all records of an abstract database object.
@@ -336,6 +349,40 @@ bool tcadbvanish(TCADB *adb);
 bool tcadbcopy(TCADB *adb, const char *path);
 
 
+/* Begin the transaction of an abstract database object.
+   `adb' specifies the abstract database object.
+   If successful, the return value is true, else, it is false.
+   The database is locked by the thread while the transaction so that only one transaction can be
+   activated with a database object at the same time.  Thus, the serializable isolation level is
+   assumed if every database operation is performed in the transaction.  All updated regions are
+   kept track of by write ahead logging while the transaction.  If the database is closed during
+   transaction, the transaction is aborted implicitly. */
+bool tcadbtranbegin(TCADB *adb);
+
+
+/* Commit the transaction of an abstract database object.
+   `adb' specifies the abstract database object.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is fixed when it is committed successfully. */
+bool tcadbtrancommit(TCADB *adb);
+
+
+/* Abort the transaction of an abstract database object.
+   `adb' specifies the abstract database object.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is discarded when it is aborted.  The state of the database is
+   rollbacked to before transaction. */
+bool tcadbtranabort(TCADB *adb);
+
+
+/* Get the file path of an abstract database object.
+   `adb' specifies the abstract database object.
+   The return value is the path of the database file or `NULL' if the object does not connect to
+   any database.  "*" stands for on-memory hash database.  "+" stands for on-memory tree
+   database. */
+const char *tcadbpath(TCADB *adb);
+
+
 /* Get the number of records of an abstract database object.
    `adb' specifies the abstract database object.
    The return value is the number of records or 0 if the object does not connect to any database
@@ -352,14 +399,18 @@ uint64_t tcadbsize(TCADB *adb);
 
 /* Call a versatile function for miscellaneous operations of an abstract database object.
    `adb' specifies the abstract database object.
-   `name' specifies the name of the function.
+   `name' specifies the name of the function.  All databases support "put", "out", "get",
+   "putlist", "outlist", "getlist", and "getpart".  "put" is to store a record.  It receives a
+   key and a value, and returns an empty list.  "out" is to remove a record.  It receives a key,
+   and returns an empty list.  "get" is to retrieve a record.  It receives a key, and returns a
+   list of the values.  "putlist" is to store records.  It receives keys and values one after the
+   other, and returns an empty list.  "outlist" is to remove records.  It receives keys, and
+   returns an empty list.  "getlist" is to retrieve records.  It receives keys, and returns keys
+   and values of corresponding records one after the other.  "getpart" is to retrieve the partial
+   value of a record.  It receives a key, the offset of the region, and the length of the region.
    `args' specifies a list object containing arguments.
    If successful, the return value is a list object of the result.  `NULL' is returned on failure.
-   All databases support "putlist", "outlist", and "getlist".  "putlist" is to store records.  It
-   receives keys and values one after the other, and returns an empty list.  "outlist" is to
-   remove records.  It receives keys, and returns an empty list.  "getlist" is to retrieve
-   records.  It receives keys, and returns keys and values of corresponding records one after the
-   other.  Because the object of the return value is created with the function `tclistnew', it
+   Because the object of the return value is created with the function `tclistnew', it
    should be deleted with the function `tclistdel' when it is no longer in use. */
 TCLIST *tcadbmisc(TCADB *adb, const char *name, const TCLIST *args);
 
@@ -370,11 +421,68 @@ TCLIST *tcadbmisc(TCADB *adb, const char *name, const TCLIST *args);
  *************************************************************************************************/
 
 
+typedef struct {                         /* type of structure for a extra database skeleton */
+  void *opq;                             /* opaque pointer */
+  void (*del)(void *);                   /* destructor */
+  bool (*open)(void *, const char *);
+  bool (*close)(void *);
+  bool (*put)(void *, const void *, int, const void *, int);
+  bool (*putkeep)(void *, const void *, int, const void *, int);
+  bool (*putcat)(void *, const void *, int, const void *, int);
+  bool (*out)(void *, const void *, int);
+  void *(*get)(void *, const void *, int, int *);
+  int (*vsiz)(void *, const void *, int);
+  bool (*iterinit)(void *);
+  void *(*iternext)(void *, int *);
+  TCLIST *(*fwmkeys)(void *, const void *, int, int);
+  int (*addint)(void *, const void *, int, int);
+  double (*adddouble)(void *, const void *, int, double);
+  bool (*sync)(void *);
+  bool (*optimize)(void *, const char *);
+  bool (*vanish)(void *);
+  bool (*copy)(void *, const char *);
+  bool (*tranbegin)(void *);
+  bool (*trancommit)(void *);
+  bool (*tranabort)(void *);
+  const char *(*path)(void *);
+  uint64_t (*rnum)(void *);
+  uint64_t (*size)(void *);
+  TCLIST *(*misc)(void *, const char *, const TCLIST *);
+  bool (*putproc)(void *, const void *, int, const void *, int, TCPDPROC, void *);
+  bool (*foreach)(void *, TCITER, void *);
+} ADBSKEL;
+
+/* type of the pointer to a mapping function.
+   `map' specifies the pointer to the destination manager.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   `op' specifies the pointer to the optional opaque object.
+   The return value is true to continue iteration or false to stop iteration. */
+typedef bool (*ADBMAPPROC)(void *map, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
+                           void *op);
+
+
+/* Set an extra database sleleton to an abstract database object.
+   `adb' specifies the abstract database object.
+   `skel' specifies the extra database skeleton.
+   If successful, the return value is true, else, it is false. */
+bool tcadbsetskel(TCADB *adb, ADBSKEL *skel);
+
+
+/* Set the multiple database skeleton to an abstract database object.
+   `adb' specifies the abstract database object.
+   `num' specifies the number of inner databases.
+   If successful, the return value is true, else, it is false. */
+bool tcadbsetskelmulti(TCADB *adb, int num);
+
+
 /* Get the open mode of an abstract database object.
    `adb' specifies the abstract database object.
    The return value is `ADBOVOID' for not opened database, `ADBOMDB' for on-memory hash database,
   `ADBONDB' for on-memory tree database, `ADBOHDB' for hash database, `ADBOBDB' for B+ tree
-  database, `ADBOFDB' for fixed-length database. */
+  database, `ADBOFDB' for fixed-length database, `ADBOTDB' for table database. */
 int tcadbomode(TCADB *adb);
 
 
@@ -385,13 +493,51 @@ int tcadbomode(TCADB *adb);
 void *tcadbreveal(TCADB *adb);
 
 
+/* Store a record into an abstract database object with a duplication handler.
+   `adb' specifies the abstract database object.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   `proc' specifies the pointer to the callback function to process duplication.
+   `op' specifies an arbitrary pointer to be given as a parameter of the callback function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false.
+   This function does not work for the table database. */
+bool tcadbputproc(TCADB *adb, const void *kbuf, int ksiz, const void *vbuf, int vsiz,
+                  TCPDPROC proc, void *op);
+
+
 /* Process each record atomically of an abstract database object.
    `adb' specifies the abstract database object.
-   `func' specifies the pointer to the iterator function called for each record.
+   `iter' specifies the pointer to the iterator function called for each record.
    `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
    it is not needed, `NULL' can be specified.
    If successful, the return value is true, else, it is false. */
 bool tcadbforeach(TCADB *adb, TCITER iter, void *op);
+
+
+/* Map records of an abstract database object into another B+ tree database.
+   `adb' specifies the abstract database object.
+   `keys' specifies a list object of the keys of the target records.  If it is `NULL', every
+   record is processed.
+   `bdb' specifies the B+ tree database object into which records emitted by the mapping function
+   are stored.
+   `proc' specifies the pointer to the mapping function called for each record.
+   `op' specifies specifies the pointer to the optional opaque object for the mapping function.
+   `csiz' specifies the size of the cache to sort emitted records.  If it is negative, the
+   default size is specified.  The default size is 268435456.
+   If successful, the return value is true, else, it is false. */
+bool tcadbmapbdb(TCADB *adb, TCLIST *keys, TCBDB *bdb, ADBMAPPROC proc, void *op, int64_t csiz);
+
+
+/* Emit records generated by the mapping function into the result map.
+   `kbuf' specifies the pointer to the region of the key.
+   `ksiz' specifies the size of the region of the key.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   If successful, the return value is true, else, it is false. */
+bool tcadbmapbdbemit(void *map, const char *kbuf, int ksiz, const char *vbuf, int vsiz);
 
 
 

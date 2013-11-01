@@ -1,4 +1,4 @@
-.TH "TCHDB" 3 "2008-11-25" "Man Page" "Tokyo Cabinet"
+.TH "TCHDB" 3 "2009-10-13" "Man Page" "Tokyo Cabinet"
 
 .SH NAME
 tchdb \- the hash database API
@@ -26,7 +26,7 @@ To use the hash database API, include `\fBtcutil.h\fR', `\fBtchdb.h\fR', and rel
 .PP
 Objects whose type is pointer to `\fBTCHDB\fR' are used to handle hash databases.  A hash database object is created with the function `\fBtchdbnew\fR' and is deleted with the function `\fBtchdbdel\fR'.  To avoid memory leak, it is important to delete every object when it is no longer in use.
 .PP
-Before operations to store or retrieve records, it is necessary to open a database file and connect the hash database object to it.  The function `\fBtchdbopen\fR' is used to open a database file and the function `\fBtchdbclose\fR' is used to close the database file.  To avoid data missing or corruption, it is important to close every database file when it is no longer in use.
+Before operations to store or retrieve records, it is necessary to open a database file and connect the hash database object to it.  The function `\fBtchdbopen\fR' is used to open a database file and the function `\fBtchdbclose\fR' is used to close the database file.  To avoid data missing or corruption, it is important to close every database file when it is no longer in use.  It is forbidden for multible database objects in a process to open the same database at the same time.
 
 .SH API
 .PP
@@ -116,7 +116,7 @@ The function `tchdbtune' is used in order to set the tuning parameters of a hash
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the default value is specified.  The default value is 10 standing for 2^10=1024.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.
+`\fIopts\fR' specifies options by bitwise-or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -164,6 +164,25 @@ Note that the mapping parameters should be set before the database is opened.
 .RE
 .RE
 .PP
+The function `tchdbsetdfunit' is used in order to set the unit step number of auto defragmentation of a hash database object.
+.PP
+.RS
+.br
+\fBbool tchdbsetdfunit(TCHDB *\fIhdb\fB, int32_t \fIdfunit\fB);\fR
+.RS
+`\fIhdb\fR' specifies the hash database object which is not opened.
+.RE
+.RS
+`\fIdfunit\fR' specifie the unit step number.  If it is not more than 0, the auto defragmentation is disabled.  It is disabled by default.
+.RE
+.RS
+If successful, the return value is true, else, it is false.
+.RE
+.RS
+Note that the defragmentation parameters should be set before the database is opened.
+.RE
+.RE
+.PP
 The function `tchdbopen' is used in order to open a database file and connect a hash database object.
 .PP
 .RS
@@ -176,7 +195,7 @@ The function `tchdbopen' is used in order to open a database file and connect a 
 `\fIpath\fR' specifies the path of the database file.
 .RE
 .RS
-`\fIomode\fR' specifies the connection mode: `HDBOWRITER' as a writer, `HDBOREADER' as a reader.  If the mode is `HDBOWRITER', the following may be added by bitwise or: `HDBOCREAT', which means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new database regardless if one exists, `HDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by bitwise or: `HDBONOLCK', which means it opens the database file without file locking, or `HDBOLCKNB', which means locking is performed without blocking.
+`\fIomode\fR' specifies the connection mode: `HDBOWRITER' as a writer, `HDBOREADER' as a reader.  If the mode is `HDBOWRITER', the following may be added by bitwise-or: `HDBOCREAT', which means it creates a new database if not exist, `HDBOTRUNC', which means it creates a new database regardless if one exists, `HDBOTSYNC', which means every transaction synchronizes updated contents with the device.  Both of `HDBOREADER' and `HDBOWRITER' can be added to by bitwise-or: `HDBONOLCK', which means it opens the database file without file locking, or `HDBOLCKNB', which means locking is performed without blocking.
 .RE
 .RS
 If successful, the return value is true, else, it is false.
@@ -629,7 +648,7 @@ The function `tchdbfwmkeys' is used in order to get forward matching keys in a h
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
@@ -651,7 +670,7 @@ The function `tchdbfwmkeys2' is used in order to get forward matching string key
 `\fImax\fR' specifies the maximum number of keys to be fetched.  If it is negative, no limit is specified.
 .RE
 .RS
-The return value is a list object of the corresponding keys.  This function does never fail and return an empty list even if no key corresponds.
+The return value is a list object of the corresponding keys.  This function does never fail.  It returns an empty list even if no key corresponds.
 .RE
 .RS
 Because the object of the return value is created with the function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer in use.  Note that this function may be very slow because every key in the database is scanned.
@@ -701,7 +720,7 @@ The function `tchdbdbadddouble' is used in order to add a real number to a recor
 `\fInum\fR' specifies the additional value.
 .RE
 .RS
-If successful, the return value is the summation value, else, it is `NAN'.
+If successful, the return value is the summation value, else, it is Not-a-Number.
 .RE
 .RS
 If the corresponding record exists, the value is treated as a real number and is added to.  If no record corresponds, a new record of the additional value is stored.
@@ -742,7 +761,7 @@ The function `tchdboptimize' is used in order to optimize the file of a hash dat
 `\fIfpow\fR' specifies the maximum number of elements of the free block pool by power of 2.  If it is negative, the current setting is not changed.
 .RE
 .RS
-`\fIopts\fR' specifies options by bitwise or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
+`\fIopts\fR' specifies options by bitwise-or: `HDBTLARGE' specifies that the size of the database can be larger than 2GB by using 64\-bit bucket array, `HDBTDEFLATE' specifies that each record is compressed with Deflate encoding, `HDBTBZIP' specifies that each record is compressed with BZIP2 encoding, `HDBTTCBS' specifies that each record is compressed with TCBS encoding.  If it is `UINT8_MAX', the current setting is not changed.
 .RE
 .RS
 If successful, the return value is true, else, it is false.

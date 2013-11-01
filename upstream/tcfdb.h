@@ -27,12 +27,6 @@
 __TCFDB_CLINKAGEBEGIN
 
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <time.h>
-#include <limits.h>
-#include <math.h>
 #include <tcutil.h>
 
 
@@ -46,7 +40,10 @@ typedef struct {                         /* type of structure for a fixed-length
   void *mmtx;                            /* mutex for method */
   void *amtx;                            /* mutex for attribute */
   void *rmtxs;                           /* mutexes for records */
+  void *tmtx;                            /* mutex for transaction */
+  void *wmtx;                            /* mutex for write ahead logging */
   void *eckey;                           /* key for thread specific error code */
+  char *rpath;                           /* real path for locking */
   uint8_t type;                          /* database type */
   uint8_t flags;                         /* additional flags */
   uint32_t width;                        /* width of the value of each record */
@@ -68,6 +65,9 @@ typedef struct {                         /* type of structure for a fixed-length
   bool fatal;                            /* whether a fatal error occured */
   uint64_t inode;                        /* inode number */
   time_t mtime;                          /* modification time */
+  bool tran;                             /* whether in the transaction */
+  int walfd;                             /* file descriptor of write ahead logging */
+  uint64_t walend;                       /* end offset of write ahead logging */
   int dbgfd;                             /* file descriptor for debugging */
   int64_t cnt_writerec;                  /* tesing counter for record write times */
   int64_t cnt_readrec;                   /* tesing counter for record read times */
@@ -85,7 +85,8 @@ enum {                                   /* enumeration for open modes */
   FDBOCREAT = 1 << 2,                    /* writer creating */
   FDBOTRUNC = 1 << 3,                    /* writer truncating */
   FDBONOLCK = 1 << 4,                    /* open without locking */
-  FDBOLCKNB = 1 << 5                     /* lock without blocking */
+  FDBOLCKNB = 1 << 5,                    /* lock without blocking */
+  FDBOTSYNC = 1 << 6                     /* synchronize every transaction */
 };
 
 enum {                                   /* enumeration for ID constants */
@@ -133,7 +134,7 @@ int tcfdbecode(TCFDB *fdb);
    `fdb' specifies the fixed-length database object which is not opened.
    If successful, the return value is true, else, it is false.
    Note that the mutual exclusion control is needed if the object is shared by plural threads and
-   this function should should be called before the database is opened. */
+   this function should be called before the database is opened. */
 bool tcfdbsetmutex(TCFDB *fdb);
 
 
@@ -152,10 +153,11 @@ bool tcfdbtune(TCFDB *fdb, int32_t width, int64_t limsiz);
    `fdb' specifies the fixed-length database object which is not opened.
    `path' specifies the path of the database file.
    `omode' specifies the connection mode: `FDBOWRITER' as a writer, `FDBOREADER' as a reader.
-   If the mode is `FDBOWRITER', the following may be added by bitwise or: `FDBOCREAT', which
+   If the mode is `FDBOWRITER', the following may be added by bitwise-or: `FDBOCREAT', which
    means it creates a new database if not exist, `FDBOTRUNC', which means it creates a new
-   database regardless if one exists.  Both of `FDBOREADER' and `FDBOWRITER' can be added to by
-   bitwise or: `FDBONOLCK', which means it opens the database file without file locking, or
+   database regardless if one exists, `FDBOTSYNC', which means every transaction synchronizes
+   updated contents with the device.  Both of `FDBOREADER' and `FDBOWRITER' can be added to by
+   bitwise-or: `FDBONOLCK', which means it opens the database file without file locking, or
    `FDBOLCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
 bool tcfdbopen(TCFDB *fdb, const char *path, int omode);
@@ -477,7 +479,7 @@ char *tcfdbiternext3(TCFDB *fdb);
    `np' specifies the pointer to the variable into which the number of elements of the return
    value is assigned.
    If successful, the return value is the pointer to an array of ID numbers of the corresponding
-   records.  `NULL' is returned on failure.  This function does never fail and return an empty
+   records.  `NULL' is returned on failure.  This function does never fail.  It returns an empty
    array even if no key corresponds.
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
@@ -495,7 +497,7 @@ uint64_t *tcfdbrange(TCFDB *fdb, int64_t lower, int64_t upper, int max, int *np)
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
    The return value is a list object of the corresponding decimal keys.  This function does never
-   fail and return an empty list even if no key corresponds.
+   fail.  It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -511,7 +513,7 @@ TCLIST *tcfdbrange2(TCFDB *fdb, const void *lbuf, int lsiz, const void *ubuf, in
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
    The return value is a list object of the corresponding decimal keys.  This function does never
-   fail and return an empty list even if no key corresponds.
+   fail.  It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -525,7 +527,7 @@ TCLIST *tcfdbrange3(TCFDB *fdb, const char *lstr, const char *ustr, int max);
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
    The return value is a list object of the corresponding decimal keys.  This function does never
-   fail and return an empty list even if no key corresponds.
+   fail.  It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -538,7 +540,7 @@ TCLIST *tcfdbrange4(TCFDB *fdb, const void *ibuf, int isiz, int max);
    `max' specifies the maximum number of keys to be fetched.  If it is negative, no limit is
    specified.
    The return value is a list object of the corresponding decimal keys.  This function does never
-   fail and return an empty list even if no key corresponds.
+   fail.  It returns an empty list even if no key corresponds.
    Because the object of the return value is created with the function `tclistnew', it should be
    deleted with the function `tclistdel' when it is no longer in use.  Note that this function
    may be very slow because every key in the database is scanned. */
@@ -567,7 +569,7 @@ int tcfdbaddint(TCFDB *fdb, int64_t id, int num);
    number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than
    the maximum ID number of existing records is specified.
    `num' specifies the additional value.
-   If successful, the return value is the summation value, else, it is `NAN'.
+   If successful, the return value is the summation value, else, it is Not-a-Number.
    If the corresponding record exists, the value is treated as a real number and is added to.  If
    no record corresponds, a new record of the additional value is stored. */
 double tcfdbadddouble(TCFDB *fdb, int64_t id, double num);
@@ -606,6 +608,32 @@ bool tcfdbvanish(TCFDB *fdb);
    executing operation is in progress.  So, this function is useful to create a backup file of
    the database file. */
 bool tcfdbcopy(TCFDB *fdb, const char *path);
+
+
+/* Begin the transaction of a fixed-length database object.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   The database is locked by the thread while the transaction so that only one transaction can be
+   activated with a database object at the same time.  Thus, the serializable isolation level is
+   assumed if every database operation is performed in the transaction.  All updated regions are
+   kept track of by write ahead logging while the transaction.  If the database is closed during
+   transaction, the transaction is aborted implicitly. */
+bool tcfdbtranbegin(TCFDB *fdb);
+
+
+/* Commit the transaction of a fixed-length database object.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is fixed when it is committed successfully. */
+bool tcfdbtrancommit(TCFDB *fdb);
+
+
+/* Abort the transaction of a fixed-length database object.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   If successful, the return value is true, else, it is false.
+   Update in the transaction is discarded when it is aborted.  The state of the database is
+   rollbacked to before transaction. */
+bool tcfdbtranabort(TCFDB *fdb);
 
 
 /* Get the file path of a fixed-length database object.
@@ -656,6 +684,12 @@ void tcfdbsetdbgfd(TCFDB *fdb, int fd);
 int tcfdbdbgfd(TCFDB *fdb);
 
 
+/* Check whether mutual exclusion control is set to a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   If mutual exclusion control is set, it is true, else it is false. */
+bool tcfdbhasmutex(TCFDB *fdb);
+
+
 /* Synchronize updating contents on memory of a fixed-length database object.
    `fdb' specifies the fixed-length database object connected as a writer.
    `phys' specifies whether to synchronize physically.
@@ -681,7 +715,7 @@ uint64_t tcfdbmax(TCFDB *fdb);
    `fdb' specifies the fixed-length database object.
    The return value is the width of the value of each record or 0 if the object does not connect
    to any database file. */
-uint64_t tcfdbwidth(TCFDB *fdb);
+uint32_t tcfdbwidth(TCFDB *fdb);
 
 
 /* Get the limit file size of a fixed-length database object.
@@ -700,15 +734,15 @@ uint64_t tcfdblimid(TCFDB *fdb);
 
 /* Get the inode number of the database file of a fixed-length database object.
    `fdb' specifies the fixed-length database object.
-   The return value is the inode number of the database file or 0 the object does not connect to
-   any database file. */
+   The return value is the inode number of the database file or 0 if the object does not connect
+   to any database file. */
 uint64_t tcfdbinode(TCFDB *fdb);
 
 
 /* Get the modification time of the database file of a fixed-length database object.
    `fdb' specifies the fixed-length database object.
-   The return value is the inode number of the database file or 0 the object does not connect to
-   any database file. */
+   The return value is the inode number of the database file or 0 if the object does not connect
+   to any database file. */
 time_t tcfdbmtime(TCFDB *fdb);
 
 
@@ -736,12 +770,76 @@ uint8_t tcfdbflags(TCFDB *fdb);
 char *tcfdbopaque(TCFDB *fdb);
 
 
+/* Store a record into a fixed-length database object with a duplication handler.
+   `fdb' specifies the fixed-length database object connected as a writer.
+   `id' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID
+   number of existing records is specified.  If it is `FDBIDPREV', the number less by one than
+   the minimum ID number of existing records is specified.  If it is `FDBIDMAX', the maximum ID
+   number of existing records is specified.  If it is `FDBIDNEXT', the number greater by one than
+   the maximum ID number of existing records is specified.
+   `vbuf' specifies the pointer to the region of the value.  `NULL' means that record addition is
+   ommited if there is no corresponding record.
+   `vsiz' specifies the size of the region of the value.  If the size of the value is greater
+   than the width tuning parameter of the database, the size is cut down to the width.
+   `proc' specifies the pointer to the callback function to process duplication.  It receives
+   four parameters.  The first parameter is the pointer to the region of the value.  The second
+   parameter is the size of the region of the value.  The third parameter is the pointer to the
+   variable into which the size of the region of the return value is assigned.  The fourth
+   parameter is the pointer to the optional opaque object.  It returns the pointer to the result
+   object allocated with `malloc'.  It is released by the caller.  If it is `NULL', the record is
+   not modified.  If it is `(void *)-1', the record is removed.
+   `op' specifies an arbitrary pointer to be given as a parameter of the callback function.  If
+   it is not needed, `NULL' can be specified.
+   If successful, the return value is true, else, it is false.
+   Note that the callback function can not perform any database operation because the function
+   is called in the critical section guarded by the same locks of database operations. */
+bool tcfdbputproc(TCFDB *fdb, int64_t id, const void *vbuf, int vsiz, TCPDPROC proc, void *op);
+
+
+/* Move the iterator to the record corresponding a key of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.  It should be more than 0.  If it is `FDBIDMIN', the minimum ID
+   number of existing records is specified.  If it is `FDBIDMAX', the maximum ID number of
+   existing records is specified.
+   If successful, the return value is true, else, it is false.  False is returned if there is
+   no record corresponding the condition. */
+bool tcfdbiterinit2(TCFDB *fdb, int64_t id);
+
+
+/* Move the iterator to the decimal record of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `kbuf' specifies the pointer to the region of the decimal key.  It should be more than 0.  If
+   it is "min", the minimum ID number of existing records is specified.  If it is "max", the
+   maximum ID number of existing records is specified.
+   `ksiz' specifies the size of the region of the key.
+   If successful, the return value is true, else, it is false.  False is returned if there is
+   no record corresponding the condition. */
+bool tcfdbiterinit3(TCFDB *fdb, const void *kbuf, int ksiz);
+
+
+/* Move the iterator to the decimal string record of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `kstr' specifies the string of the decimal key.  It should be more than 0.  If it is "min",
+   the minimum ID number of existing records is specified.  If it is "max", the maximum ID number
+   of existing records is specified.
+   If successful, the return value is true, else, it is false.  False is returned if there is
+   no record corresponding the condition. */
+bool tcfdbiterinit4(TCFDB *fdb, const char *kstr);
+
+
 /* Process each record atomically of a fixed-length database object.
    `fdb' specifies the fixed-length database object.
-   `func' specifies the pointer to the iterator function called for each record.
+   `iter' specifies the pointer to the iterator function called for each record.  It receives
+   five parameters.  The first parameter is the pointer to the region of the key.  The second
+   parameter is the size of the region of the key.  The third parameter is the pointer to the
+   region of the value.  The fourth parameter is the size of the region of the value.  The fifth
+   parameter is the pointer to the optional opaque object.  It returns true to continue iteration
+   or false to stop iteration.
    `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.  If
    it is not needed, `NULL' can be specified.
-   If successful, the return value is true, else, it is false. */
+   If successful, the return value is true, else, it is false.
+   Note that the callback function can not perform any database operation because the function
+   is called in the critical section guarded by the same locks of database operations. */
 bool tcfdbforeach(TCFDB *fdb, TCITER iter, void *op);
 
 

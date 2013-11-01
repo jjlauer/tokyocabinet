@@ -17,7 +17,7 @@
 #include <tcutil.h>
 #include "myconf.h"
 
-#define RECBUFSIZ      32                // buffer for records
+#define RECBUFSIZ      48                // buffer for records
 
 typedef struct {                         // type of structure for combo thread
   TCMDB *mdb;
@@ -39,6 +39,7 @@ typedef struct {                         // type of structure for typical thread
 
 /* global variables */
 const char *g_progname;                  // program name
+unsigned int g_randseed;                 // random seed
 
 
 /* function prototypes */
@@ -46,7 +47,7 @@ int main(int argc, char **argv);
 static void usage(void);
 static void iprintf(const char *format, ...);
 static void iputchar(int c);
-static void eprint(const char *func);
+static void eprint(int line, const char *func);
 static int myrand(int range);
 static int myrandnd(int range);
 static int runcombo(int argc, char **argv);
@@ -62,7 +63,9 @@ static void *threadtypical(void *targ);
 /* main routine */
 int main(int argc, char **argv){
   g_progname = argv[0];
-  srand((unsigned int)(tctime() * 1000) % UINT_MAX);
+  const char *ebuf = getenv("TCRNDSEED");
+  g_randseed = ebuf ? tcatoix(ebuf) : tctime() * 1000;
+  srand(g_randseed);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "combo")){
@@ -71,6 +74,13 @@ int main(int argc, char **argv){
     rv = runtypical(argc, argv);
   } else {
     usage();
+  }
+  if(rv != 0){
+    printf("FAILED: TCRNDSEED=%u PID=%d", g_randseed, (int)getpid());
+    for(int i = 0; i < argc; i++){
+      printf(" %s", argv[i]);
+    }
+    printf("\n\n");
   }
   return rv;
 }
@@ -106,14 +116,18 @@ static void iputchar(int c){
 
 
 /* print error message of on-memory database */
-static void eprint(const char *func){
-  fprintf(stderr, "%s: %s: error\n", g_progname, func);
+static void eprint(int line, const char *func){
+  fprintf(stderr, "%s: %d: %s: error\n", g_progname, line, func);
 }
 
 
 /* get a random number */
 static int myrand(int range){
-  return (int)((double)range * rand() / (RAND_MAX + 1.0));
+  if(range < 2) return 0;
+  int high = (unsigned int)rand() >> 4;
+  int low = range * (rand() / (RAND_MAX + 1.0));
+  low &= (unsigned int)INT_MAX >> 4;
+  return (high + low) % range;
 }
 
 
@@ -151,10 +165,10 @@ static int runcombo(int argc, char **argv){
     }
   }
   if(!tstr || !rstr) usage();
-  int tnum = tcatoi(tstr);
-  int rnum = tcatoi(rstr);
+  int tnum = tcatoix(tstr);
+  int rnum = tcatoix(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
+  int bnum = bstr ? tcatoix(bstr) : -1;
   int rv = proccombo(tnum, rnum, bnum, tr, rnd);
   return rv;
 }
@@ -176,7 +190,7 @@ static int runtypical(int argc, char **argv){
         nc = true;
       } else if(!strcmp(argv[i], "-rr")){
         if(++i >= argc) usage();
-        rratio = tcatoi(argv[i]);
+        rratio = tcatoix(argv[i]);
       } else {
         usage();
       }
@@ -191,10 +205,10 @@ static int runtypical(int argc, char **argv){
     }
   }
   if(!tstr || !rstr) usage();
-  int tnum = tcatoi(tstr);
-  int rnum = tcatoi(rstr);
+  int tnum = tcatoix(tstr);
+  int rnum = tcatoix(rstr);
   if(tnum < 1 || rnum < 1) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
+  int bnum = bstr ? tcatoix(bstr) : -1;
   int rv = proctypical(tnum, rnum, bnum, tr, nc, rratio);
   return rv;
 }
@@ -202,8 +216,8 @@ static int runtypical(int argc, char **argv){
 
 /* perform combo command */
 static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
-  iprintf("<Combination Test>\n  tnum=%d  rnum=%d  bnum=%d  tr=%d  rnd=%d\n\n",
-          tnum, rnum, bnum, tr, rnd);
+  iprintf("<Combination Test>\n  seed=%u  tnum=%d  rnum=%d  bnum=%d  tr=%d  rnd=%d\n\n",
+          g_randseed, tnum, rnum, bnum, tr, rnd);
   bool err = false;
   double stime = tctime();
   TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
@@ -225,7 +239,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadwrite, targs + i) != 0){
-        eprint("pthread_create");
+        eprint(__LINE__, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -234,7 +248,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint("pthread_join");
+        eprint(__LINE__, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
@@ -256,7 +270,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadread, targs + i) != 0){
-        eprint("pthread_create");
+        eprint(__LINE__, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -265,7 +279,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint("pthread_join");
+        eprint(__LINE__, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
@@ -287,7 +301,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       targs[i].rnd = rnd;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadremove, targs + i) != 0){
-        eprint("pthread_create");
+        eprint(__LINE__, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -296,7 +310,7 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint("pthread_join");
+        eprint(__LINE__, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
@@ -320,8 +334,8 @@ static int proccombo(int tnum, int rnum, int bnum, bool tr, bool rnd){
 
 /* perform typical command */
 static int proctypical(int tnum, int rnum, int bnum, bool tr, bool nc, int rratio){
-  iprintf("<Typical Access Test>\n  tnum=%d  rnum=%d  bnum=%d  tr=%d  nc=%d  rratio=%d\n\n",
-          tnum, rnum, bnum, tr, nc, rratio);
+  iprintf("<Typical Access Test>\n  seed=%u  tnum=%d  rnum=%d  bnum=%d  tr=%d  nc=%d"
+          "  rratio=%d\n\n", g_randseed, tnum, rnum, bnum, tr, nc, rratio);
   bool err = false;
   double stime = tctime();
   TCMDB *mdb = (bnum > 0) ? tcmdbnew2(bnum) : tcmdbnew();
@@ -345,7 +359,7 @@ static int proctypical(int tnum, int rnum, int bnum, bool tr, bool nc, int rrati
       targs[i].rratio= rratio;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadtypical, targs + i) != 0){
-        eprint("pthread_create");
+        eprint(__LINE__, "pthread_create");
         targs[i].id = -1;
         err = true;
       }
@@ -354,7 +368,7 @@ static int proctypical(int tnum, int rnum, int bnum, bool tr, bool nc, int rrati
       if(targs[i].id == -1) continue;
       void *rv;
       if(pthread_join(threads[i], &rv) != 0){
-        eprint("pthread_join");
+        eprint(__LINE__, "pthread_join");
         err = true;
       } else if(rv){
         err = true;
@@ -517,14 +531,14 @@ static void *threadtypical(void *targ){
           int msiz;
           const char *mbuf = tcmapget(map, buf, len, &msiz);
           if(msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
-            eprint("(validation)");
+            eprint(__LINE__, "(validation)");
             err = true;
           }
         }
         tcfree(vbuf);
       } else {
         if(map && tcmapget(map, buf, len, &vsiz)){
-          eprint("(validation)");
+          eprint(__LINE__, "(validation)");
           err = true;
         }
       }
@@ -545,12 +559,12 @@ static void *threadtypical(void *targ){
         int msiz;
         const char *mbuf = tcmapget(map, kbuf, ksiz, &msiz);
         if(!mbuf || msiz != vsiz || memcmp(mbuf, vbuf, vsiz)){
-          eprint("(validation)");
+          eprint(__LINE__, "(validation)");
           err = true;
         }
         tcfree(vbuf);
       } else {
-        eprint("(validation)");
+        eprint(__LINE__, "(validation)");
         err = true;
       }
     }

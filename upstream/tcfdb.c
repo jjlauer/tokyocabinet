@@ -34,54 +34,61 @@
 #define FDBOPAQUEOFF   128               // offset of the region for the opaque field
 
 #define FDBDEFWIDTH    255               // default value width
-#define FDBDEFLIMSIZ   (256*(1LL<<20))   // default limit size
+#define FDBDEFLIMSIZ   (256LL<<20)       // default limit size
 #define FDBRMTXNUM     127               // number of record mutexes
 #define FDBTRUNCALW    256               // number of record for truncate allowance
 #define FDBIDARYUNIT   2048              // size of ID array allocation unit
+#define FDBWALSUFFIX   "wal"             // suffix of write ahead logging file
 
 enum {                                   // enumeration for duplication behavior
   FDBPDOVER,                             // overwrite an existing value
   FDBPDKEEP,                             // keep the existing value
   FDBPDCAT,                              // concatenate values
   FDBPDADDINT,                           // add an integer
-  FDBPDADDDBL                            // add a real number
+  FDBPDADDDBL,                           // add a real number
+  FDBPDPROC                              // process by a callback function
 };
+
+typedef struct {                         // type of structure for a duplication callback
+  TCPDPROC proc;                         // function pointer
+  void *op;                              // opaque pointer
+} FDBPDPROCOP;
 
 
 /* private macros */
-#define FDBLOCKMETHOD(TC_fdb, TC_wr) \
+#define FDBLOCKMETHOD(TC_fdb, TC_wr)                            \
   ((TC_fdb)->mmtx ? tcfdblockmethod((TC_fdb), (TC_wr)) : true)
-#define FDBUNLOCKMETHOD(TC_fdb) \
+#define FDBUNLOCKMETHOD(TC_fdb)                         \
   ((TC_fdb)->mmtx ? tcfdbunlockmethod(TC_fdb) : true)
-#define FDBLOCKATTR(TC_fdb) \
+#define FDBLOCKATTR(TC_fdb)                             \
   ((TC_fdb)->mmtx ? tcfdblockattr(TC_fdb) : true)
-#define FDBUNLOCKATTR(TC_fdb) \
+#define FDBUNLOCKATTR(TC_fdb)                           \
   ((TC_fdb)->mmtx ? tcfdbunlockattr(TC_fdb) : true)
-#define FDBLOCKRECORD(TC_fdb, TC_wr, TC_id) \
+#define FDBLOCKRECORD(TC_fdb, TC_wr, TC_id)                             \
   ((TC_fdb)->mmtx ? tcfdblockrecord((TC_fdb), (TC_wr), (TC_id)) : true)
-#define FDBUNLOCKRECORD(TC_fdb, TC_id) \
+#define FDBUNLOCKRECORD(TC_fdb, TC_id)                                  \
   ((TC_fdb)->mmtx ? tcfdbunlockrecord((TC_fdb), (TC_id)) : true)
-#define FDBLOCKALLRECORDS(TC_fdb, TC_wr) \
+#define FDBLOCKALLRECORDS(TC_fdb, TC_wr)                                \
   ((TC_fdb)->mmtx ? tcfdblockallrecords((TC_fdb), (TC_wr)) : true)
-#define FDBUNLOCKALLRECORDS(TC_fdb) \
+#define FDBUNLOCKALLRECORDS(TC_fdb)                             \
   ((TC_fdb)->mmtx ? tcfdbunlockallrecords(TC_fdb) : true)
-#define FDBTHREADYIELD(TC_fdb) \
-  do { if((TC_fdb)->mmtx) pthread_yield(); } while(false)
+#define FDBLOCKWAL(TC_fdb)                              \
+  ((TC_fdb)->mmtx ? tcfdblockwal(TC_fdb) : true)
+#define FDBUNLOCKWAL(TC_fdb)                            \
+  ((TC_fdb)->mmtx ? tcfdbunlockwal(TC_fdb) : true)
+#define FDBTHREADYIELD(TC_fdb)                          \
+  do { if((TC_fdb)->mmtx) sched_yield(); } while(false)
 
 
 /* private function prototypes */
-static void tcdumpmeta(TCFDB *fdb, char *hbuf);
-static void tcloadmeta(TCFDB *fdb, const char *hbuf);
+static void tcfdbdumpmeta(TCFDB *fdb, char *hbuf);
+static void tcfdbloadmeta(TCFDB *fdb, const char *hbuf);
 static void tcfdbclear(TCFDB *fdb);
 static void tcfdbsetflag(TCFDB *fdb, int flag, bool sign);
-static bool tcfdblockmethod(TCFDB *fdb, bool wr);
-static bool tcfdbunlockmethod(TCFDB *fdb);
-static bool tcfdblockattr(TCFDB *fdb);
-static bool tcfdbunlockattr(TCFDB *fdb);
-static bool tcfdblockrecord(TCFDB *fdb, bool wr, uint64_t id);
-static bool tcfdbunlockrecord(TCFDB *fdb, uint64_t id);
-static bool tcfdblockallrecords(TCFDB *fdb, bool wr);
-static bool tcfdbunlockallrecords(TCFDB *fdb);
+static bool tcfdbwalinit(TCFDB *fdb);
+static bool tcfdbwalwrite(TCFDB *fdb, uint64_t off, int64_t size);
+static int tcfdbwalrestore(TCFDB *fdb, const char *path);
+static bool tcfdbwalremove(TCFDB *fdb, const char *path);
 static bool tcfdbopenimpl(TCFDB *fdb, const char *path, int omode);
 static bool tcfdbcloseimpl(TCFDB *fdb);
 static int64_t tcfdbprevid(TCFDB *fdb, int64_t id);
@@ -95,7 +102,18 @@ static uint64_t *tcfdbrangeimpl(TCFDB *fdb, int64_t lower, int64_t upper, int ma
 static bool tcfdboptimizeimpl(TCFDB *fdb, int32_t width, int64_t limsiz);
 static bool tcfdbvanishimpl(TCFDB *fdb);
 static bool tcfdbcopyimpl(TCFDB *fdb, const char *path);
+static bool tcfdbiterjumpimpl(TCFDB *fdb, int64_t id);
 static bool tcfdbforeachimpl(TCFDB *fdb, TCITER iter, void *op);
+static bool tcfdblockmethod(TCFDB *fdb, bool wr);
+static bool tcfdbunlockmethod(TCFDB *fdb);
+static bool tcfdblockattr(TCFDB *fdb);
+static bool tcfdbunlockattr(TCFDB *fdb);
+static bool tcfdblockrecord(TCFDB *fdb, bool wr, uint64_t id);
+static bool tcfdbunlockrecord(TCFDB *fdb, uint64_t id);
+static bool tcfdblockallrecords(TCFDB *fdb, bool wr);
+static bool tcfdbunlockallrecords(TCFDB *fdb);
+static bool tcfdblockwal(TCFDB *fdb);
+static bool tcfdbunlockwal(TCFDB *fdb);
 
 
 /* debugging function prototypes */
@@ -129,12 +147,16 @@ void tcfdbdel(TCFDB *fdb){
   if(fdb->fd >= 0) tcfdbclose(fdb);
   if(fdb->mmtx){
     pthread_key_delete(*(pthread_key_t *)fdb->eckey);
+    pthread_mutex_destroy(fdb->wmtx);
+    pthread_mutex_destroy(fdb->tmtx);
     for(int i = FDBRMTXNUM - 1; i >= 0; i--){
       pthread_rwlock_destroy((pthread_rwlock_t *)fdb->rmtxs + i);
     }
     pthread_mutex_destroy(fdb->amtx);
     pthread_rwlock_destroy(fdb->mmtx);
     TCFREE(fdb->eckey);
+    TCFREE(fdb->wmtx);
+    TCFREE(fdb->tmtx);
     TCFREE(fdb->rmtxs);
     TCFREE(fdb->amtx);
     TCFREE(fdb->mmtx);
@@ -162,6 +184,8 @@ bool tcfdbsetmutex(TCFDB *fdb){
   TCMALLOC(fdb->mmtx, sizeof(pthread_rwlock_t));
   TCMALLOC(fdb->amtx, sizeof(pthread_mutex_t));
   TCMALLOC(fdb->rmtxs, sizeof(pthread_rwlock_t) * FDBRMTXNUM);
+  TCMALLOC(fdb->tmtx, sizeof(pthread_mutex_t));
+  TCMALLOC(fdb->wmtx, sizeof(pthread_mutex_t));
   TCMALLOC(fdb->eckey, sizeof(pthread_key_t));
   bool err = false;
   if(pthread_rwlock_init(fdb->mmtx, NULL) != 0) err = true;
@@ -169,13 +193,19 @@ bool tcfdbsetmutex(TCFDB *fdb){
   for(int i = 0; i < FDBRMTXNUM; i++){
     if(pthread_rwlock_init((pthread_rwlock_t *)fdb->rmtxs + i, NULL) != 0) err = true;
   }
+  if(pthread_mutex_init(fdb->tmtx, NULL) != 0) err = true;
+  if(pthread_mutex_init(fdb->wmtx, NULL) != 0) err = true;
   if(pthread_key_create(fdb->eckey, NULL) != 0) err = true;
   if(err){
     TCFREE(fdb->eckey);
+    TCFREE(fdb->wmtx);
+    TCFREE(fdb->tmtx);
     TCFREE(fdb->rmtxs);
     TCFREE(fdb->amtx);
     TCFREE(fdb->mmtx);
     fdb->eckey = NULL;
+    fdb->wmtx = NULL;
+    fdb->tmtx = NULL;
     fdb->rmtxs = NULL;
     fdb->amtx = NULL;
     fdb->mmtx = NULL;
@@ -210,7 +240,31 @@ bool tcfdbopen(TCFDB *fdb, const char *path, int omode){
     FDBUNLOCKMETHOD(fdb);
     return false;
   }
+  char *rpath = tcrealpath(path);
+  if(!rpath){
+    int ecode = TCEOPEN;
+    switch(errno){
+      case EACCES: ecode = TCENOPERM; break;
+      case ENOENT: ecode = TCENOFILE; break;
+      case ENOTDIR: ecode = TCENOFILE; break;
+    }
+    tcfdbsetecode(fdb, ecode, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  if(!tcpathlock(rpath)){
+    tcfdbsetecode(fdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    TCFREE(rpath);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
   bool rv = tcfdbopenimpl(fdb, path, omode);
+  if(rv){
+    fdb->rpath = rpath;
+  } else {
+    tcpathunlock(rpath);
+    TCFREE(rpath);
+  }
   FDBUNLOCKMETHOD(fdb);
   return rv;
 }
@@ -226,6 +280,9 @@ bool tcfdbclose(TCFDB *fdb){
     return false;
   }
   bool rv = tcfdbcloseimpl(fdb);
+  tcpathunlock(fdb->rpath);
+  TCFREE(fdb->rpath);
+  fdb->rpath = NULL;
   FDBUNLOCKMETHOD(fdb);
   return rv;
 }
@@ -799,7 +856,7 @@ double tcfdbadddouble(TCFDB *fdb, int64_t id, double num){
 bool tcfdbsync(TCFDB *fdb){
   assert(fdb);
   if(!FDBLOCKMETHOD(fdb, true)) return false;
-  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER)){
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || fdb->tran){
     tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
     FDBUNLOCKMETHOD(fdb);
     return false;
@@ -814,7 +871,7 @@ bool tcfdbsync(TCFDB *fdb){
 bool tcfdboptimize(TCFDB *fdb, int32_t width, int64_t limsiz){
   assert(fdb);
   if(!FDBLOCKMETHOD(fdb, true)) return false;
-  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER)){
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || fdb->tran){
     tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
     FDBUNLOCKMETHOD(fdb);
     return false;
@@ -830,7 +887,7 @@ bool tcfdboptimize(TCFDB *fdb, int32_t width, int64_t limsiz){
 bool tcfdbvanish(TCFDB *fdb){
   assert(fdb);
   if(!FDBLOCKMETHOD(fdb, true)) return false;
-  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER)){
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || fdb->tran){
     tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
     FDBUNLOCKMETHOD(fdb);
     return false;
@@ -846,7 +903,7 @@ bool tcfdbvanish(TCFDB *fdb){
 bool tcfdbcopy(TCFDB *fdb, const char *path){
   assert(fdb && path);
   if(!FDBLOCKMETHOD(fdb, false)) return false;
-  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER)){
+  if(fdb->fd < 0){
     tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
     FDBUNLOCKMETHOD(fdb);
     return false;
@@ -860,6 +917,108 @@ bool tcfdbcopy(TCFDB *fdb, const char *path){
   FDBUNLOCKALLRECORDS(fdb);
   FDBUNLOCKMETHOD(fdb);
   return rv;
+}
+
+
+/* Begin the transaction of a fixed-length database object. */
+bool tcfdbtranbegin(TCFDB *fdb){
+  assert(fdb);
+  for(double wsec = 1.0 / sysconf(_SC_CLK_TCK); true; wsec *= 2){
+    if(!FDBLOCKMETHOD(fdb, true)) return false;
+    if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || fdb->fatal){
+      tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+      FDBUNLOCKMETHOD(fdb);
+      return false;
+    }
+    if(!fdb->tran) break;
+    FDBUNLOCKMETHOD(fdb);
+    if(wsec > 1.0) wsec = 1.0;
+    tcsleep(wsec);
+  }
+  if(!tcfdbmemsync(fdb, false)){
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  if((fdb->omode & FDBOTSYNC) && fsync(fdb->fd) == -1){
+    tcfdbsetecode(fdb, TCESYNC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  if(fdb->walfd < 0){
+    char *tpath = tcsprintf("%s%c%s", fdb->path, MYEXTCHR, FDBWALSUFFIX);
+    int walfd = open(tpath, O_RDWR | O_CREAT | O_TRUNC, FDBFILEMODE);
+    TCFREE(tpath);
+    if(walfd < 0){
+      int ecode = TCEOPEN;
+      switch(errno){
+        case EACCES: ecode = TCENOPERM; break;
+        case ENOENT: ecode = TCENOFILE; break;
+        case ENOTDIR: ecode = TCENOFILE; break;
+      }
+      tcfdbsetecode(fdb, ecode, __FILE__, __LINE__, __func__);
+      FDBUNLOCKMETHOD(fdb);
+      return false;
+    }
+    fdb->walfd = walfd;
+  }
+  tcfdbsetflag(fdb, FDBFOPEN, false);
+  if(!tcfdbwalinit(fdb)){
+    tcfdbsetflag(fdb, FDBFOPEN, true);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  tcfdbsetflag(fdb, FDBFOPEN, true);
+  fdb->tran = true;
+  FDBUNLOCKMETHOD(fdb);
+  return true;
+}
+
+
+/* Commit the transaction of a fixed-length database object. */
+bool tcfdbtrancommit(TCFDB *fdb){
+  assert(fdb);
+  if(!FDBLOCKMETHOD(fdb, true)) return false;
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || fdb->fatal || !fdb->tran){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  bool err = false;
+  if(!tcfdbmemsync(fdb, fdb->omode & FDBOTSYNC)) err = true;
+  if(!err && ftruncate(fdb->walfd, 0) == -1){
+    tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  fdb->tran = false;
+  FDBUNLOCKMETHOD(fdb);
+  return !err;
+}
+
+
+/* Abort the transaction of a fixed-length database object. */
+bool tcfdbtranabort(TCFDB *fdb){
+  assert(fdb);
+  if(!FDBLOCKMETHOD(fdb, true)) return false;
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER) || !fdb->tran){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  bool err = false;
+  if(!tcfdbmemsync(fdb, false)) err = true;
+  if(!tcfdbwalrestore(fdb, fdb->path)) err = true;
+  char hbuf[FDBHEADSIZ];
+  if(lseek(fdb->fd, 0, SEEK_SET) == -1){
+    tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
+    err = false;
+  } else if(!tcread(fdb->fd, hbuf, FDBHEADSIZ)){
+    tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+    err = false;
+  } else {
+    tcfdbloadmeta(fdb, hbuf);
+  }
+  fdb->tran = false;
+  FDBUNLOCKMETHOD(fdb);
+  return !err;
 }
 
 
@@ -917,6 +1076,7 @@ uint64_t tcfdbfsiz(TCFDB *fdb){
 /* Set the error code of a fixed-length database object. */
 void tcfdbsetecode(TCFDB *fdb, int ecode, const char *filename, int line, const char *func){
   assert(fdb && filename && line >= 1 && func);
+  int myerrno = errno;
   if(!fdb->fatal){
     fdb->ecode = ecode;
     if(fdb->mmtx) pthread_setspecific(*(pthread_key_t *)fdb->eckey, (void *)(intptr_t)ecode);
@@ -925,11 +1085,13 @@ void tcfdbsetecode(TCFDB *fdb, int ecode, const char *filename, int line, const 
     fdb->fatal = true;
     if(fdb->fd >= 0 && (fdb->omode & FDBOWRITER)) tcfdbsetflag(fdb, FDBFFATAL, true);
   }
-  if(fdb->dbgfd >= 0){
+  if(fdb->dbgfd >= 0 && (fdb->dbgfd != UINT16_MAX || fdb->fatal)){
+    int dbgfd = (fdb->dbgfd == UINT16_MAX) ? 1 : fdb->dbgfd;
     char obuf[FDBIOBUFSIZ];
-    int osiz = sprintf(obuf, "ERROR:%s:%d:%s:%s:%d:%s\n", filename, line, func,
-                       fdb->path ? fdb->path : "-", ecode, tcfdberrmsg(ecode));
-    tcwrite(fdb->dbgfd, obuf, osiz);
+    int osiz = sprintf(obuf, "ERROR:%s:%d:%s:%s:%d:%s:%d:%s\n", filename, line, func,
+                       fdb->path ? fdb->path : "-", ecode, tcfdberrmsg(ecode),
+                       myerrno, strerror(myerrno));
+    tcwrite(dbgfd, obuf, osiz);
   }
 }
 
@@ -948,6 +1110,13 @@ int tcfdbdbgfd(TCFDB *fdb){
 }
 
 
+/* Check whether mutual exclusion control is set to a fixed-length database object. */
+bool tcfdbhasmutex(TCFDB *fdb){
+  assert(fdb);
+  return fdb->mmtx != NULL;
+}
+
+
 /* Synchronize updating contents on memory of a fixed-length database object. */
 bool tcfdbmemsync(TCFDB *fdb, bool phys){
   assert(fdb);
@@ -957,7 +1126,7 @@ bool tcfdbmemsync(TCFDB *fdb, bool phys){
   }
   bool err = false;
   char hbuf[FDBHEADSIZ];
-  tcdumpmeta(fdb, hbuf);
+  tcfdbdumpmeta(fdb, hbuf);
   memcpy(fdb->map, hbuf, FDBOPAQUEOFF);
   if(phys){
     if(msync(fdb->map, fdb->limsiz, MS_SYNC) == -1){
@@ -996,7 +1165,7 @@ uint64_t tcfdbmax(TCFDB *fdb){
 
 
 /* Get the width of the value of each record of a fixed-length database object. */
-uint64_t tcfdbwidth(TCFDB *fdb){
+uint32_t tcfdbwidth(TCFDB *fdb){
   assert(fdb);
   if(fdb->fd < 0){
     tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
@@ -1094,6 +1263,103 @@ char *tcfdbopaque(TCFDB *fdb){
 }
 
 
+/* Store a record into a fixed-length database object with a duplication handler. */
+bool tcfdbputproc(TCFDB *fdb, int64_t id, const void *vbuf, int vsiz, TCPDPROC proc, void *op){
+  assert(fdb && proc);
+  if(!FDBLOCKMETHOD(fdb, id < 1)) return false;
+  if(fdb->fd < 0 || !(fdb->omode & FDBOWRITER)){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  if(id == FDBIDMIN){
+    id = fdb->min;
+  } else if(id == FDBIDPREV){
+    id = fdb->min - 1;
+  } else if(id == FDBIDMAX){
+    id = fdb->max;
+  } else if(id == FDBIDNEXT){
+    id = fdb->max + 1;
+  }
+  if(id < 1 || id > fdb->limid){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  if(!FDBLOCKRECORD(fdb, true, id)){
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  FDBPDPROCOP procop;
+  procop.proc = proc;
+  procop.op = op;
+  FDBPDPROCOP *procptr = &procop;
+  tcgeneric_t stack[(FDBDEFWIDTH+TCNUMBUFSIZ)/sizeof(tcgeneric_t)+1];
+  char *rbuf;
+  if(vbuf){
+    if(vsiz <= sizeof(stack) - sizeof(procptr)){
+      rbuf = (char *)stack;
+    } else {
+      TCMALLOC(rbuf, vsiz + sizeof(procptr));
+    }
+    char *wp = rbuf;
+    memcpy(wp, &procptr, sizeof(procptr));
+    wp += sizeof(procptr);
+    memcpy(wp, vbuf, vsiz);
+    vbuf = rbuf + sizeof(procptr);
+  } else {
+    rbuf = (char *)stack;
+    memcpy(rbuf, &procptr, sizeof(procptr));
+    vbuf = rbuf + sizeof(procptr);
+    vsiz = -1;
+  }
+  bool rv = tcfdbputimpl(fdb, id, vbuf, vsiz, FDBPDPROC);
+  if(rbuf != (char *)stack) TCFREE(rbuf);
+  FDBUNLOCKRECORD(fdb, id);
+  FDBUNLOCKMETHOD(fdb);
+  return rv;
+}
+
+
+/* Move the iterator to the record corresponding a key of a fixed-length database object. */
+bool tcfdbiterinit2(TCFDB *fdb, int64_t id){
+  assert(fdb);
+  if(!FDBLOCKMETHOD(fdb, true)) return false;
+  if(fdb->fd < 0){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  if(id == FDBIDMIN){
+    id = fdb->min;
+  } else if(id == FDBIDMAX){
+    id = fdb->max;
+  }
+  if(id < 1 || id > fdb->limid){
+    tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+    FDBUNLOCKMETHOD(fdb);
+    return false;
+  }
+  bool rv = tcfdbiterjumpimpl(fdb, id);
+  FDBUNLOCKMETHOD(fdb);
+  return rv;
+}
+
+
+/* Move the iterator to the decimal record of a fixed-length database object. */
+bool tcfdbiterinit3(TCFDB *fdb, const void *kbuf, int ksiz){
+  assert(fdb && kbuf && ksiz >= 0);
+  return tcfdbiterinit2(fdb, tcfdbkeytoid(kbuf, ksiz));
+}
+
+
+/* Move the iterator to the decimal string record of a fixed-length database object. */
+bool tcfdbiterinit4(TCFDB *fdb, const char *kstr){
+  assert(fdb && kstr);
+  return tcfdbiterinit2(fdb, tcfdbkeytoid(kstr, strlen(kstr)));
+}
+
+
 /* Process each record atomically of a fixed-length database object. */
 bool tcfdbforeach(TCFDB *fdb, TCITER iter, void *op){
   assert(fdb && iter);
@@ -1103,7 +1369,6 @@ bool tcfdbforeach(TCFDB *fdb, TCITER iter, void *op){
     FDBUNLOCKMETHOD(fdb);
     return false;
   }
-
   if(!FDBLOCKALLRECORDS(fdb, false)){
     FDBUNLOCKMETHOD(fdb);
     return false;
@@ -1147,7 +1412,7 @@ int64_t tcfdbkeytoid(const char *kbuf, int ksiz){
 /* Serialize meta data into a buffer.
    `fdb' specifies the fixed-length database object.
    `hbuf' specifies the buffer. */
-static void tcdumpmeta(TCFDB *fdb, char *hbuf){
+static void tcfdbdumpmeta(TCFDB *fdb, char *hbuf){
   memset(hbuf, 0, FDBHEADSIZ);
   sprintf(hbuf, "%s\n%s:%d\n", FDBMAGICDATA, _TC_FORMATVER, _TC_LIBVER);
   memcpy(hbuf + FDBTYPEOFF, &(fdb->type), sizeof(fdb->type));
@@ -1177,7 +1442,7 @@ static void tcdumpmeta(TCFDB *fdb, char *hbuf){
 /* Deserialize meta data from a buffer.
    `fdb' specifies the fixed-length database object.
    `hbuf' specifies the buffer. */
-static void tcloadmeta(TCFDB *fdb, const char *hbuf){
+static void tcfdbloadmeta(TCFDB *fdb, const char *hbuf){
   memcpy(&(fdb->type), hbuf + FDBTYPEOFF, sizeof(fdb->type));
   memcpy(&(fdb->flags), hbuf + FDBFLAGSOFF, sizeof(fdb->flags));
   uint64_t llnum;
@@ -1203,7 +1468,10 @@ static void tcfdbclear(TCFDB *fdb){
   fdb->mmtx = NULL;
   fdb->amtx = NULL;
   fdb->rmtxs = NULL;
+  fdb->tmtx = NULL;
+  fdb->wmtx = NULL;
   fdb->eckey = NULL;
+  fdb->rpath = NULL;
   fdb->type = TCDBTFIXED;
   fdb->flags = 0;
   fdb->width = FDBDEFWIDTH;
@@ -1225,6 +1493,9 @@ static void tcfdbclear(TCFDB *fdb){
   fdb->fatal = false;
   fdb->inode = 0;
   fdb->mtime = 0;
+  fdb->tran = false;
+  fdb->walfd = -1;
+  fdb->walend = 0;
   fdb->dbgfd = -1;
   fdb->cnt_writerec = -1;
   fdb->cnt_readrec = -1;
@@ -1248,6 +1519,1017 @@ static void tcfdbsetflag(TCFDB *fdb, int flag, bool sign){
     *fp &= ~(uint8_t)flag;
   }
   fdb->flags = *fp;
+}
+
+
+/* Initialize the write ahead logging file.
+   `fdb' specifies the fixed-length database object.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbwalinit(TCFDB *fdb){
+  assert(fdb);
+  if(lseek(fdb->walfd, 0, SEEK_SET) == -1){
+    tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  if(ftruncate(fdb->walfd, 0) == -1){
+    tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  uint64_t llnum = fdb->fsiz;
+  llnum = TCHTOILL(llnum);
+  if(!tcwrite(fdb->walfd, &llnum, sizeof(llnum))){
+    tcfdbsetecode(fdb, TCEWRITE, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  fdb->walend = fdb->fsiz;
+  if(!tcfdbwalwrite(fdb, 0, FDBHEADSIZ)) return false;
+  return true;
+}
+
+
+/* Write an event into the write ahead logging file.
+   `fdb' specifies the fixed-length database object.
+   `off' specifies the offset of the region to be updated.
+   `size' specifies the size of the region.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbwalwrite(TCFDB *fdb, uint64_t off, int64_t size){
+  assert(fdb && off >= 0 && size >= 0);
+  if(off + size > fdb->walend) size = fdb->walend - off;
+  if(size < 1) return true;
+  char stack[FDBIOBUFSIZ];
+  char *buf;
+  if(size + sizeof(off) + sizeof(size) <= FDBIOBUFSIZ){
+    buf = stack;
+  } else {
+    TCMALLOC(buf, size + sizeof(off) + sizeof(size));
+  }
+  char *wp = buf;
+  uint64_t llnum = TCHTOILL(off);
+  memcpy(wp, &llnum, sizeof(llnum));
+  wp += sizeof(llnum);
+  uint32_t lnum = TCHTOIL(size);
+  memcpy(wp, &lnum, sizeof(lnum));
+  wp += sizeof(lnum);
+  memcpy(wp, fdb->map + off, size);
+  wp += size;
+  if(!FDBLOCKWAL(fdb)) return false;
+  if(!tcwrite(fdb->walfd, buf, wp - buf)){
+    tcfdbsetecode(fdb, TCEWRITE, __FILE__, __LINE__, __func__);
+    if(buf != stack) TCFREE(buf);
+    FDBUNLOCKWAL(fdb);
+    return false;
+  }
+  if(buf != stack) TCFREE(buf);
+  if((fdb->omode & FDBOTSYNC) && fsync(fdb->walfd) == -1){
+    tcfdbsetecode(fdb, TCESYNC, __FILE__, __LINE__, __func__);
+    FDBUNLOCKWAL(fdb);
+    return false;
+  }
+  FDBUNLOCKWAL(fdb);
+  return true;
+}
+
+
+/* Restore the database from the write ahead logging file.
+   `fdb' specifies the fixed-length database object.
+   `path' specifies the path of the database file.
+   If successful, the return value is true, else, it is false. */
+static int tcfdbwalrestore(TCFDB *fdb, const char *path){
+  assert(fdb && path);
+  char *tpath = tcsprintf("%s%c%s", path, MYEXTCHR, FDBWALSUFFIX);
+  int walfd = open(tpath, O_RDONLY, FDBFILEMODE);
+  TCFREE(tpath);
+  if(walfd < 0) return false;
+  bool err = false;
+  uint64_t walsiz = 0;
+  struct stat sbuf;
+  if(fstat(walfd, &sbuf) == 0){
+    walsiz = sbuf.st_size;
+  } else {
+    tcfdbsetecode(fdb, TCESTAT, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  if(walsiz >= sizeof(walsiz) + FDBHEADSIZ){
+    int dbfd = fdb->fd;
+    int tfd = -1;
+    if(!(fdb->omode & FDBOWRITER)){
+      tfd = open(path, O_WRONLY, FDBFILEMODE);
+      if(tfd >= 0){
+        dbfd = tfd;
+      } else {
+        int ecode = TCEOPEN;
+        switch(errno){
+          case EACCES: ecode = TCENOPERM; break;
+          case ENOENT: ecode = TCENOFILE; break;
+          case ENOTDIR: ecode = TCENOFILE; break;
+        }
+        tcfdbsetecode(fdb, ecode, __FILE__, __LINE__, __func__);
+        err = true;
+      }
+    }
+    uint64_t fsiz = 0;
+    if(tcread(walfd, &fsiz, sizeof(fsiz))){
+      fsiz = TCITOHLL(fsiz);
+    } else {
+      tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+    TCLIST *list = tclistnew();
+    uint64_t waloff = sizeof(fsiz);
+    char stack[FDBIOBUFSIZ];
+    while(waloff < walsiz){
+      uint64_t off;
+      uint32_t size;
+      if(!tcread(walfd, stack, sizeof(off) + sizeof(size))){
+        tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+        err = true;
+        break;
+      }
+      memcpy(&off, stack, sizeof(off));
+      off = TCITOHLL(off);
+      memcpy(&size, stack + sizeof(off), sizeof(size));
+      size = TCITOHL(size);
+      char *buf;
+      if(sizeof(off) + size <= FDBIOBUFSIZ){
+        buf = stack;
+      } else {
+        TCMALLOC(buf, sizeof(off) + size);
+      }
+      *(uint64_t *)buf = off;
+      if(!tcread(walfd, buf + sizeof(off), size)){
+        tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+        err = true;
+        if(buf != stack) TCFREE(buf);
+        break;
+      }
+      TCLISTPUSH(list, buf, sizeof(off) + size);
+      if(buf != stack) TCFREE(buf);
+      waloff += sizeof(off) + sizeof(size) + size;
+    }
+    for(int i = TCLISTNUM(list) - 1; i >= 0; i--){
+      const char *rec;
+      int size;
+      TCLISTVAL(rec, list, i, size);
+      uint64_t off = *(uint64_t *)rec;
+      rec += sizeof(off);
+      size -= sizeof(off);
+      if(lseek(dbfd, off, SEEK_SET) == -1){
+        tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
+        err = true;
+        break;
+      }
+      if(!tcwrite(dbfd, rec, size)){
+        tcfdbsetecode(fdb, TCEWRITE, __FILE__, __LINE__, __func__);
+        err = true;
+        break;
+      }
+    }
+    tclistdel(list);
+    if(ftruncate(dbfd, fsiz) == -1){
+      tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+    if((fdb->omode & FDBOTSYNC) && fsync(dbfd) == -1){
+      tcfdbsetecode(fdb, TCESYNC, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+    if(tfd >= 0 && close(tfd) == -1){
+      tcfdbsetecode(fdb, TCECLOSE, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+  } else {
+    err = true;
+  }
+  if(close(walfd) == -1){
+    tcfdbsetecode(fdb, TCECLOSE, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  return !err;
+}
+
+
+/* Remove the write ahead logging file.
+   `fdb' specifies the fixed-length database object.
+   `path' specifies the path of the database file.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbwalremove(TCFDB *fdb, const char *path){
+  assert(fdb && path);
+  char *tpath = tcsprintf("%s%c%s", path, MYEXTCHR, FDBWALSUFFIX);
+  bool err = false;
+  if(unlink(tpath) == -1 && errno != ENOENT){
+    tcfdbsetecode(fdb, TCEUNLINK, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  TCFREE(tpath);
+  return !err;
+}
+
+
+/* Open a database file and connect a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `path' specifies the path of the database file.
+   `omode' specifies the connection mode.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbopenimpl(TCFDB *fdb, const char *path, int omode){
+  assert(fdb && path);
+  int mode = O_RDONLY;
+  if(omode & FDBOWRITER){
+    mode = O_RDWR;
+    if(omode & FDBOCREAT) mode |= O_CREAT;
+  }
+  int fd = open(path, mode, FDBFILEMODE);
+  if(fd < 0){
+    int ecode = TCEOPEN;
+    switch(errno){
+      case EACCES: ecode = TCENOPERM; break;
+      case ENOENT: ecode = TCENOFILE; break;
+      case ENOTDIR: ecode = TCENOFILE; break;
+    }
+    tcfdbsetecode(fdb, ecode, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  if(!(omode & FDBONOLCK)){
+    if(!tclock(fd, omode & FDBOWRITER, omode & FDBOLCKNB)){
+      tcfdbsetecode(fdb, TCELOCK, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+  }
+  if((omode & FDBOWRITER) && (omode & FDBOTRUNC)){
+    if(ftruncate(fd, 0) == -1){
+      tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+    if(!tcfdbwalremove(fdb, path)){
+      close(fd);
+      return false;
+    }
+  }
+  struct stat sbuf;
+  if(fstat(fd, &sbuf) == -1 || !S_ISREG(sbuf.st_mode)){
+    tcfdbsetecode(fdb, TCESTAT, __FILE__, __LINE__, __func__);
+    close(fd);
+    return false;
+  }
+  char hbuf[FDBHEADSIZ];
+  if((omode & FDBOWRITER) && sbuf.st_size < 1){
+    fdb->flags = 0;
+    fdb->rnum = 0;
+    fdb->fsiz = FDBHEADSIZ;
+    fdb->min = 0;
+    fdb->max = 0;
+    tcfdbdumpmeta(fdb, hbuf);
+    if(!tcwrite(fd, hbuf, FDBHEADSIZ)){
+      tcfdbsetecode(fdb, TCEWRITE, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+    sbuf.st_size = fdb->fsiz;
+  }
+  if(lseek(fd, 0, SEEK_SET) == -1){
+    tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
+    close(fd);
+    return false;
+  }
+  if(!tcread(fd, hbuf, FDBHEADSIZ)){
+    tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+    close(fd);
+    return false;
+  }
+  int type = fdb->type;
+  tcfdbloadmeta(fdb, hbuf);
+  if((fdb->flags & FDBFOPEN) && tcfdbwalrestore(fdb, path)){
+    if(lseek(fd, 0, SEEK_SET) == -1){
+      tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+    if(!tcread(fd, hbuf, FDBHEADSIZ)){
+      tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+    tcfdbloadmeta(fdb, hbuf);
+    if(!tcfdbwalremove(fdb, path)){
+      close(fd);
+      return false;
+    }
+  }
+  if(!(omode & FDBONOLCK)){
+    if(memcmp(hbuf, FDBMAGICDATA, strlen(FDBMAGICDATA)) || fdb->type != type ||
+       fdb->width < 1 || sbuf.st_size < fdb->fsiz || fdb->limsiz < FDBHEADSIZ ||
+       fdb->fsiz > fdb->limsiz){
+      tcfdbsetecode(fdb, TCEMETA, __FILE__, __LINE__, __func__);
+      close(fd);
+      return false;
+    }
+    if(sbuf.st_size > fdb->fsiz) fdb->fsiz = sbuf.st_size;
+  }
+  void *map = mmap(0, fdb->limsiz, PROT_READ | ((omode & FDBOWRITER) ? PROT_WRITE : 0),
+                   MAP_SHARED, fd, 0);
+  if(map == MAP_FAILED){
+    tcfdbsetecode(fdb, TCEMMAP, __FILE__, __LINE__, __func__);
+    close(fd);
+    return false;
+  }
+  if(fdb->width <= UINT8_MAX){
+    fdb->wsiz = sizeof(uint8_t);
+  } else if(fdb->width <= UINT16_MAX){
+    fdb->wsiz = sizeof(uint16_t);
+  } else {
+    fdb->wsiz = sizeof(uint32_t);
+  }
+  fdb->rsiz = fdb->width + fdb->wsiz;
+  fdb->limid = (fdb->limsiz - FDBHEADSIZ) / fdb->rsiz;
+  fdb->path = tcstrdup(path);
+  fdb->fd = fd;
+  fdb->omode = omode;
+  fdb->iter = 0;
+  fdb->map = map;
+  fdb->array = (unsigned char *)map + FDBHEADSIZ;
+  fdb->ecode = TCESUCCESS;
+  fdb->fatal = false;
+  fdb->inode = (uint64_t)sbuf.st_ino;
+  fdb->mtime = sbuf.st_mtime;
+  fdb->tran = false;
+  fdb->walfd = -1;
+  fdb->walend = 0;
+  if(fdb->omode & FDBOWRITER) tcfdbsetflag(fdb, FDBFOPEN, true);
+  return true;
+}
+
+
+/* Close a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbcloseimpl(TCFDB *fdb){
+  assert(fdb);
+  bool err = false;
+  if(fdb->omode & FDBOWRITER) tcfdbsetflag(fdb, FDBFOPEN, false);
+  if((fdb->omode & FDBOWRITER) && !tcfdbmemsync(fdb, false)) err = true;
+  if(munmap(fdb->map, fdb->limsiz) == -1){
+    tcfdbsetecode(fdb, TCEMMAP, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  if(fdb->tran){
+    if(!tcfdbwalrestore(fdb, fdb->path)) err = true;
+    fdb->tran = false;
+  }
+  if(fdb->walfd >= 0){
+    if(close(fdb->walfd) == -1){
+      tcfdbsetecode(fdb, TCECLOSE, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+    if(!fdb->fatal && !tcfdbwalremove(fdb, fdb->path)) err = true;
+  }
+  if(close(fdb->fd) == -1){
+    tcfdbsetecode(fdb, TCECLOSE, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  TCFREE(fdb->path);
+  fdb->path = NULL;
+  fdb->fd = -1;
+  return !err;
+}
+
+
+/* Get the previous record of a record.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   The return value is the ID number of the previous record or 0 if no record corresponds. */
+static int64_t tcfdbprevid(TCFDB *fdb, int64_t id){
+  assert(fdb && id >= 0);
+  id--;
+  while(id >= fdb->min){
+    TCDODEBUG(fdb->cnt_readrec++);
+    unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
+    unsigned char *rp = rec;
+    uint32_t osiz;
+    uint16_t snum;
+    uint32_t lnum;
+    switch(fdb->wsiz){
+      case 1:
+        osiz = *(rp++);
+        break;
+      case 2:
+        memcpy(&snum, rp, sizeof(snum));
+        osiz = TCITOHS(snum);
+        rp += sizeof(snum);
+        break;
+      default:
+        memcpy(&lnum, rp, sizeof(lnum));
+        osiz = TCITOHL(lnum);
+        rp += sizeof(lnum);
+        break;
+    }
+    if(osiz > 0 || *rp != 0) return id;
+    id--;
+  }
+  return 0;
+}
+
+
+/* Get the next record of a record.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   The return value is the ID number of the next record or 0 if no record corresponds. */
+static int64_t tcfdbnextid(TCFDB *fdb, int64_t id){
+  assert(fdb && id >= 0);
+  id++;
+  while(id <= fdb->max){
+    TCDODEBUG(fdb->cnt_readrec++);
+    unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
+    unsigned char *rp = rec;
+    uint32_t osiz;
+    uint16_t snum;
+    uint32_t lnum;
+    switch(fdb->wsiz){
+      case 1:
+        osiz = *(rp++);
+        break;
+      case 2:
+        memcpy(&snum, rp, sizeof(snum));
+        osiz = TCITOHS(snum);
+        rp += sizeof(snum);
+        break;
+      default:
+        memcpy(&lnum, rp, sizeof(lnum));
+        osiz = TCITOHL(lnum);
+        rp += sizeof(lnum);
+        break;
+    }
+    if(osiz > 0 || *rp != 0) return id;
+    id++;
+  }
+  return 0;
+}
+
+
+/* Store a record.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   `vbuf' specifies the pointer to the region of the value.
+   `vsiz' specifies the size of the region of the value.
+   `dmode' specifies behavior when the key overlaps.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbputimpl(TCFDB *fdb, int64_t id, const void *vbuf, int vsiz, int dmode){
+  assert(fdb && id > 0);
+  if(vsiz > (int64_t)fdb->width) vsiz = fdb->width;
+  TCDODEBUG(fdb->cnt_readrec++);
+  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
+  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
+  if(nsiz > fdb->fsiz){
+    if(nsiz > fdb->limsiz){
+      tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
+      return false;
+    }
+    if(!FDBLOCKATTR(fdb)) return false;
+    if(nsiz > fdb->fsiz){
+      if(vsiz < 0){
+        tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+        FDBUNLOCKATTR(fdb);
+        return false;
+      }
+      if(nsiz + fdb->rsiz * FDBTRUNCALW < fdb->limsiz) nsiz += fdb->rsiz * FDBTRUNCALW;
+      if(ftruncate(fdb->fd, nsiz) == -1){
+        tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
+        FDBUNLOCKATTR(fdb);
+        return false;
+      }
+      TCDODEBUG(fdb->cnt_truncfile++);
+      fdb->fsiz = nsiz;
+      unsigned char *wp = rec;
+      uint16_t snum;
+      uint32_t lnum;
+      switch(fdb->wsiz){
+        case 1:
+          *(wp++) = vsiz;
+          break;
+        case 2:
+          snum = TCHTOIS(vsiz);
+          memcpy(wp, &snum, sizeof(snum));
+          wp += sizeof(snum);
+          break;
+        default:
+          lnum = TCHTOIL(vsiz);
+          memcpy(wp, &lnum, sizeof(lnum));
+          wp += sizeof(lnum);
+          break;
+      }
+      if(vsiz > 0){
+        memcpy(wp, vbuf, vsiz);
+      } else {
+        *wp = 1;
+      }
+      TCDODEBUG(fdb->cnt_writerec++);
+      fdb->rnum++;
+      if(fdb->min < 1 || id < fdb->min) fdb->min = id;
+      if(fdb->max < 1 || id > fdb->max) fdb->max = id;
+      FDBUNLOCKATTR(fdb);
+      return true;
+    }
+    FDBUNLOCKATTR(fdb);
+  }
+  unsigned char *rp = rec;
+  uint32_t osiz;
+  uint16_t snum;
+  uint32_t lnum;
+  switch(fdb->wsiz){
+    case 1:
+      osiz = *(rp++);
+      break;
+    case 2:
+      memcpy(&snum, rp, sizeof(snum));
+      osiz = TCITOHS(snum);
+      rp += sizeof(snum);
+      break;
+    default:
+      memcpy(&lnum, rp, sizeof(lnum));
+      osiz = TCITOHL(lnum);
+      rp += sizeof(lnum);
+      break;
+  }
+  bool miss = osiz == 0 && *rp == 0;
+  if(dmode != FDBPDOVER && !miss){
+    if(dmode == FDBPDKEEP){
+      tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
+      return false;
+    }
+    if(dmode == FDBPDCAT){
+      if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+      vsiz = tclmin(vsiz, fdb->width - osiz);
+      unsigned char *wp = rec;
+      int usiz = osiz + vsiz;
+      switch(fdb->wsiz){
+        case 1:
+          *(wp++) = usiz;
+          break;
+        case 2:
+          snum = TCHTOIS(usiz);
+          memcpy(wp, &snum, sizeof(snum));
+          wp += sizeof(snum);
+          break;
+        default:
+          lnum = TCHTOIL(usiz);
+          memcpy(wp, &lnum, sizeof(lnum));
+          wp += sizeof(lnum);
+          break;
+      }
+      if(usiz > 0){
+        memcpy(wp + osiz, vbuf, vsiz);
+      } else {
+        *wp = 1;
+      }
+      TCDODEBUG(fdb->cnt_writerec++);
+      return true;
+    }
+    if(dmode == FDBPDADDINT){
+      if(osiz != sizeof(int)){
+        tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
+        return false;
+      }
+      int lnum;
+      memcpy(&lnum, rp, sizeof(lnum));
+      if(*(int *)vbuf == 0){
+        *(int *)vbuf = lnum;
+        return true;
+      }
+      if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+      lnum += *(int *)vbuf;
+      *(int *)vbuf = lnum;
+      memcpy(rp, &lnum, sizeof(lnum));
+      TCDODEBUG(fdb->cnt_writerec++);
+      return true;
+    }
+    if(dmode == FDBPDADDDBL){
+      if(osiz != sizeof(double)){
+        tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
+        return false;
+      }
+      double dnum;
+      memcpy(&dnum, rp, sizeof(dnum));
+      if(*(double *)vbuf == 0.0){
+        *(double *)vbuf = dnum;
+        return true;
+      }
+      if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+      dnum += *(double *)vbuf;
+      *(double *)vbuf = dnum;
+      memcpy(rp, &dnum, sizeof(dnum));
+      TCDODEBUG(fdb->cnt_writerec++);
+      return true;
+    }
+    if(dmode == FDBPDPROC){
+      FDBPDPROCOP *procptr = *(FDBPDPROCOP **)((char *)vbuf - sizeof(procptr));
+      int nvsiz;
+      char *nvbuf = procptr->proc(rp, osiz, &nvsiz, procptr->op);
+      if(nvbuf == (void *)-1){
+        if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+        memset(rec, 0, fdb->wsiz + 1);
+        TCDODEBUG(fdb->cnt_writerec++);
+        if(!FDBLOCKATTR(fdb)) return false;
+        fdb->rnum--;
+        if(fdb->rnum < 1){
+          fdb->min = 0;
+          fdb->max = 0;
+        } else if(fdb->rnum < 2){
+          if(fdb->min == id){
+            fdb->min = fdb->max;
+          } else if(fdb->max == id){
+            fdb->max = fdb->min;
+          }
+        } else {
+          if(id == fdb->min) fdb->min = tcfdbnextid(fdb, id);
+          if(id == fdb->max) fdb->max = tcfdbprevid(fdb, id);
+        }
+        FDBUNLOCKATTR(fdb);
+        return true;
+      }
+      if(!nvbuf){
+        tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
+        return false;
+      }
+      if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+      if(nvsiz > fdb->width) nvsiz = fdb->width;
+      unsigned char *wp = rec;
+      switch(fdb->wsiz){
+        case 1:
+          *(wp++) = nvsiz;
+          break;
+        case 2:
+          snum = TCHTOIS(nvsiz);
+          memcpy(wp, &snum, sizeof(snum));
+          wp += sizeof(snum);
+          break;
+        default:
+          lnum = TCHTOIL(nvsiz);
+          memcpy(wp, &lnum, sizeof(lnum));
+          wp += sizeof(lnum);
+          break;
+      }
+      if(nvsiz > 0){
+        memcpy(wp, nvbuf, nvsiz);
+      } else {
+        *wp = 1;
+      }
+      TCFREE(nvbuf);
+      TCDODEBUG(fdb->cnt_writerec++);
+      return true;
+    }
+  }
+  if(vsiz < 0){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+  unsigned char *wp = rec;
+  switch(fdb->wsiz){
+    case 1:
+      *(wp++) = vsiz;
+      break;
+    case 2:
+      snum = TCHTOIS(vsiz);
+      memcpy(wp, &snum, sizeof(snum));
+      wp += sizeof(snum);
+      break;
+    default:
+      lnum = TCHTOIL(vsiz);
+      memcpy(wp, &lnum, sizeof(lnum));
+      wp += sizeof(lnum);
+      break;
+  }
+  if(vsiz > 0){
+    memcpy(wp, vbuf, vsiz);
+  } else {
+    *wp = 1;
+  }
+  TCDODEBUG(fdb->cnt_writerec++);
+  if(miss){
+    if(!FDBLOCKATTR(fdb)) return false;
+    fdb->rnum++;
+    if(fdb->min < 1 || id < fdb->min) fdb->min = id;
+    if(fdb->max < 1 || id > fdb->max) fdb->max = id;
+    FDBUNLOCKATTR(fdb);
+  }
+  return true;
+}
+
+
+/* Remove a record of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdboutimpl(TCFDB *fdb, int64_t id){
+  assert(fdb && id >= 0);
+  TCDODEBUG(fdb->cnt_readrec++);
+  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
+  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
+  if(nsiz > fdb->fsiz){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  unsigned char *rp = rec;
+  uint32_t osiz;
+  uint16_t snum;
+  uint32_t lnum;
+  switch(fdb->wsiz){
+    case 1:
+      osiz = *(rp++);
+      break;
+    case 2:
+      memcpy(&snum, rp, sizeof(snum));
+      osiz = TCITOHS(snum);
+      rp += sizeof(snum);
+      break;
+    default:
+      memcpy(&lnum, rp, sizeof(lnum));
+      osiz = TCITOHL(lnum);
+      rp += sizeof(lnum);
+      break;
+  }
+  if(osiz == 0 && *rp == 0){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  if(fdb->tran && !tcfdbwalwrite(fdb, (char *)rec - fdb->map, fdb->width)) return false;
+  memset(rec, 0, fdb->wsiz + 1);
+  TCDODEBUG(fdb->cnt_writerec++);
+  if(!FDBLOCKATTR(fdb)) return false;
+  fdb->rnum--;
+  if(fdb->rnum < 1){
+    fdb->min = 0;
+    fdb->max = 0;
+  } else if(fdb->rnum < 2){
+    if(fdb->min == id){
+      fdb->min = fdb->max;
+    } else if(fdb->max == id){
+      fdb->max = fdb->min;
+    }
+  } else {
+    if(id == fdb->min) fdb->min = tcfdbnextid(fdb, id);
+    if(id == fdb->max) fdb->max = tcfdbprevid(fdb, id);
+  }
+  FDBUNLOCKATTR(fdb);
+  return true;
+}
+
+
+/* Retrieve a record.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   `sp' specifies the pointer to the variable into which the size of the region of the return
+   value is assigned.
+   If successful, the return value is the pointer to the region of the value of the corresponding
+   record. */
+static const void *tcfdbgetimpl(TCFDB *fdb, int64_t id, int *sp){
+  assert(fdb && id >= 0 && sp);
+  TCDODEBUG(fdb->cnt_readrec++);
+  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
+  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
+  if(nsiz > fdb->fsiz){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  unsigned char *rp = rec;
+  uint32_t osiz;
+  uint16_t snum;
+  uint32_t lnum;
+  switch(fdb->wsiz){
+    case 1:
+      osiz = *(rp++);
+      break;
+    case 2:
+      memcpy(&snum, rp, sizeof(snum));
+      osiz = TCITOHS(snum);
+      rp += sizeof(snum);
+      break;
+    default:
+      memcpy(&lnum, rp, sizeof(lnum));
+      osiz = TCITOHL(lnum);
+      rp += sizeof(lnum);
+      break;
+  }
+  if(osiz == 0 && *rp == 0){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return false;
+  }
+  *sp = osiz;
+  return rp;
+}
+
+
+/* Initialize the iterator of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbiterinitimpl(TCFDB *fdb){
+  assert(fdb);
+  fdb->iter = fdb->min;
+  return true;
+}
+
+
+/* Get the next key of the iterator of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   If successful, the return value is the next ID number of the iterator, else, it is 0. */
+static uint64_t tcfdbiternextimpl(TCFDB *fdb){
+  assert(fdb);
+  if(fdb->iter < 1){
+    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
+    return 0;
+  }
+  uint64_t cur = fdb->iter;
+  fdb->iter = tcfdbnextid(fdb, fdb->iter);
+  return cur;
+}
+
+
+/* Get range matching ID numbers in a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `lower' specifies the lower limit of the range.
+   `upper' specifies the upper limit of the range.
+   `max' specifies the maximum number of keys to be fetched.
+   `np' specifies the pointer to the variable into which the number of elements of the return
+   value is assigned.
+   If successful, the return value is the pointer to an array of ID numbers of the corresponding
+   records. */
+static uint64_t *tcfdbrangeimpl(TCFDB *fdb, int64_t lower, int64_t upper, int max, int *np){
+  assert(fdb && lower > 0 && upper > 0 && np);
+  if(lower < fdb->min) lower = fdb->min;
+  if(upper > fdb->max) upper = fdb->max;
+  if(max < 0) max = INT_MAX;
+  int anum = FDBIDARYUNIT;
+  uint64_t *ids;
+  TCMALLOC(ids, anum * sizeof(*ids));
+  int num = 0;
+  for(int64_t i = lower; i <= upper && num < max; i++){
+    int vsiz;
+    const void *vbuf = tcfdbgetimpl(fdb, i, &vsiz);
+    if(vbuf){
+      if(num >= anum){
+        anum *= 2;
+        TCREALLOC(ids, ids, anum * sizeof(*ids));
+      }
+      ids[num++] = i;
+    }
+  }
+  *np = num;
+  return ids;
+}
+
+
+/* Optimize the file of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `width' specifies the width of the value of each record.
+   `limsiz' specifies the limit size of the database file.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdboptimizeimpl(TCFDB *fdb, int32_t width, int64_t limsiz){
+  assert(fdb);
+  char *tpath = tcsprintf("%s%ctmp%c%llu", fdb->path, MYEXTCHR, MYEXTCHR, fdb->inode);
+  TCFDB *tfdb = tcfdbnew();
+  tfdb->dbgfd = fdb->dbgfd;
+  if(width < 1) width = fdb->width;
+  if(limsiz < 1) limsiz = fdb->limsiz;
+  tcfdbtune(tfdb, width, limsiz);
+  if(!tcfdbopen(tfdb, tpath, FDBOWRITER | FDBOCREAT | FDBOTRUNC)){
+    tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
+    tcfdbdel(tfdb);
+    TCFREE(tpath);
+    return false;
+  }
+  bool err = false;
+  int64_t max = fdb->max;
+  for(int i = fdb->min; !err && i <= max; i++){
+    int vsiz;
+    const void *vbuf = tcfdbgetimpl(fdb, i, &vsiz);
+    if(vbuf && !tcfdbput(tfdb, i, vbuf, vsiz)){
+      tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+  }
+  if(!tcfdbclose(tfdb)){
+    tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  tcfdbdel(tfdb);
+  if(unlink(fdb->path) == -1){
+    tcfdbsetecode(fdb, TCEUNLINK, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  if(rename(tpath, fdb->path) == -1){
+    tcfdbsetecode(fdb, TCERENAME, __FILE__, __LINE__, __func__);
+    err = true;
+  }
+  TCFREE(tpath);
+  if(err) return false;
+  tpath = tcstrdup(fdb->path);
+  int omode = (fdb->omode & ~FDBOCREAT) & ~FDBOTRUNC;
+  if(!tcfdbcloseimpl(fdb)){
+    TCFREE(tpath);
+    return false;
+  }
+  bool rv = tcfdbopenimpl(fdb, tpath, omode);
+  TCFREE(tpath);
+  return rv;
+}
+
+
+/* Remove all records of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbvanishimpl(TCFDB *fdb){
+  assert(fdb);
+  char *path = tcstrdup(fdb->path);
+  int omode = fdb->omode;
+  bool err = false;
+  if(!tcfdbcloseimpl(fdb)) err = true;
+  if(!tcfdbopenimpl(fdb, path, FDBOTRUNC | omode)){
+    tcpathunlock(fdb->rpath);
+    TCFREE(fdb->rpath);
+    err = true;
+  }
+  TCFREE(path);
+  return !err;
+}
+
+
+/* Copy the database file of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `path' specifies the path of the destination file.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbcopyimpl(TCFDB *fdb, const char *path){
+  assert(fdb && path);
+  bool err = false;
+  if(fdb->omode & FDBOWRITER){
+    if(!tcfdbmemsync(fdb, false)) err = true;
+    tcfdbsetflag(fdb, FDBFOPEN, false);
+  }
+  if(*path == '@'){
+    char tsbuf[TCNUMBUFSIZ];
+    sprintf(tsbuf, "%llu", (unsigned long long)(tctime() * 1000000));
+    const char *args[3];
+    args[0] = path + 1;
+    args[1] = fdb->path;
+    args[2] = tsbuf;
+    if(tcsystem(args, sizeof(args) / sizeof(*args)) != 0) err = true;
+  } else {
+    if(!tccopyfile(fdb->path, path)){
+      tcfdbsetecode(fdb, TCEMISC, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+  }
+  if(fdb->omode & FDBOWRITER) tcfdbsetflag(fdb, FDBFOPEN, true);
+  return !err;
+}
+
+
+/* Move the iterator to the record corresponding a key of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `id' specifies the ID number.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbiterjumpimpl(TCFDB *fdb, int64_t id){
+  assert(fdb && id >= 0);
+  if(id <= fdb->min){
+    fdb->iter = fdb->min;
+  } else {
+    int vsiz;
+    if(tcfdbgetimpl(fdb, id, &vsiz)){
+      fdb->iter = id;
+    } else {
+      uint64_t iter = tcfdbnextid(fdb, id);
+      if(iter > 0){
+        fdb->iter = iter;
+      } else {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+
+/* Process each record atomically of a fixed-length database object.
+   `fdb' specifies the fixed-length database object.
+   `iter' specifies the pointer to the iterator function called for each record.
+   `op' specifies an arbitrary pointer to be given as a parameter of the iterator function.
+   If successful, the return value is true, else, it is false. */
+static bool tcfdbforeachimpl(TCFDB *fdb, TCITER iter, void *op){
+  bool err = false;
+  uint64_t id = fdb->min;
+  while(id > 0){
+    int vsiz;
+    const void *vbuf = tcfdbgetimpl(fdb, id, &vsiz);
+    if(vbuf){
+      char kbuf[TCNUMBUFSIZ];
+      int ksiz = sprintf(kbuf, "%llu", (unsigned long long)id);
+      if(!iter(kbuf, ksiz, vbuf, vsiz, op)) break;
+    } else {
+      tcfdbsetecode(fdb, TCEMISC, __FILE__, __LINE__, __func__);
+      err = true;
+    }
+    id = tcfdbnextid(fdb, id);
+  }
+  return !err;
 }
 
 
@@ -1338,8 +2620,8 @@ static bool tcfdbunlockrecord(TCFDB *fdb, uint64_t id){
 }
 
 
-/* Lock all records of the hash database object.
-   `fdb' specifies the hash database object.
+/* Lock all records of the fixed-length database object.
+   `fdb' specifies the fixed-length database object.
    `wr' specifies whether the lock is writer or not.
    If successful, the return value is true, else, it is false. */
 static bool tcfdblockallrecords(TCFDB *fdb, bool wr){
@@ -1347,10 +2629,10 @@ static bool tcfdblockallrecords(TCFDB *fdb, bool wr){
   for(int i = 0; i < FDBRMTXNUM; i++){
     if(wr ? pthread_rwlock_wrlock((pthread_rwlock_t *)fdb->rmtxs + i) != 0 :
        pthread_rwlock_rdlock((pthread_rwlock_t *)fdb->rmtxs + i) != 0){
+      tcfdbsetecode(fdb, TCETHREAD, __FILE__, __LINE__, __func__);
       while(--i >= 0){
         pthread_rwlock_unlock((pthread_rwlock_t *)fdb->rmtxs + i);
       }
-      tcfdbsetecode(fdb, TCETHREAD, __FILE__, __LINE__, __func__);
       return false;
     }
   }
@@ -1359,8 +2641,8 @@ static bool tcfdblockallrecords(TCFDB *fdb, bool wr){
 }
 
 
-/* Unlock all records of the hash database object.
-   `fdb' specifies the hash database object.
+/* Unlock all records of the fixed-length database object.
+   `fdb' specifies the fixed-length database object.
    If successful, the return value is true, else, it is false. */
 static bool tcfdbunlockallrecords(TCFDB *fdb){
   assert(fdb);
@@ -1377,666 +2659,31 @@ static bool tcfdbunlockallrecords(TCFDB *fdb){
 }
 
 
-/* Open a database file and connect a fixed-length database object.
+/* Lock the write ahead logging file of the fixed-length database object.
    `fdb' specifies the fixed-length database object.
-   `path' specifies the path of the database file.
-   `omode' specifies the connection mode.
    If successful, the return value is true, else, it is false. */
-static bool tcfdbopenimpl(TCFDB *fdb, const char *path, int omode){
-  assert(fdb && path);
-  int mode = O_RDONLY;
-  if(omode & FDBOWRITER){
-    mode = O_RDWR;
-    if(omode & FDBOCREAT) mode |= O_CREAT;
-  }
-  int fd = open(path, mode, FDBFILEMODE);
-  if(fd < 0){
-    int ecode = TCEOPEN;
-    switch(errno){
-    case EACCES: ecode = TCENOPERM; break;
-    case ENOENT: ecode = TCENOFILE; break;
-    }
-    tcfdbsetecode(fdb, ecode, __FILE__, __LINE__, __func__);
+static bool tcfdblockwal(TCFDB *fdb){
+  assert(fdb);
+  if(pthread_mutex_lock(fdb->wmtx) != 0){
+    tcfdbsetecode(fdb, TCETHREAD, __FILE__, __LINE__, __func__);
     return false;
   }
-  if(!(omode & FDBONOLCK)){
-    if(!tclock(fd, omode & FDBOWRITER, omode & FDBOLCKNB)){
-      tcfdbsetecode(fdb, TCELOCK, __FILE__, __LINE__, __func__);
-      close(fd);
-      return false;
-    }
-  }
-  if((omode & FDBOWRITER) && (omode & FDBOTRUNC)){
-    if(ftruncate(fd, 0) == -1){
-      tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
-      close(fd);
-      return false;
-    }
-  }
-  struct stat sbuf;
-  if(fstat(fd, &sbuf) == -1 || !S_ISREG(sbuf.st_mode)){
-    tcfdbsetecode(fdb, TCESTAT, __FILE__, __LINE__, __func__);
-    close(fd);
-    return false;
-  }
-  char hbuf[FDBHEADSIZ];
-  if((omode & FDBOWRITER) && sbuf.st_size < 1){
-    fdb->flags = 0;
-    fdb->rnum = 0;
-    fdb->fsiz = FDBHEADSIZ;
-    fdb->min = 0;
-    fdb->max = 0;
-    tcdumpmeta(fdb, hbuf);
-    if(!tcwrite(fd, hbuf, FDBHEADSIZ)){
-      tcfdbsetecode(fdb, TCEWRITE, __FILE__, __LINE__, __func__);
-      close(fd);
-      return false;
-    }
-    sbuf.st_size = fdb->fsiz;
-  }
-  if(lseek(fd, 0, SEEK_SET) == -1){
-    tcfdbsetecode(fdb, TCESEEK, __FILE__, __LINE__, __func__);
-    close(fd);
-    return false;
-  }
-  if(!tcread(fd, hbuf, FDBHEADSIZ)){
-    tcfdbsetecode(fdb, TCEREAD, __FILE__, __LINE__, __func__);
-    close(fd);
-    return false;
-  }
-  int type = fdb->type;
-  tcloadmeta(fdb, hbuf);
-  if(!(omode & FDBONOLCK)){
-    if(memcmp(hbuf, FDBMAGICDATA, strlen(FDBMAGICDATA)) || fdb->type != type ||
-       fdb->width < 1 || sbuf.st_size < fdb->fsiz || fdb->limsiz < FDBHEADSIZ ||
-       fdb->fsiz > fdb->limsiz){
-      tcfdbsetecode(fdb, TCEMETA, __FILE__, __LINE__, __func__);
-      close(fd);
-      return false;
-    }
-    if(sbuf.st_size > fdb->fsiz) fdb->fsiz = sbuf.st_size;
-  }
-  void *map = mmap(0, fdb->limsiz, PROT_READ | ((omode & FDBOWRITER) ? PROT_WRITE : 0),
-                   MAP_SHARED, fd, 0);
-  if(map == MAP_FAILED){
-    tcfdbsetecode(fdb, TCEMMAP, __FILE__, __LINE__, __func__);
-    close(fd);
-    return false;
-  }
-  if(fdb->width <= UINT8_MAX){
-    fdb->wsiz = sizeof(uint8_t);
-  } else if(fdb->width <= UINT16_MAX){
-    fdb->wsiz = sizeof(uint16_t);
-  } else {
-    fdb->wsiz = sizeof(uint32_t);
-  }
-  fdb->rsiz = fdb->width + fdb->wsiz;
-  fdb->limid = (fdb->limsiz - FDBHEADSIZ) / fdb->rsiz;
-  fdb->path = tcstrdup(path);
-  fdb->fd = fd;
-  fdb->omode = omode;
-  fdb->iter = 0;
-  fdb->map = map;
-  fdb->array = (unsigned char *)map + FDBHEADSIZ;
-  fdb->ecode = TCESUCCESS;
-  fdb->fatal = false;
-  fdb->inode = (uint64_t)sbuf.st_ino;
-  fdb->mtime = sbuf.st_mtime;
-  if(fdb->omode & FDBOWRITER) tcfdbsetflag(fdb, FDBFOPEN, true);
+  TCTESTYIELD();
   return true;
 }
 
 
-/* Close a fixed-length database object.
+/* Unlock the write ahead logging file of the fixed-length database object.
    `fdb' specifies the fixed-length database object.
    If successful, the return value is true, else, it is false. */
-static bool tcfdbcloseimpl(TCFDB *fdb){
+static bool tcfdbunlockwal(TCFDB *fdb){
   assert(fdb);
-  bool err = false;
-  if(fdb->omode & FDBOWRITER) tcfdbsetflag(fdb, FDBFOPEN, false);
-  TCFREE(fdb->path);
-  if((fdb->omode & FDBOWRITER) && !tcfdbmemsync(fdb, false)) err = true;
-  if(munmap(fdb->map, fdb->limsiz) == -1){
-    tcfdbsetecode(fdb, TCEMMAP, __FILE__, __LINE__, __func__);
-    err = true;
+  if(pthread_mutex_unlock(fdb->wmtx) != 0){
+    tcfdbsetecode(fdb, TCETHREAD, __FILE__, __LINE__, __func__);
+    return false;
   }
-  if(close(fdb->fd) == -1){
-    tcfdbsetecode(fdb, TCECLOSE, __FILE__, __LINE__, __func__);
-    err = true;
-  }
-  fdb->path = NULL;
-  fdb->fd = -1;
-  return !err;
-}
-
-
-/* Get the previous record of a record.
-   `fdb' specifies the fixed-length database object.
-   `id' specifies the ID number.
-   The return value is the ID number of the previous record or 0 if no record corresponds. */
-static int64_t tcfdbprevid(TCFDB *fdb, int64_t id){
-  assert(fdb && id >= 0);
-  id--;
-  while(id >= fdb->min){
-    TCDODEBUG(fdb->cnt_readrec++);
-    unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
-    unsigned char *rp = rec;
-    uint32_t osiz;
-    uint16_t snum;
-    uint32_t lnum;
-    switch(fdb->wsiz){
-    case 1:
-      osiz = *(rp++);
-      break;
-    case 2:
-      memcpy(&snum, rp, sizeof(snum));
-      osiz = TCITOHS(snum);
-      rp += sizeof(snum);
-      break;
-    default:
-      memcpy(&lnum, rp, sizeof(lnum));
-      osiz = TCITOHL(lnum);
-      rp += sizeof(lnum);
-      break;
-    }
-    if(osiz > 0 || *rp != 0) return id;
-    id--;
-  }
-  return 0;
-}
-
-
-/* Get the next record of a record.
-   `fdb' specifies the fixed-length database object.
-   `id' specifies the ID number.
-   The return value is the ID number of the next record or 0 if no record corresponds. */
-static int64_t tcfdbnextid(TCFDB *fdb, int64_t id){
-  assert(fdb && id >= 0);
-  id++;
-  while(id <= fdb->max){
-    TCDODEBUG(fdb->cnt_readrec++);
-    unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
-    unsigned char *rp = rec;
-    uint32_t osiz;
-    uint16_t snum;
-    uint32_t lnum;
-    switch(fdb->wsiz){
-    case 1:
-      osiz = *(rp++);
-      break;
-    case 2:
-      memcpy(&snum, rp, sizeof(snum));
-      osiz = TCITOHS(snum);
-      rp += sizeof(snum);
-      break;
-    default:
-      memcpy(&lnum, rp, sizeof(lnum));
-      osiz = TCITOHL(lnum);
-      rp += sizeof(lnum);
-      break;
-    }
-    if(osiz > 0 || *rp != 0) return id;
-    id++;
-  }
-  return 0;
-}
-
-
-/* Store a record.
-   `fdb' specifies the fixed-length database object.
-   `id' specifies the ID number.
-   `vbuf' specifies the pointer to the region of the value.
-   `vsiz' specifies the size of the region of the value.
-   `dmode' specifies behavior when the key overlaps.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdbputimpl(TCFDB *fdb, int64_t id, const void *vbuf, int vsiz, int dmode){
-  assert(fdb && id > 0 && vbuf && vsiz >= 0);
-  if(vsiz > fdb->width) vsiz = fdb->width;
-  TCDODEBUG(fdb->cnt_readrec++);
-  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
-  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
-  if(nsiz > fdb->fsiz){
-    if(nsiz > fdb->limsiz){
-      tcfdbsetecode(fdb, TCEINVALID, __FILE__, __LINE__, __func__);
-      return false;
-    }
-    if(!FDBLOCKATTR(fdb)) return false;
-    if(nsiz > fdb->fsiz){
-      if(nsiz + fdb->rsiz * FDBTRUNCALW < fdb->limsiz) nsiz += fdb->rsiz * FDBTRUNCALW;
-      if(ftruncate(fdb->fd, nsiz) == -1){
-        tcfdbsetecode(fdb, TCETRUNC, __FILE__, __LINE__, __func__);
-        FDBUNLOCKATTR(fdb);
-        return false;
-      }
-      TCDODEBUG(fdb->cnt_truncfile++);
-      fdb->fsiz = nsiz;
-      unsigned char *wp = rec;
-      uint16_t snum;
-      uint32_t lnum;
-      switch(fdb->wsiz){
-      case 1:
-        *(wp++) = vsiz;
-        break;
-      case 2:
-        snum = TCHTOIS(vsiz);
-        memcpy(wp, &snum, sizeof(snum));
-        wp += sizeof(snum);
-        break;
-      default:
-        lnum = TCHTOIL(vsiz);
-        memcpy(wp, &lnum, sizeof(lnum));
-        wp += sizeof(lnum);
-        break;
-      }
-      if(vsiz > 0){
-        memcpy(wp, vbuf, vsiz);
-      } else {
-        *wp = 1;
-      }
-      TCDODEBUG(fdb->cnt_writerec++);
-      fdb->rnum++;
-      if(fdb->min < 1 || id < fdb->min) fdb->min = id;
-      if(fdb->max < 1 || id > fdb->max) fdb->max = id;
-      FDBUNLOCKATTR(fdb);
-      return true;
-    }
-    FDBUNLOCKATTR(fdb);
-  }
-  unsigned char *rp = rec;
-  uint32_t osiz;
-  uint16_t snum;
-  uint32_t lnum;
-  switch(fdb->wsiz){
-  case 1:
-    osiz = *(rp++);
-    break;
-  case 2:
-    memcpy(&snum, rp, sizeof(snum));
-    osiz = TCITOHS(snum);
-    rp += sizeof(snum);
-    break;
-  default:
-    memcpy(&lnum, rp, sizeof(lnum));
-    osiz = TCITOHL(lnum);
-    rp += sizeof(lnum);
-    break;
-  }
-  bool miss = osiz == 0 && *rp == 0;
-  if(dmode != FDBPDOVER && !miss){
-    if(dmode == FDBPDKEEP){
-      tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
-      return false;
-    }
-    if(dmode == FDBPDCAT){
-      vsiz = tclmin(vsiz, fdb->width - osiz);
-      unsigned char *wp = rec;
-      int usiz = osiz + vsiz;
-      switch(fdb->wsiz){
-      case 1:
-        *(wp++) = usiz;
-        break;
-      case 2:
-        snum = TCHTOIS(usiz);
-        memcpy(wp, &snum, sizeof(snum));
-        wp += sizeof(snum);
-        break;
-      default:
-        lnum = TCHTOIL(usiz);
-        memcpy(wp, &lnum, sizeof(lnum));
-        wp += sizeof(lnum);
-        break;
-      }
-      if(usiz > 0){
-        memcpy(wp + osiz, vbuf, vsiz);
-      } else {
-        *wp = 1;
-      }
-      TCDODEBUG(fdb->cnt_writerec++);
-      return true;
-    }
-    if(dmode == FDBPDADDINT){
-      if(osiz != sizeof(int)){
-        tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
-        return false;
-      }
-      int lnum;
-      memcpy(&lnum, rp, sizeof(lnum));
-      if(*(int *)vbuf == 0){
-        *(int *)vbuf = lnum;
-        return true;
-      }
-      lnum += *(int *)vbuf;
-      *(int *)vbuf = lnum;
-      memcpy(rp, &lnum, sizeof(lnum));
-      return true;
-    }
-    if(dmode == FDBPDADDDBL){
-      if(osiz != sizeof(double)){
-        tcfdbsetecode(fdb, TCEKEEP, __FILE__, __LINE__, __func__);
-        return false;
-      }
-      double dnum;
-      memcpy(&dnum, rp, sizeof(dnum));
-      if(*(double *)vbuf == 0.0){
-        *(double *)vbuf = dnum;
-        return true;
-      }
-      dnum += *(double *)vbuf;
-      *(double *)vbuf = dnum;
-      memcpy(rp, &dnum, sizeof(dnum));
-      return true;
-    }
-  }
-  unsigned char *wp = rec;
-  switch(fdb->wsiz){
-  case 1:
-    *(wp++) = vsiz;
-    break;
-  case 2:
-    snum = TCHTOIS(vsiz);
-    memcpy(wp, &snum, sizeof(snum));
-    wp += sizeof(snum);
-    break;
-  default:
-    lnum = TCHTOIL(vsiz);
-    memcpy(wp, &lnum, sizeof(lnum));
-    wp += sizeof(lnum);
-    break;
-  }
-  if(vsiz > 0){
-    memcpy(wp, vbuf, vsiz);
-  } else {
-    *wp = 1;
-  }
-  TCDODEBUG(fdb->cnt_writerec++);
-  if(miss){
-    if(!FDBLOCKATTR(fdb)) return false;
-    fdb->rnum++;
-    if(fdb->min < 1 || id < fdb->min) fdb->min = id;
-    if(fdb->max < 1 || id > fdb->max) fdb->max = id;
-    FDBUNLOCKATTR(fdb);
-  }
+  TCTESTYIELD();
   return true;
-}
-
-
-/* Remove a record of a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   `id' specifies the ID number.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdboutimpl(TCFDB *fdb, int64_t id){
-  assert(fdb && id >= 0);
-  TCDODEBUG(fdb->cnt_readrec++);
-  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
-  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
-  if(nsiz > fdb->fsiz){
-    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  unsigned char *rp = rec;
-  uint32_t osiz;
-  uint16_t snum;
-  uint32_t lnum;
-  switch(fdb->wsiz){
-  case 1:
-    osiz = *(rp++);
-    break;
-  case 2:
-    memcpy(&snum, rp, sizeof(snum));
-    osiz = TCITOHS(snum);
-    rp += sizeof(snum);
-    break;
-  default:
-    memcpy(&lnum, rp, sizeof(lnum));
-    osiz = TCITOHL(lnum);
-    rp += sizeof(lnum);
-    break;
-  }
-  if(osiz == 0 && *rp == 0){
-    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  memset(rec, 0, fdb->wsiz + 1);
-  TCDODEBUG(fdb->cnt_writerec++);
-  if(!FDBLOCKATTR(fdb)) return false;
-  fdb->rnum--;
-  if(fdb->rnum < 1){
-    fdb->min = 0;
-    fdb->max = 0;
-  } else if(fdb->rnum < 2){
-    if(fdb->min == id){
-      fdb->min = fdb->max;
-    } else if(fdb->max == id){
-      fdb->max = fdb->min;
-    }
-  } else {
-    if(id == fdb->min) fdb->min = tcfdbnextid(fdb, id);
-    if(id == fdb->max) fdb->max = tcfdbprevid(fdb, id);
-  }
-  FDBUNLOCKATTR(fdb);
-  return true;
-}
-
-
-/* Retrieve a record.
-   `fdb' specifies the fixed-length database object.
-   `id' specifies the ID number.
-   `sp' specifies the pointer to the variable into which the size of the region of the return
-   value is assigned.
-   If successful, the return value is the pointer to the region of the value of the corresponding
-   record. */
-static const void *tcfdbgetimpl(TCFDB *fdb, int64_t id, int *sp){
-  assert(fdb && id >= 0 && sp);
-  TCDODEBUG(fdb->cnt_readrec++);
-  unsigned char *rec = fdb->array + (id - 1) * (fdb->rsiz);
-  uint64_t nsiz = FDBHEADSIZ + id * fdb->rsiz;
-  if(nsiz > fdb->fsiz){
-    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  unsigned char *rp = rec;
-  uint32_t osiz;
-  uint16_t snum;
-  uint32_t lnum;
-  switch(fdb->wsiz){
-  case 1:
-    osiz = *(rp++);
-    break;
-  case 2:
-    memcpy(&snum, rp, sizeof(snum));
-    osiz = TCITOHS(snum);
-    rp += sizeof(snum);
-    break;
-  default:
-    memcpy(&lnum, rp, sizeof(lnum));
-    osiz = TCITOHL(lnum);
-    rp += sizeof(lnum);
-    break;
-  }
-  if(osiz == 0 && *rp == 0){
-    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
-    return false;
-  }
-  *sp = osiz;
-  return rp;
-}
-
-
-/* Initialize the iterator of a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdbiterinitimpl(TCFDB *fdb){
-  assert(fdb);
-  fdb->iter = fdb->min;
-  return true;
-}
-
-
-/* Get the next key of the iterator of a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   If successful, the return value is the next ID number of the iterator, else, it is 0. */
-static uint64_t tcfdbiternextimpl(TCFDB *fdb){
-  assert(fdb);
-  if(fdb->iter < 1){
-    tcfdbsetecode(fdb, TCENOREC, __FILE__, __LINE__, __func__);
-    return 0;
-  }
-  uint64_t cur = fdb->iter;
-  fdb->iter = tcfdbnextid(fdb, fdb->iter);
-  return cur;
-}
-
-
-/* Get range matching ID numbers in a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   `lower' specifies the lower limit of the range.
-   `upper' specifies the upper limit of the range.
-   `max' specifies the maximum number of keys to be fetched.
-   `np' specifies the pointer to the variable into which the number of elements of the return
-   value is assigned.
-   If successful, the return value is the pointer to an array of ID numbers of the corresponding
-   records. */
-static uint64_t *tcfdbrangeimpl(TCFDB *fdb, int64_t lower, int64_t upper, int max, int *np){
-  assert(fdb && lower > 0 && upper > 0 && np);
-  if(lower < fdb->min) lower = fdb->min;
-  if(upper > fdb->max) upper = fdb->max;
-  if(max < 0) max = INT_MAX;
-  int anum = FDBIDARYUNIT;
-  uint64_t *ids;
-  TCMALLOC(ids, anum * sizeof(*ids));
-  int num = 0;
-  for(int64_t i = lower; i <= upper && num < max; i++){
-    int vsiz;
-    const void *vbuf = tcfdbgetimpl(fdb, i, &vsiz);
-    if(vbuf){
-      if(num >= anum){
-        anum *= 2;
-        TCREALLOC(ids, ids, anum * sizeof(*ids));
-      }
-      ids[num++] = i;
-    }
-  }
-  *np = num;
-  return ids;
-}
-
-
-/* Optimize the file of a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   `width' specifies the width of the value of each record.
-   `limsiz' specifies the limit size of the database file.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdboptimizeimpl(TCFDB *fdb, int32_t width, int64_t limsiz){
-  assert(fdb);
-  if(width < 1) width = fdb->width;
-  if(limsiz < 1) limsiz = fdb->limsiz;
-  char *tpath = tcsprintf("%s%ctmp%c%llu", fdb->path, MYEXTCHR, MYEXTCHR, fdb->inode);
-  TCFDB *tfdb = tcfdbnew();
-  tcfdbtune(tfdb, width, limsiz);
-  if(!tcfdbopen(tfdb, tpath, FDBOWRITER | FDBOCREAT | FDBOTRUNC)){
-    tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
-    tcfdbdel(tfdb);
-    TCFREE(tpath);
-    return false;
-  }
-  bool err = false;
-  int64_t max = fdb->max;
-  for(int i = fdb->min; !err && i <= max; i++){
-    int vsiz;
-    const void *vbuf = tcfdbgetimpl(fdb, i, &vsiz);
-    if(vbuf && !tcfdbput(tfdb, i, vbuf, vsiz)){
-      tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
-      err = true;
-    }
-  }
-  if(!tcfdbclose(tfdb)){
-    tcfdbsetecode(fdb, tfdb->ecode, __FILE__, __LINE__, __func__);
-    err = true;
-  }
-  tcfdbdel(tfdb);
-  if(unlink(fdb->path) == -1){
-    tcfdbsetecode(fdb, TCEUNLINK, __FILE__, __LINE__, __func__);
-    err = true;
-  }
-  if(rename(tpath, fdb->path) == -1){
-    tcfdbsetecode(fdb, TCERENAME, __FILE__, __LINE__, __func__);
-    err = true;
-  }
-  TCFREE(tpath);
-  if(err) return false;
-  tpath = tcstrdup(fdb->path);
-  int omode = (fdb->omode & ~FDBOCREAT) & ~FDBOTRUNC;
-  if(!tcfdbcloseimpl(fdb)){
-    TCFREE(tpath);
-    return false;
-  }
-  bool rv = tcfdbopenimpl(fdb, tpath, omode);
-  TCFREE(tpath);
-  return rv;
-}
-
-
-/* Remove all records of a fixed-length database object.
-   `fdb' specifies the fixed-length database object.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdbvanishimpl(TCFDB *fdb){
-  assert(fdb);
-  char *path = tcstrdup(fdb->path);
-  int omode = fdb->omode;
-  bool err = false;
-  if(!tcfdbcloseimpl(fdb)) err = true;
-  if(!tcfdbopenimpl(fdb, path, FDBOTRUNC | omode)) err = true;
-  TCFREE(path);
-  return !err;
-}
-
-
-/* Copy the database file of a hash database object.
-   `fdb' specifies the hash database object.
-   `path' specifies the path of the destination file.
-   If successful, the return value is true, else, it is false. */
-static bool tcfdbcopyimpl(TCFDB *fdb, const char *path){
-  assert(fdb && path);
-  bool err = false;
-  fdb->flags &= ~FDBFOPEN;
-  if((fdb->omode & FDBOWRITER) && !tcfdbmemsync(fdb, false)) err = true;
-  if(*path == '@'){
-    char tsbuf[TCNUMBUFSIZ];
-    sprintf(tsbuf, "%llu", (unsigned long long)(tctime() * 1000000));
-    const char *args[3];
-    args[0] = path + 1;
-    args[1] = fdb->path;
-    args[2] = tsbuf;
-    if(tcsystem(args, sizeof(args) / sizeof(*args)) != 0) err = true;
-  } else {
-    if(!tccopyfile(fdb->path, path)){
-      tcfdbsetecode(fdb, TCEMISC, __FILE__, __LINE__, __func__);
-      err = true;
-    }
-  }
-  fdb->flags |= FDBFOPEN;
-  return !err;
-}
-
-
-/* Process each record atomically of a fixed-length database object. */
-static bool tcfdbforeachimpl(TCFDB *fdb, TCITER iter, void *op){
-  bool err = false;
-  uint64_t id = fdb->min;
-  while(id > 0){
-    int vsiz;
-    const void *vbuf = tcfdbgetimpl(fdb, id, &vsiz);
-    if(vbuf){
-      char kbuf[TCNUMBUFSIZ];
-      int ksiz = sprintf(kbuf, "%llu", (unsigned long long)id);
-      if(!iter(kbuf, ksiz, vbuf, vsiz, op)) break;
-    } else {
-      tcfdbsetecode(fdb, TCEMISC, __FILE__, __LINE__, __func__);
-      err = true;
-    }
-    id = tcfdbnextid(fdb, id);
-  }
-  return !err;
 }
 
 
@@ -2051,13 +2698,17 @@ static bool tcfdbforeachimpl(TCFDB *fdb, TCITER iter, void *op){
 void tcfdbprintmeta(TCFDB *fdb){
   assert(fdb);
   if(fdb->dbgfd < 0) return;
+  int dbgfd = (fdb->dbgfd == UINT16_MAX) ? 1 : fdb->dbgfd;
   char buf[FDBIOBUFSIZ];
   char *wp = buf;
   wp += sprintf(wp, "META:");
   wp += sprintf(wp, " mmtx=%p", (void *)fdb->mmtx);
   wp += sprintf(wp, " amtx=%p", (void *)fdb->amtx);
   wp += sprintf(wp, " rmtxs=%p", (void *)fdb->rmtxs);
+  wp += sprintf(wp, " tmtx=%p", (void *)fdb->tmtx);
+  wp += sprintf(wp, " wmtx=%p", (void *)fdb->wmtx);
   wp += sprintf(wp, " eckey=%p", (void *)fdb->eckey);
+  wp += sprintf(wp, " rpath=%s", fdb->rpath ? fdb->rpath : "-");
   wp += sprintf(wp, " type=%02X", fdb->type);
   wp += sprintf(wp, " flags=%02X", fdb->flags);
   wp += sprintf(wp, " width=%u", fdb->width);
@@ -2079,12 +2730,15 @@ void tcfdbprintmeta(TCFDB *fdb){
   wp += sprintf(wp, " fatal=%u", fdb->fatal);
   wp += sprintf(wp, " inode=%llu", (unsigned long long)fdb->inode);
   wp += sprintf(wp, " mtime=%llu", (unsigned long long)fdb->mtime);
+  wp += sprintf(wp, " tran=%d", fdb->tran);
+  wp += sprintf(wp, " walfd=%d", fdb->walfd);
+  wp += sprintf(wp, " walend=%llu", (unsigned long long)fdb->walend);
   wp += sprintf(wp, " dbgfd=%d", fdb->dbgfd);
   wp += sprintf(wp, " cnt_writerec=%lld", (long long)fdb->cnt_writerec);
   wp += sprintf(wp, " cnt_readrec=%lld", (long long)fdb->cnt_readrec);
   wp += sprintf(wp, " cnt_truncfile=%lld", (long long)fdb->cnt_truncfile);
   *(wp++) = '\n';
-  tcwrite(fdb->dbgfd, buf, wp - buf);
+  tcwrite(dbgfd, buf, wp - buf);
 }
 
 

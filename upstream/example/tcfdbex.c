@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 int main(int argc, char **argv){
-
   TCFDB *fdb;
   int ecode;
   char *key, *value;
@@ -14,7 +13,7 @@ int main(int argc, char **argv){
   fdb = tcfdbnew();
 
   /* open the database */
-  if(!tcfdbopen(fdb, "casket.fdb", FDBOWRITER | FDBOCREAT)){
+  if(!tcfdbopen(fdb, "casket.tcf", FDBOWRITER | FDBOCREAT)){
     ecode = tcfdbecode(fdb);
     fprintf(stderr, "open error: %s\n", tcfdberrmsg(ecode));
   }

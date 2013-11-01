@@ -46,7 +46,8 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
 static int procout(const char *path, const char *kbuf, int ksiz, int omode);
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz);
 static int proclist(const char *path, int omode, int max, bool pv, bool px, const char *fmstr);
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode);
+static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode,
+                        bool df);
 static int procimporttsv(const char *path, const char *file, int omode, bool sc);
 static int procversion(void);
 
@@ -56,7 +57,7 @@ int main(int argc, char **argv){
   g_progname = argv[0];
   g_dbgfd = -1;
   const char *ebuf = getenv("TCDBGFD");
-  if(ebuf) g_dbgfd = tcatoi(ebuf);
+  if(ebuf) g_dbgfd = tcatoix(ebuf);
   if(argc < 2) usage();
   int rv = 0;
   if(!strcmp(argv[1], "create")){
@@ -91,12 +92,12 @@ static void usage(void){
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s create [-tl] [-td|-tb|-tt|-tx] path [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
-  fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
+  fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc|-dai|-dad] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
   fprintf(stderr, "  %s list [-nl|-nb] [-m num] [-pv] [-px] [-fm str] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb|-tt|-tx] [-tz] [-nl|-nb] path"
-          " [bnum [apow [fpow]]]\n", g_progname);
+  fprintf(stderr, "  %s optimize [-tl] [-td|-tb|-tt|-tx] [-tz] [-nl|-nb] [-df]"
+          " path [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
@@ -191,9 +192,9 @@ static int runcreate(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
-  int apow = astr ? tcatoi(astr) : -1;
-  int fpow = fstr ? tcatoi(fstr) : -1;
+  int bnum = bstr ? tcatoix(bstr) : -1;
+  int apow = astr ? tcatoix(astr) : -1;
+  int fpow = fstr ? tcatoix(fstr) : -1;
   int rv = proccreate(path, bnum, apow, fpow, opts);
   return rv;
 }
@@ -242,6 +243,10 @@ static int runput(int argc, char **argv){
         dmode = -1;
       } else if(!strcmp(argv[i], "-dc")){
         dmode = 1;
+      } else if(!strcmp(argv[i], "-dai")){
+        dmode = 10;
+      } else if(!strcmp(argv[i], "-dad")){
+        dmode = 11;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else {
@@ -258,8 +263,8 @@ static int runput(int argc, char **argv){
     }
   }
   if(!path || !key || !value) usage();
-  int ksiz, vsiz;
   char *kbuf, *vbuf;
+  int ksiz, vsiz;
   if(sx){
     kbuf = tchexdecode(key, &ksiz);
     vbuf = tchexdecode(value, &vsiz);
@@ -378,7 +383,7 @@ static int runlist(int argc, char **argv){
         omode |= HDBOLCKNB;
       } else if(!strcmp(argv[i], "-m")){
         if(++i >= argc) usage();
-        max = tcatoi(argv[i]);
+        max = tcatoix(argv[i]);
       } else if(!strcmp(argv[i], "-pv")){
         pv = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -409,6 +414,7 @@ static int runoptimize(int argc, char **argv){
   char *fstr = NULL;
   int opts = UINT8_MAX;
   int omode = 0;
+  bool df = false;
   for(int i = 2; i < argc; i++){
     if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
@@ -432,6 +438,8 @@ static int runoptimize(int argc, char **argv){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= HDBOLCKNB;
+      } else if(!strcmp(argv[i], "-df")){
+        df = true;
       } else {
         usage();
       }
@@ -448,10 +456,10 @@ static int runoptimize(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int bnum = bstr ? tcatoi(bstr) : -1;
-  int apow = astr ? tcatoi(astr) : -1;
-  int fpow = fstr ? tcatoi(fstr) : -1;
-  int rv = procoptimize(path, bnum, apow, fpow, opts, omode);
+  int bnum = bstr ? tcatoix(bstr) : -1;
+  int apow = astr ? tcatoix(astr) : -1;
+  int fpow = fstr ? tcatoix(fstr) : -1;
+  int rv = procoptimize(path, bnum, apow, fpow, opts, omode, df);
   return rv;
 }
 
@@ -535,9 +543,10 @@ static int procinform(const char *path, int omode){
   printf("path: %s\n", npath);
   const char *type = "(unknown)";
   switch(tchdbtype(hdb)){
-  case TCDBTHASH: type = "hash"; break;
-  case TCDBTBTREE: type = "btree"; break;
-  case TCDBTFIXED: type = "fixed"; break;
+    case TCDBTHASH: type = "hash"; break;
+    case TCDBTBTREE: type = "btree"; break;
+    case TCDBTFIXED: type = "fixed"; break;
+    case TCDBTTABLE: type = "table"; break;
   }
   printf("database type: %s\n", type);
   uint8_t flags = tchdbflags(hdb);
@@ -586,24 +595,36 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
   }
   bool err = false;
   switch(dmode){
-  case -1:
-    if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
-      err = true;
-    }
-    break;
-  case 1:
-    if(!tchdbputcat(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
-      err = true;
-    }
-    break;
-  default:
-    if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
-      err = true;
-    }
-    break;
+    case -1:
+      if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz)){
+        printerr(hdb);
+        err = true;
+      }
+      break;
+    case 1:
+      if(!tchdbputcat(hdb, kbuf, ksiz, vbuf, vsiz)){
+        printerr(hdb);
+        err = true;
+      }
+      break;
+    case 10:
+      if(tchdbaddint(hdb, kbuf, ksiz, tcatoi(vbuf)) == INT_MIN){
+        printerr(hdb);
+        err = true;
+      }
+      break;
+    case 11:
+      if(isnan(tchdbadddouble(hdb, kbuf, ksiz, tcatof(vbuf)))){
+        printerr(hdb);
+        err = true;
+      }
+      break;
+    default:
+      if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
+        printerr(hdb);
+        err = true;
+      }
+      break;
   }
   if(!tchdbclose(hdb)){
     if(!err) printerr(hdb);
@@ -727,7 +748,8 @@ static int proclist(const char *path, int omode, int max, bool pv, bool px, cons
 
 
 /* perform optimize command */
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode){
+static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode,
+                        bool df){
   TCHDB *hdb = tchdbnew();
   if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
   if(!tchdbsetcodecfunc(hdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(hdb);
@@ -737,9 +759,16 @@ static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts
     return 1;
   }
   bool err = false;
-  if(!tchdboptimize(hdb, bnum, apow, fpow, opts)){
-    printerr(hdb);
-    err = true;
+  if(df){
+    if(!tchdbdefrag(hdb, INT64_MAX)){
+      printerr(hdb);
+      err = true;
+    }
+  } else {
+    if(!tchdboptimize(hdb, bnum, apow, fpow, opts)){
+      printerr(hdb);
+      err = true;
+    }
   }
   if(!tchdbclose(hdb)){
     if(!err) printerr(hdb);
@@ -776,7 +805,7 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
       continue;
     }
     *pv = '\0';
-    if(sc) tcstrtolower(line);
+    if(sc) tcstrutfnorm(line, TCUNSPACE | TCUNLOWER | TCUNNOACC | TCUNWIDTH);
     if(!tchdbput2(hdb, line, pv + 1)){
       printerr(hdb);
       err = true;
@@ -802,7 +831,8 @@ static int procimporttsv(const char *path, const char *file, int omode, bool sc)
 
 /* perform version command */
 static int procversion(void){
-  printf("Tokyo Cabinet version %s (%d:%s)\n", tcversion, _TC_LIBVER, _TC_FORMATVER);
+  printf("Tokyo Cabinet version %s (%d:%s) for %s\n",
+         tcversion, _TC_LIBVER, _TC_FORMATVER, TCSYSNAME);
   printf("Copyright (C) 2006-2009 Mikio Hirabayashi\n");
   return 0;
 }
