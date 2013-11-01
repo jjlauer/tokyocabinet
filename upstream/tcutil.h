@@ -269,7 +269,7 @@ int tclistnum(const TCLIST *list);
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string.  If `index' is equal to or more than
    the number of elements, the return value is `NULL'. */
-const char *tclistval(const TCLIST *list, int index, int *sp);
+const void *tclistval(const TCLIST *list, int index, int *sp);
 
 
 /* Get the string of an element of a list object.
@@ -284,7 +284,7 @@ const char *tclistval2(const TCLIST *list, int index);
    `list' specifies the list object.
    `ptr' specifies the pointer to the region of the new element.
    `size' specifies the size of the region. */
-void tclistpush(TCLIST *list, const char *ptr, int size);
+void tclistpush(TCLIST *list, const void *ptr, int size);
 
 
 /* Add a string element at the end of a list object.
@@ -298,7 +298,7 @@ void tclistpush2(TCLIST *list, const char *str);
    `ptr' specifies the pointer to the region allocated with `malloc' call.
    `size' specifies the size of the region.
    Note that the specified region is released when the object is deleted. */
-void tclistpushmalloc(TCLIST *list, char *ptr, int size);
+void tclistpushmalloc(TCLIST *list, void *ptr, int size);
 
 
 /* Remove an element of the end of a list object.
@@ -310,7 +310,7 @@ void tclistpushmalloc(TCLIST *list, char *ptr, int size);
    the return value can be treated as a character string.  Because the region of the return
    value is allocated with the `malloc' call, it should be released with the `free' call when it
    is no longer in use.  If the list is empty, the return value is `NULL'. */
-char *tclistpop(TCLIST *list, int *sp);
+void *tclistpop(TCLIST *list, int *sp);
 
 
 /* Remove a string element of the end of a list object.
@@ -344,7 +344,7 @@ void tclistunshift2(TCLIST *list, const char *str);
    the return value can be treated as a character string.  Because the region of the return
    value is allocated with the `malloc' call, it should be released with the `free' call when it
    is no longer in use.  If the list is empty, the return value is `NULL'. */
-char *tclistshift(TCLIST *list, int *sp);
+void *tclistshift(TCLIST *list, int *sp);
 
 
 /* Remove a string element of the top of a list object.
@@ -384,7 +384,7 @@ void tclistinsert2(TCLIST *list, int index, const char *str);
    value is allocated with the `malloc' call, it should be released with the `free' call when it
    is no longer in use.  If `index' is equal to or more than the number of elements, no element
    is removed and the return value is `NULL'. */
-char *tclistremove(TCLIST *list, int index, int *sp);
+void *tclistremove(TCLIST *list, int index, int *sp);
 
 
 /* Remove a string element at the specified location of a list object.
@@ -430,7 +430,7 @@ void tclistsortci(TCLIST *list);
    `size' specifies the size of the region.
    The return value is the index of a corresponding element or -1 if there is no corresponding
    element.  If two or more elements correspond, the former returns. */
-int tclistlsearch(const TCLIST *list, const char *ptr, int size);
+int tclistlsearch(const TCLIST *list, const void *ptr, int size);
 
 
 /* Search a list object for an element using binary search.
@@ -439,7 +439,7 @@ int tclistlsearch(const TCLIST *list, const char *ptr, int size);
    `size' specifies the size of the region.
    The return value is the index of a corresponding element or -1 if there is no corresponding
    element.  If two or more elements correspond, which returns is not defined. */
-int tclistbsearch(const TCLIST *list, const char *ptr, int size);
+int tclistbsearch(const TCLIST *list, const void *ptr, int size);
 
 
 /* Clear a list object.
@@ -455,7 +455,7 @@ void tclistclear(TCLIST *list);
    The return value is the pointer to the region of the result serial region.
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
-char *tclistdump(const TCLIST *list, int *sp);
+void *tclistdump(const TCLIST *list, int *sp);
 
 
 /* Create a list object from a serialized byte array.
@@ -464,7 +464,7 @@ char *tclistdump(const TCLIST *list, int *sp);
    The return value is a new list object.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
-TCLIST *tclistload(const char *ptr, int size);
+TCLIST *tclistload(const void *ptr, int size);
 
 
 
@@ -600,7 +600,7 @@ bool tcmapout2(TCMAP *map, const void *kstr);
    corresponding record.  `NULL' is returned when no record corresponds.
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string. */
-const char *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp);
+const void *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp);
 
 
 /* Retrieve a string record in a map object.
@@ -645,7 +645,7 @@ void tcmapiterinit(TCMAP *map);
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string.
    The order of iteration is assured to be the same as the stored order. */
-const char *tcmapiternext(TCMAP *map, int *sp);
+const void *tcmapiternext(TCMAP *map, int *sp);
 
 
 /* Get the next key string of the iterator of a map object.
@@ -663,7 +663,7 @@ const char *tcmapiternext2(TCMAP *map);
    The return value is the pointer to the region of the value of the corresponding record.
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string. */
-const char *tcmapiterval(const char *kbuf, int *sp);
+const void *tcmapiterval(const void *kbuf, int *sp);
 
 
 /* Get the value string binded to the key fetched from the iterator of a map object.
@@ -707,7 +707,7 @@ void tcmapclear(TCMAP *map);
    The return value is the pointer to the region of the result serial region.
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
-char *tcmapdump(const TCMAP *map, int *sp);
+void *tcmapdump(const TCMAP *map, int *sp);
 
 
 /* Create a map object from a serialized byte array.
@@ -716,7 +716,7 @@ char *tcmapdump(const TCMAP *map, int *sp);
    The return value is a new map object.
    Because the object of the return value is created with the function `tcmapnew', it should be
    deleted with the function `tcmapdel' when it is no longer in use. */
-TCMAP *tcmapload(const char *ptr, int size);
+TCMAP *tcmapload(const void *ptr, int size);
 
 
 /* Extract a map record from a serialized byte array.
@@ -730,7 +730,7 @@ TCMAP *tcmapload(const char *ptr, int size);
    corresponding record.  `NULL' is returned when no record corresponds.
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string. */
-char *tcmaploadone(const char *ptr, int size, const char *kbuf, int ksiz, int *sp);
+void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *sp);
 
 
 
@@ -935,7 +935,7 @@ char *tcstrcututf(char *str, int num);
 /* Create a list object by splitting a string.
    `str' specifies the source string.
    `delim' specifies a string containing delimiting characters.
-   The return value is a list object.
+   The return value is a list object of the split elements.
    If two delimiters are successive, it is assumed that an empty element is between the two.
    Because the object of the return value is created with the function `tclistnew', it should
    be deleted with the function `tclistdel' when it is no longer in use. */
@@ -945,6 +945,7 @@ TCLIST *tcstrsplit(const char *str, const char *delim);
 /* Get the time of day in milliseconds.
    The return value is the time of day in milliseconds. */
 double tctime(void);
+
 
 
 /*************************************************************************************************
@@ -964,7 +965,7 @@ double tctime(void);
    return value can be treated as a character string.  Because the region of the return value is
    allocated with the `malloc' call, it should be released with the `free' call when when is no
    longer in use.  */
-char *tcreadfile(const char *path, int limit, int *sp);
+void *tcreadfile(const char *path, int limit, int *sp);
 
 
 /* Read every line of a file.
@@ -974,6 +975,14 @@ char *tcreadfile(const char *path, int limit, int *sp);
    function `tclistnew', it should be deleted with the function `tclistdel' when it is no longer
    in use. */
 TCLIST *tcreadfilelines(const char *path);
+
+
+/* Write data into a file.
+   `path' specifies the path of the file.  If it is `NULL', the standard output is specified.
+   `ptr' specifies the pointer to the data region.
+   `size' specifies the size of the region.
+   If successful, the return value is true, else, it is false. */
+bool tcwritefile(const char *path, const void *ptr, int size);
 
 
 /* Read names of files in a directory.
@@ -990,6 +999,30 @@ TCLIST *tcreaddir(const char *path);
    If successful, the return value is true, else, it is false.  False is returned when the link
    does not exist or the permission is denied. */
 bool tcremovelink(const char *path);
+
+
+/* Write data into a file.
+   `fd' specifies the file descriptor.
+   `buf' specifies the buffer to be written.
+   `size' specifies the size of the buffer.
+   The return value is true if successful, else, it is false. */
+bool tcwrite(int fd, const void *buf, size_t size);
+
+
+/* Read data from a file.
+   `fd' specifies the file descriptor.
+   `buf' specifies the buffer to store into.
+   `size' specifies the size of the buffer.
+   The return value is true if successful, else, it is false. */
+bool tcread(int fd, void *buf, size_t size);
+
+
+/* Lock a file.
+   `fd' specifies the file descriptor.
+   `ex' specifies whether an exclusive lock or a shared lock is performed.
+   `nb' specifies whether to request with non-blocking.
+   The return value is true if successful, else, it is false. */
+bool tclock(int fd, bool ex, bool nb);
 
 
 
@@ -1363,9 +1396,9 @@ typedef struct {                         // type of structure for a bit stream o
  *************************************************************************************************/
 
 
-#define _TC_VERSION    "0.3.4"
-#define _TC_LIBVER     106
-#define _TC_FORMATVER  "0.1"
+#define _TC_VERSION    "0.4.1"
+#define _TC_LIBVER     108
+#define _TC_FORMATVER  "0.2"
 
 
 /* Show error message on the standard error output and exit.

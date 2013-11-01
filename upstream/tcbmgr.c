@@ -1,5 +1,5 @@
 /*************************************************************************************************
- * The command line utility of the hash database API
+ * The command line utility of the B+ tree database API
  *                                                      Copyright (C) 2006-2007 Mikio Hirabayashi
  * This file is part of Tokyo Cabinet.
  * Tokyo Cabinet is free software; you can redistribute it and/or modify it under the terms of
@@ -16,6 +16,7 @@
 
 #include <tcutil.h>
 #include <tchdb.h>
+#include <tcbdb.h>
 #include "myconf.h"
 
 #define RECBUFSIZ      32                // buffer for records
@@ -29,7 +30,7 @@ int g_dbgfd;                             // debugging output
 /* function prototypes */
 int main(int argc, char **argv);
 static void usage(void);
-static void printerr(TCHDB *hdb);
+static void printerr(TCBDB *bdb);
 static int printdata(const char *ptr, int size, bool px);
 static char *hextoobj(const char *str, int *sp);
 static int runcreate(int argc, char **argv);
@@ -40,14 +41,16 @@ static int runget(int argc, char **argv);
 static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
 static int runversion(int argc, char **argv);
-static int proccreate(const char *path, int bnum, int apow, int fpow, int opts);
+static int proccreate(const char *path, int lmemb, int nmemb,
+                      int bnum, int apow, int fpow, int opts);
 static int procinform(const char *path, int omode);
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
                    int omode, int dmode);
 static int procout(const char *path, const char *kbuf, int ksiz, int omode);
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz);
-static int proclist(const char *path, int omode, bool pv, bool px);
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode);
+static int proclist(const char *path, int omode, bool pv, bool bk, const char *jstr, bool px);
+static int procoptimize(const char *path, int lmemb, int nmemb,
+                        int bnum, int apow, int fpow, int opts, int omode);
 static int procversion(void);
 
 
@@ -84,17 +87,17 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: the command line utility of the hash database API\n", g_progname);
+  fprintf(stderr, "%s: the command line utility of the B+ tree database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum] [apow] [fpow]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
-  fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
+  fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc|-dd|-db] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
   fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-nl] path key\n", g_progname);
-  fprintf(stderr, "  %s list [-nl|-nb] [-pv] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum] [apow] [fpow]\n",
-          g_progname);
+  fprintf(stderr, "  %s list [-nl|-nb] [-bk] [-pv] [-j str] path\n", g_progname);
+  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path"
+          " [lmebm] [nmemb] [bnum] [apow] [fpow]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -102,10 +105,10 @@ static void usage(void){
 
 
 /* print error information */
-static void printerr(TCHDB *hdb){
-  const char *path = tchdbpath(hdb);
-  int ecode = tchdbecode(hdb);
-  fprintf(stderr, "%s: %s: %d: %s\n", g_progname, path ? path : "-", ecode, tchdberrmsg(ecode));
+static void printerr(TCBDB *bdb){
+  const char *path = tcbdbpath(bdb);
+  int ecode = tcbdbecode(bdb);
+  fprintf(stderr, "%s: %s: %d: %s\n", g_progname, path ? path : "-", ecode, tcbdberrmsg(ecode));
 }
 
 
@@ -150,6 +153,8 @@ static char *hextoobj(const char *str, int *sp){
 /* parse arguments of create command */
 static int runcreate(int argc, char **argv){
   char *path = NULL;
+  char *lmstr = NULL;
+  char *nmstr = NULL;
   char *bstr = NULL;
   char *astr = NULL;
   char *fstr = NULL;
@@ -157,16 +162,20 @@ static int runcreate(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
-        opts |= HDBTLARGE;
+        opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
-        opts |= HDBTDEFLATE;
+        opts |= BDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
-        opts |= HDBTTCBS;
+        opts |= BDBTTCBS;
       } else {
         usage();
       }
     } else if(!path){
       path = argv[i];
+    } else if(!lmstr){
+      lmstr = argv[i];
+    } else if(!nmstr){
+      nmstr = argv[i];
     } else if(!bstr){
       bstr = argv[i];
     } else if(!astr){
@@ -178,10 +187,12 @@ static int runcreate(int argc, char **argv){
     }
   }
   if(!path) usage();
+  int lmemb = lmstr ? atoi(lmstr) : -1;
+  int nmemb = nmstr ? atoi(nmstr) : -1;
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = proccreate(path, bnum, apow, fpow, opts);
+  int rv = proccreate(path, lmemb, nmemb, bnum, apow, fpow, opts);
   return rv;
 }
 
@@ -193,9 +204,9 @@ static int runinform(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else {
         usage();
       }
@@ -222,13 +233,17 @@ static int runput(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-dk")){
         dmode = -1;
       } else if(!strcmp(argv[i], "-dc")){
         dmode = 1;
+      } else if(!strcmp(argv[i], "-dd")){
+        dmode = 2;
+      } else if(!strcmp(argv[i], "-db")){
+        dmode = 3;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else {
@@ -272,9 +287,9 @@ static int runout(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else {
@@ -314,9 +329,9 @@ static int runget(int argc, char **argv){
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-sx")){
         sx = true;
       } else if(!strcmp(argv[i], "-px")){
@@ -354,15 +369,22 @@ static int runlist(int argc, char **argv){
   char *path = NULL;
   int omode = 0;
   bool pv = false;
+  bool bk = false;
+  char *jstr = NULL;
   bool px = false;
   for(int i = 2; i < argc; i++){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else if(!strcmp(argv[i], "-pv")){
         pv = true;
+      } else if(!strcmp(argv[i], "-bk")){
+        bk = true;
+      } else if(!strcmp(argv[i], "-j")){
+        if(++i >= argc) usage();
+        jstr = argv[i];
       } else if(!strcmp(argv[i], "-px")){
         px = true;
       } else {
@@ -375,7 +397,7 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = proclist(path, omode, pv, px);
+  int rv = proclist(path, omode, pv, bk, jstr, px);
   return rv;
 }
 
@@ -383,6 +405,8 @@ static int runlist(int argc, char **argv){
 /* parse arguments of optimize command */
 static int runoptimize(int argc, char **argv){
   char *path = NULL;
+  char *lmstr = NULL;
+  char *nmstr = NULL;
   char *bstr = NULL;
   char *astr = NULL;
   char *fstr = NULL;
@@ -392,24 +416,28 @@ static int runoptimize(int argc, char **argv){
     if(argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
         if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTLARGE;
+        opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
         if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTDEFLATE;
+        opts |= BDBTDEFLATE;
       } else if(!strcmp(argv[i], "-tb")){
         if(opts == UINT8_MAX) opts = 0;
-        opts |= HDBTTCBS;
+        opts |= BDBTTCBS;
       } else if(!strcmp(argv[i], "-tz")){
         if(opts == UINT8_MAX) opts = 0;
       } else if(!strcmp(argv[i], "-nl")){
-        omode |= HDBONOLCK;
+        omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
-        omode |= HDBOLCKNB;
+        omode |= BDBOLCKNB;
       } else {
         usage();
       }
     } else if(!path){
       path = argv[i];
+    } else if(!lmstr){
+      lmstr = argv[i];
+    } else if(!nmstr){
+      nmstr = argv[i];
     } else if(!bstr){
       bstr = argv[i];
     } else if(!astr){
@@ -421,10 +449,12 @@ static int runoptimize(int argc, char **argv){
     }
   }
   if(!path) usage();
+  int lmemb = lmstr ? atoi(lmstr) : -1;
+  int nmemb = nmstr ? atoi(nmstr) : -1;
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procoptimize(path, bnum, apow, fpow, opts, omode);
+  int rv = procoptimize(path, lmemb, nmemb, bnum, apow, fpow, opts, omode);
   return rv;
 }
 
@@ -437,71 +467,71 @@ static int runversion(int argc, char **argv){
 
 
 /* perform create command */
-static int proccreate(const char *path, int bnum, int apow, int fpow, int opts){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbtune(hdb, bnum, apow, fpow, opts)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int proccreate(const char *path, int lmemb, int nmemb,
+                      int bnum, int apow, int fpow, int opts){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbtune(bdb, lmemb, nmemb, bnum, apow, fpow, opts)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
-  if(!tchdbopen(hdb, path, HDBOWRITER | HDBOCREAT | HDBOTRUNC)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
-  if(!tchdbclose(hdb)){
-    printerr(hdb);
+  if(!tcbdbclose(bdb)){
+    printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
 
 /* perform inform command */
 static int procinform(const char *path, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOREADER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
-  const char *npath = tchdbpath(hdb);
+  const char *npath = tcbdbpath(bdb);
   if(!npath) npath = "(unknown)";
   printf("path: %s\n", npath);
-  const char *type = "(unknown)";
-  switch(tchdbtype(hdb)){
-  case HDBTHASH: type = "hash"; break;
-  case HDBTBTREE: type = "btree"; break;
-  }
-  printf("database type: %s\n", type);
-  uint8_t flags = tchdbflags(hdb);
+  printf("database type: btree\n");
+  uint8_t flags = tcbdbflags(bdb);
   printf("additional flags:");
-  if(flags & HDBFOPEN) printf(" open");
-  if(flags & HDBFFATAL) printf(" fatal");
+  if(flags & BDBFOPEN) printf(" open");
+  if(flags & BDBFFATAL) printf(" fatal");
   printf("\n");
-  printf("bucket number: %llu\n", (unsigned long long)tchdbbnum(hdb));
-  if(hdb->cnt_writerec >= 0)
-    printf("used bucket number: %lld\n", (long long)tchdbbnumused(hdb));
-  printf("alignment: %u\n", tchdbalign(hdb));
-  printf("free block pool: %u\n", tchdbfbpmax(hdb));
-  uint8_t opts = tchdbopts(hdb);
+  printf("max leaf member: %d\n", tcbdblmemb(bdb));
+  printf("max node member: %d\n", tcbdbnmemb(bdb));
+  printf("leaf number: %llu\n", (unsigned long long)tcbdblnum(bdb));
+  printf("node number: %llu\n", (unsigned long long)tcbdbnnum(bdb));
+  printf("bucket number: %llu\n", (unsigned long long)tcbdbbnum(bdb));
+  if(bdb->hdb->cnt_writerec >= 0)
+    printf("used bucket number: %lld\n", (long long)tcbdbbnumused(bdb));
+  printf("alignment: %u\n", tcbdbalign(bdb));
+  printf("free block pool: %u\n", tcbdbfbpmax(bdb));
+  uint8_t opts = tcbdbopts(bdb);
   printf("options:");
-  if(opts & HDBTLARGE) printf(" large");
-  if(opts & HDBTDEFLATE) printf(" deflate");
-  if(opts & HDBTTCBS) printf(" tcbs");
+  if(opts & BDBTLARGE) printf(" large");
+  if(opts & BDBTDEFLATE) printf(" deflate");
+  if(opts & BDBTTCBS) printf(" tcbs");
   printf("\n");
-  printf("record number: %llu\n", (unsigned long long)tchdbrnum(hdb));
-  printf("file size: %llu\n", (unsigned long long)tchdbfsiz(hdb));
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  printf("record number: %llu\n", (unsigned long long)tcbdbrnum(bdb));
+  printf("file size: %llu\n", (unsigned long long)tcbdbfsiz(bdb));
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
@@ -509,149 +539,196 @@ static int procinform(const char *path, int omode){
 /* perform put command */
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
                    int omode, int dmode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
   switch(dmode){
   case -1:
-    if(!tchdbputkeep(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcbdbputkeep(bdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(bdb);
       err = true;
     }
     break;
   case 1:
-    if(!tchdbputcat(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcbdbputcat(bdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(bdb);
+      err = true;
+    }
+    break;
+  case 2:
+    if(!tcbdbputdup(bdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(bdb);
+      err = true;
+    }
+    break;
+  case 3:
+    if(!tcbdbputdupback(bdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(bdb);
       err = true;
     }
     break;
   default:
-    if(!tchdbput(hdb, kbuf, ksiz, vbuf, vsiz)){
-      printerr(hdb);
+    if(!tcbdbput(bdb, kbuf, ksiz, vbuf, vsiz)){
+      printerr(bdb);
       err = true;
     }
     break;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
 
 /* perform out command */
 static int procout(const char *path, const char *kbuf, int ksiz, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
-  if(!tchdbout(hdb, kbuf, ksiz)){
-    printerr(hdb);
+  if(!tcbdbout(bdb, kbuf, ksiz)){
+    printerr(bdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
 
 /* perform get command */
 static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
   int vsiz;
-  char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
+  char *vbuf = tcbdbget(bdb, kbuf, ksiz, &vsiz);
   if(vbuf){
     printdata(vbuf, vsiz, px);
     if(!pz) putchar('\n');
     free(vbuf);
   } else {
-    printerr(hdb);
+    printerr(bdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
 
 /* perform list command */
-static int proclist(const char *path, int omode, bool pv, bool px){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOREADER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int proclist(const char *path, int omode, bool pv, bool bk, const char *jstr, bool px){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOREADER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
+  BDBCUR *cur = tcbdbcurnew(bdb);
   bool err = false;
-  if(!tchdbiterinit(hdb)){
-    printerr(hdb);
-    err = true;
+  if(bk){
+    if(jstr){
+      if(!tcbdbcurjumpback(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    } else {
+      if(!tcbdbcurlast(cur) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    }
+  } else {
+    if(jstr){
+      if(!tcbdbcurjump(cur, jstr, strlen(jstr)) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    } else {
+      if(!tcbdbcurfirst(cur) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    }
   }
   TCXSTR *key = tcxstrnew();
   TCXSTR *val = tcxstrnew();
-  while(tchdbiternext3(hdb, key, val)){
+  while(tcbdbcurrec(cur, key, val)){
     printdata(tcxstrptr(key), tcxstrsize(key), px);
     if(pv){
       putchar('\t');
       printdata(tcxstrptr(val), tcxstrsize(val), px);
     }
     putchar('\n');
+    if(bk){
+      if(!tcbdbcurprev(cur) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    } else {
+      if(!tcbdbcurnext(cur) && tcbdbecode(bdb) != TCENOREC){
+        printerr(bdb);
+        err = true;
+      }
+    }
   }
   tcxstrdel(val);
   tcxstrdel(key);
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  tcbdbcurdel(cur);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 
 
 /* perform optimize command */
-static int procoptimize(const char *path, int bnum, int apow, int fpow, int opts, int omode){
-  TCHDB *hdb = tchdbnew();
-  if(g_dbgfd >= 0) tchdbsetdbgfd(hdb, g_dbgfd);
-  if(!tchdbopen(hdb, path, HDBOWRITER | omode)){
-    printerr(hdb);
-    tchdbdel(hdb);
+static int procoptimize(const char *path, int lmemb, int nmemb,
+                        int bnum, int apow, int fpow, int opts, int omode){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
     return 1;
   }
   bool err = false;
-  if(!tchdboptimize(hdb, bnum, apow, fpow, opts)){
-    printerr(hdb);
+  if(!tcbdboptimize(bdb, lmemb, nmemb, bnum, apow, fpow, opts)){
+    printerr(bdb);
     err = true;
   }
-  if(!tchdbclose(hdb)){
-    if(!err) printerr(hdb);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
     err = true;
   }
-  tchdbdel(hdb);
+  tcbdbdel(bdb);
   return err ? 1 : 0;
 }
 

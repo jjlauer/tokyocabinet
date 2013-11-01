@@ -116,23 +116,22 @@ static void eprint(TCHDB *hdb, const char *func){
 
 /* print members of hash database */
 static void mprint(TCHDB *hdb){
-  if(hdb->cnt_writerec >= 0){
-    iprintf("bucket number: %lld\n", (long long)tchdbbnum(hdb));
-    iprintf("used bucket number: %lld\n", (long long)tchdbbnumused(hdb));
-    iprintf("cnt_writerec: %lld\n", (long long)hdb->cnt_writerec);
-    iprintf("cnt_reuserec: %lld\n", (long long)hdb->cnt_reuserec);
-    iprintf("cnt_moverec: %lld\n", (long long)hdb->cnt_moverec);
-    iprintf("cnt_readrec: %lld\n", (long long)hdb->cnt_readrec);
-    iprintf("cnt_searchfbp: %lld\n", (long long)hdb->cnt_searchfbp);
-    iprintf("cnt_insertfbp: %lld\n", (long long)hdb->cnt_insertfbp);
-    iprintf("cnt_splicefbp: %lld\n", (long long)hdb->cnt_splicefbp);
-    iprintf("cnt_dividefbp: %lld\n", (long long)hdb->cnt_dividefbp);
-    iprintf("cnt_mergefbp: %lld\n", (long long)hdb->cnt_mergefbp);
-    iprintf("cnt_reducefbp: %lld\n", (long long)hdb->cnt_reducefbp);
-    iprintf("cnt_appenddrp: %lld\n", (long long)hdb->cnt_appenddrp);
-    iprintf("cnt_deferdrp: %lld\n", (long long)hdb->cnt_deferdrp);
-    iprintf("cnt_flushdrp: %lld\n", (long long)hdb->cnt_flushdrp);
-  }
+  if(hdb->cnt_writerec < 0) return;
+  iprintf("bucket number: %lld\n", (long long)tchdbbnum(hdb));
+  iprintf("used bucket number: %lld\n", (long long)tchdbbnumused(hdb));
+  iprintf("cnt_writerec: %lld\n", (long long)hdb->cnt_writerec);
+  iprintf("cnt_reuserec: %lld\n", (long long)hdb->cnt_reuserec);
+  iprintf("cnt_moverec: %lld\n", (long long)hdb->cnt_moverec);
+  iprintf("cnt_readrec: %lld\n", (long long)hdb->cnt_readrec);
+  iprintf("cnt_searchfbp: %lld\n", (long long)hdb->cnt_searchfbp);
+  iprintf("cnt_insertfbp: %lld\n", (long long)hdb->cnt_insertfbp);
+  iprintf("cnt_splicefbp: %lld\n", (long long)hdb->cnt_splicefbp);
+  iprintf("cnt_dividefbp: %lld\n", (long long)hdb->cnt_dividefbp);
+  iprintf("cnt_mergefbp: %lld\n", (long long)hdb->cnt_mergefbp);
+  iprintf("cnt_reducefbp: %lld\n", (long long)hdb->cnt_reducefbp);
+  iprintf("cnt_appenddrp: %lld\n", (long long)hdb->cnt_appenddrp);
+  iprintf("cnt_deferdrp: %lld\n", (long long)hdb->cnt_deferdrp);
+  iprintf("cnt_flushdrp: %lld\n", (long long)hdb->cnt_flushdrp);
 }
 
 
@@ -725,7 +724,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     "mikio", "hirabayashi", "tokyo", "cabinet", "hyper", "estraier", "19780211", "birth day",
     "one", "first", "two", "second", "three", "third", "four", "fourth", "five", "fifth",
     "_[1]_", "uno", "_[2]_", "dos", "_[3]_", "tres", "_[4]_", "cuatro", "_[5]_", "cinco",
-    "\xe5\xb9\xb3\xe6\x9e\x97\xe5\xb9\xb9\xe9\x9b\x84", "\xe9\xa6\xac\xe9\xb9\xbf", NULL
+    "[\xe5\xb9\xb3\xe6\x9e\x97\xe5\xb9\xb9\xe9\x9b\x84]", "[\xe9\xa6\xac\xe9\xb9\xbf]", NULL
   };
   for(int i = 0; words[i] != NULL; i += 2){
     const char *kbuf = words[i];
@@ -975,7 +974,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
   char *kbuf;
   int ksiz;
   int inum = 0;
-  for(int i = 1; (kbuf = tchdbiternext(hdb, &ksiz)); i++, inum++){
+  for(int i = 1; (kbuf = tchdbiternext(hdb, &ksiz)) != NULL; i++, inum++){
     int vsiz;
     char *vbuf = tchdbget(hdb, kbuf, ksiz, &vsiz);
     if(!vbuf){
@@ -1003,7 +1002,7 @@ static int procmisc(const char *path, int rnum, bool mt, int opts, int omode){
     err = true;
   }
   inum = 0;
-  for(int i = 1; (kbuf = tchdbiternext(hdb, &ksiz)); i++, inum++){
+  for(int i = 1; (kbuf = tchdbiternext(hdb, &ksiz)) != NULL; i++, inum++){
     if(myrand(2) == 0){
       if(!tchdbputcat(hdb, kbuf, ksiz, "0123456789", 10)){
         eprint(hdb, "tchdbputcat");

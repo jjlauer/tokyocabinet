@@ -7,20 +7,20 @@
 #================================================================
 
 # Package name
-AC_INIT(tokyocabinet, 0.3.4)
+AC_INIT(tokyocabinet, 0.4.1)
 
 # Package information
 MYLIBVER=1
-MYLIBREV=6
-MYFORMATVER="0.1"
+MYLIBREV=8
+MYFORMATVER="0.2"
 
 # Targets
-MYHEADERFILES="tcutil.h tchdb.h"
+MYHEADERFILES="tcutil.h tchdb.h tcbdb.h"
 MYLIBRARYFILES="libtokyocabinet.a"
-MYLIBOBJFILES="tcutil.o tchdb.o myconf.o"
-MYCOMMANDFILES="tcutest tcucodec tchtest tchmttest tchmgr"
-MYMAN1FILES="tcutest.1 tcucodec.1 tchtest.1 tchmttest.1 tchmgr.1"
-MYMAN3FILES="tcutil.3 tchdb.3"
+MYLIBOBJFILES="tcutil.o tchdb.o tcbdb.o myconf.o"
+MYCOMMANDFILES="tcutest tcucodec tchtest tchmttest tchmgr tcbtest tcbmttest tcbmgr"
+MYMAN1FILES="tcutest.1 tcucodec.1 tchtest.1 tchmttest.1 tchmgr.1 tcbtest.1 tcbmttest.1 tcbmgr.1"
+MYMAN3FILES="tcutil.3 tchdb.3 tcbdb.3"
 MYDOCUMENTFILES="COPYING ChangeLog THANKS doc"
 
 # Building flags

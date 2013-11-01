@@ -185,16 +185,17 @@ check :
 	$(RUNENV) $(RUNCMD) ./tchtest misc casket 5000
 	$(RUNENV) $(RUNCMD) ./tchtest misc -tl -td casket 5000
 	$(RUNENV) $(RUNCMD) ./tchtest misc -mt -tb casket 500
-	$(RUNENV) $(RUNCMD) ./tchmgr list casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tchmgr list -pv casket > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchtest wicked casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -tl -td casket 50000
 	$(RUNENV) $(RUNCMD) ./tchtest wicked -mt -tb casket 5000
 	$(RUNENV) $(RUNCMD) ./tchmttest write -tl casket 5 5000 500 5
 	$(RUNENV) $(RUNCMD) ./tchmttest read casket 5
-	$(RUNENV) $(RUNCMD) ./tchmttest wicked casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest wicked -nc casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tl -td casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tb casket 5 5000
 	$(RUNENV) $(RUNCMD) ./tchmgr create casket 3 1 1
+	$(RUNENV) $(RUNCMD) ./tchmgr inform casket
 	$(RUNENV) $(RUNCMD) ./tchmgr put casket one first
 	$(RUNENV) $(RUNCMD) ./tchmgr put casket two second
 	$(RUNENV) $(RUNCMD) ./tchmgr put casket three third
@@ -208,13 +209,62 @@ check :
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket three > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket four > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket five > /dev/null
-	$(RUNENV) $(RUNCMD) ./tchmgr list casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tchmgr list -pv casket > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchmgr optimize casket
 	$(RUNENV) $(RUNCMD) ./tchmgr put -dc casket three third
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket three > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket four > /dev/null
 	$(RUNENV) $(RUNCMD) ./tchmgr get casket five > /dev/null
-	$(RUNENV) $(RUNCMD) ./tchmgr list casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tchmgr list -pv casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbtest write casket 50000 5 5 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest read casket
+	$(RUNENV) $(RUNCMD) ./tcbtest remove casket
+	$(RUNENV) $(RUNCMD) ./tcbtest write -mt -tl -td casket 50000 5 5 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest read -mt -nb casket
+	$(RUNENV) $(RUNCMD) ./tcbtest remove -mt casket
+	$(RUNENV) $(RUNCMD) ./tcbtest write -tb casket 50000 5 5 50000 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest read -nl casket
+	$(RUNENV) $(RUNCMD) ./tcbtest remove casket
+	$(RUNENV) $(RUNCMD) ./tcbtest rcat -lc 5 -nc 5 -pn 500 casket 50000 5 5 5000 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest rcat -tl -td -pn 5000 casket 50000 5 5 500 5 15
+	$(RUNENV) $(RUNCMD) ./tcbtest rcat -nl -pn 5000 -rl casket 15000 5 5 500 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest rcat -tb -pn 5000 casket 15000 5 5 500 5 5
+	$(RUNENV) $(RUNCMD) ./tcbtest misc casket 5000
+	$(RUNENV) $(RUNCMD) ./tcbtest misc -tl -td casket 5000
+	$(RUNENV) $(RUNCMD) ./tcbtest misc -mt -tb casket 500
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbtest wicked casket 50000
+	$(RUNENV) $(RUNCMD) ./tcbtest wicked -tl -td casket 50000
+	$(RUNENV) $(RUNCMD) ./tcbtest wicked -mt -tb casket 5000
+	$(RUNENV) $(RUNCMD) ./tcbmttest write -tl casket 5 5000 5 5 500 5
+	$(RUNENV) $(RUNCMD) ./tcbmttest read casket 5
+	$(RUNENV) $(RUNCMD) ./tcbmttest wicked -nc casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tcbmttest wicked -tl -td casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tchmttest wicked -tb casket 5 5000
+	$(RUNENV) $(RUNCMD) ./tcbmgr create casket 4 4 3 1 1
+	$(RUNENV) $(RUNCMD) ./tcbmgr inform casket
+	$(RUNENV) $(RUNCMD) ./tcbmgr put casket one first
+	$(RUNENV) $(RUNCMD) ./tcbmgr put casket two second
+	$(RUNENV) $(RUNCMD) ./tcbmgr put casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr put -dc casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr put -dc casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr put -dd casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr put -dd casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr put casket four fourth
+	$(RUNENV) $(RUNCMD) ./tcbmgr put casket five fifth
+	$(RUNENV) $(RUNCMD) ./tcbmgr out casket one > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr out casket two > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket three > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket four > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket five > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -j three -pv casket > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr optimize casket
+	$(RUNENV) $(RUNCMD) ./tcbmgr put -dc casket three third
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket three > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket four > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr get casket five > /dev/null
+	$(RUNENV) $(RUNCMD) ./tcbmgr list -pv casket > /dev/null
 	rm -rf casket*
 	@printf '\n'
 	@printf '#================================================================\n'
@@ -265,15 +315,31 @@ tchmgr : tchmgr.o $(LIBOBJFILES)
 	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
 
 
+tcbtest : tcbtest.o $(LIBOBJFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
+tcbmttest : tcbmttest.o $(LIBOBJFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
+tcbmgr : tcbmgr.o $(LIBOBJFILES)
+	$(LDENV) $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ltokyocabinet $(LIBS)
+
+
 myconf.o : myconf.h
 
 tcutil.o : tcutil.h myconf.h
 
 tchdb.o : tchdb.h tcutil.h myconf.h
 
+tcbdb.o : tcbdb.h tchdb.h tcutil.h myconf.h
+
 tcutest.o tcucodec.o : tcutil.h myconf.h
 
 tchtest.o tchmttest.o tchmgr.o : tcutil.h tchdb.h myconf.h
+
+tcbtest.o tcbmttest.o tcbmgr.o : tcutil.h tchdb.h tcbdb.h myconf.h
 
 
 

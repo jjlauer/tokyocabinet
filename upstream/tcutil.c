@@ -429,7 +429,7 @@ int tclistnum(const TCLIST *list){
 
 
 /* Get the pointer to the region of an element of a list object. */
-const char *tclistval(const TCLIST *list, int index, int *sp){
+const void *tclistval(const TCLIST *list, int index, int *sp){
   assert(list && index >= 0 && sp);
   if(index >= list->num) return NULL;
   index += list->start;
@@ -448,7 +448,7 @@ const char *tclistval2(const TCLIST *list, int index){
 
 
 /* Add an element at the end of a list object. */
-void tclistpush(TCLIST *list, const char *ptr, int size){
+void tclistpush(TCLIST *list, const void *ptr, int size){
   assert(list && ptr && size >= 0);
   int index = list->start + list->num;
   if(index >= list->anum){
@@ -482,7 +482,7 @@ void tclistpush2(TCLIST *list, const char *str){
 
 
 /* Add an allocated element at the end of a list object. */
-void tclistpushmalloc(TCLIST *list, char *ptr, int size){
+void tclistpushmalloc(TCLIST *list, void *ptr, int size){
   assert(list && ptr && size >= 0);
   int index = list->start + list->num;
   if(index >= list->anum){
@@ -498,7 +498,7 @@ void tclistpushmalloc(TCLIST *list, char *ptr, int size){
 
 
 /* Remove an element of the end of a list object. */
-char *tclistpop(TCLIST *list, int *sp){
+void *tclistpop(TCLIST *list, int *sp){
   assert(list && sp);
   if(list->num < 1) return NULL;
   int index = list->start + list->num - 1;
@@ -561,7 +561,7 @@ void tclistunshift2(TCLIST *list, const char *str){
 
 
 /* Remove an element of the top of a list object. */
-char *tclistshift(TCLIST *list, int *sp){
+void *tclistshift(TCLIST *list, int *sp){
   assert(list && sp);
   if(list->num < 1) return NULL;
   int index = list->start;
@@ -623,7 +623,7 @@ void tclistinsert2(TCLIST *list, int index, const char *str){
 
 
 /* Remove an element at the specified location of a list object. */
-char *tclistremove(TCLIST *list, int index, int *sp){
+void *tclistremove(TCLIST *list, int index, int *sp){
   assert(list && index >= 0 && sp);
   if(index >= list->num) return NULL;
   index += list->start;
@@ -690,7 +690,7 @@ void tclistsortci(TCLIST *list){
 
 
 /* Search a list object for an element using liner search. */
-int tclistlsearch(const TCLIST *list, const char *ptr, int size){
+int tclistlsearch(const TCLIST *list, const void *ptr, int size){
   assert(list && ptr && size >= 0);
   int end = list->start + list->num;
   for(int i = list->start; i < end; i++){
@@ -702,7 +702,7 @@ int tclistlsearch(const TCLIST *list, const char *ptr, int size){
 
 
 /* Search a list object for an element using binary search. */
-int tclistbsearch(const TCLIST *list, const char *ptr, int size){
+int tclistbsearch(const TCLIST *list, const void *ptr, int size){
   assert(list && ptr && size >= 0);
   TCLISTDATUM key;
   key.ptr = (char *)ptr;
@@ -727,7 +727,7 @@ void tclistclear(TCLIST *list){
 
 
 /* Serialize a list object into a byte array. */
-char *tclistdump(const TCLIST *list, int *sp){
+void *tclistdump(const TCLIST *list, int *sp){
   assert(list && sp);
   const TCLISTDATUM *array = list->array;
   int end = list->start + list->num;
@@ -750,14 +750,14 @@ char *tclistdump(const TCLIST *list, int *sp){
 
 
 /* Create a list object from a serialized byte array. */
-TCLIST *tclistload(const char *ptr, int size){
+TCLIST *tclistload(const void *ptr, int size){
   assert(ptr && size >= 0);
   TCLIST *list = tcmalloc(sizeof(*list));
   int anum = size / sizeof(int) + 1;
   TCLISTDATUM *array = tcmalloc(sizeof(array[0]) * anum);
   int num = 0;
   const char *rp = ptr;
-  const char *ep = ptr + size;
+  const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, vsiz;
     TC_READVNUMBUF(rp, vsiz, step);
@@ -1213,7 +1213,7 @@ bool tcmapout2(TCMAP *map, const void *kstr){
 
 
 /* Retrieve a record in a map object. */
-const char *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp){
+const void *tcmapget(const TCMAP *map, const void *kbuf, int ksiz, int *sp){
   assert(map && kbuf && ksiz >= 0 && sp);
   unsigned int hash;
   TC_MAPHASH1(hash, kbuf, ksiz);
@@ -1332,7 +1332,7 @@ void tcmapiterinit(TCMAP *map){
 
 
 /* Get the next key of the iterator of a map object. */
-const char *tcmapiternext(TCMAP *map, int *sp){
+const void *tcmapiternext(TCMAP *map, int *sp){
   assert(map && sp);
   TCMAPREC *rec;
   if(!map->cur) return NULL;
@@ -1355,11 +1355,11 @@ const char *tcmapiternext2(TCMAP *map){
 
 
 /* Get the value binded to the key fetched from the iterator of a map object. */
-const char *tcmapiterval(const char *kbuf, int *sp){
+const void *tcmapiterval(const void *kbuf, int *sp){
   assert(kbuf && sp);
-  TCMAPREC *rec = (TCMAPREC *)(kbuf - sizeof(*rec));
+  TCMAPREC *rec = (TCMAPREC *)((char *)kbuf - sizeof(*rec));
   *sp = rec->vsiz;
-  return kbuf + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
+  return (char *)kbuf + rec->ksiz + TC_ALIGNPAD(rec->ksiz);
 }
 
 
@@ -1434,7 +1434,7 @@ void tcmapclear(TCMAP *map){
 
 
 /* Serialize map list object into a byte array. */
-char *tcmapdump(const TCMAP *map, int *sp){
+void *tcmapdump(const TCMAP *map, int *sp){
   assert(map && sp);
   TCMAPREC *cur = map->cur;
   int tsiz = 0;
@@ -1467,11 +1467,11 @@ char *tcmapdump(const TCMAP *map, int *sp){
 
 
 /* Create a map object from a serialized byte array. */
-TCMAP *tcmapload(const char *ptr, int size){
+TCMAP *tcmapload(const void *ptr, int size){
   assert(ptr && size >= 0);
   TCMAP *map = tcmapnew();
   const char *rp = ptr;
-  const char *ep = ptr + size;
+  const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, ksiz, vsiz;
     TC_READVNUMBUF(rp, ksiz, step);
@@ -1488,10 +1488,10 @@ TCMAP *tcmapload(const char *ptr, int size){
 
 
 /* Extract a map record from a serialized byte array. */
-char *tcmaploadone(const char *ptr, int size, const char *kbuf, int ksiz, int *sp){
+void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *sp){
   assert(ptr && size >= 0 && kbuf && ksiz >= 0 && sp);
   const char *rp = ptr;
-  const char *ep = ptr + size;
+  const char *ep = (char *)ptr + size;
   while(rp < ep){
     int step, rsiz;
     TC_READVNUMBUF(rp, rsiz, step);
@@ -1900,7 +1900,7 @@ double tctime(void){
 
 
 /* Read whole data of a file. */
-char *tcreadfile(const char *path, int limit, int *sp){
+void *tcreadfile(const char *path, int limit, int *sp){
   int fd = path ? open(path, O_RDONLY, TC_FILEMODE) : 0;
   if(fd == -1) return NULL;
   if(fd == 0){
@@ -1964,6 +1964,18 @@ TCLIST *tcreadfilelines(const char *path){
 }
 
 
+/* Write data into a file. */
+bool tcwritefile(const char *path, const void *ptr, int size){
+  assert(ptr && size >= 0);
+  int fd = 1;
+  if(path && (fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, TC_FILEMODE)) == -1) return false;
+  bool err = false;
+  if(!tcwrite(fd, ptr, size)) err = true;
+  if(close(fd) == -1) err = true;
+  return err ? false : true;
+}
+
+
 /* Read names of files in a directory. */
 TCLIST *tcreaddir(const char *path){
   assert(path);
@@ -2003,6 +2015,60 @@ bool tcremovelink(const char *path){
   }
   tclistdel(list);
   return rmdir(path) == 0 ? true : false;
+}
+
+
+/* Write data into a file. */
+bool tcwrite(int fd, const void *buf, size_t size){
+  assert(fd >= 0 && buf && size >= 0);
+  const char *rp = buf;
+  do {
+    int wb = write(fd, rp, size);
+    switch(wb){
+    case -1: if(errno != EINTR) return false;
+    case 0: break;
+    default:
+      rp += wb;
+      size -= wb;
+      break;
+    }
+  } while(size > 0);
+  return true;
+}
+
+
+/* Read data from a file. */
+bool tcread(int fd, void *buf, size_t size){
+  assert(fd >= 0 && buf && size >= 0);
+  char *wp = buf;
+  do {
+    int rb = read(fd, wp, size);
+    switch(rb){
+    case -1: if(errno != EINTR) return false;
+    case 0: return size < 1;
+    default:
+      wp += rb;
+      size -= rb;
+    }
+  } while(size > 0);
+  return true;
+}
+
+
+/* Lock a file. */
+bool tclock(int fd, bool ex, bool nb){
+  assert(fd >= 0);
+  struct flock lock;
+  memset(&lock, 0, sizeof(struct flock));
+  lock.l_type = ex ? F_WRLCK : F_RDLCK;
+  lock.l_whence = SEEK_SET;
+  lock.l_start = 0;
+  lock.l_len = 0;
+  lock.l_pid = 0;
+  while(fcntl(fd, nb ? F_SETLK : F_SETLKW, &lock) == -1){
+    if(errno != EINTR) return false;
+  }
+  return true;
 }
 
 
@@ -2934,10 +3000,10 @@ bool tcglobalmutexunlock(void){
 char *tcbsencode(const char *ptr, int size, int *sp){
   assert(ptr && size >= 0 && sp);
   char *result = tcmalloc((size * 7) / 3 + (size / TC_BSENCUNIT + 1) * sizeof(uint16_t) +
-                          TC_BSENCUNIT * 2 + 0x20);
-  char *pv = result + size + 0x10;
+                          TC_BSENCUNIT * 2 + 0x200);
+  char *pv = result + size + 0x100;
   char *wp = pv;
-  char *tp = pv + size + 0x10;
+  char *tp = pv + size + 0x100;
   const char *end = ptr + size;
   while(ptr < end){
     int usiz = tclmin(TC_BSENCUNIT, end - ptr);
@@ -2979,8 +3045,8 @@ char *tcbsencode(const char *ptr, int size, int *sp){
 
 /* Decompress a serial object compressed with TCBS encoding. */
 char *tcbsdecode(const char *ptr, int size, int *sp){
-  char *result = tcmalloc(size * 9 + 0x100);
-  char *wp = result + size + 0x20;
+  char *result = tcmalloc(size * 9 + 0x200);
+  char *wp = result + size + 0x100;
   int nsiz = tcgammadecode(ptr, size, wp);
   tcmtfdecode(wp, nsiz);
   ptr = wp;

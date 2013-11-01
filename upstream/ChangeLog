@@ -1,3 +1,19 @@
+2007-10-15  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tcbdb.c (tchdbtranbegin): locking mode was aolished.
+
+	* tcbdb.c (tcbdbsetcmpfunc): new function.
+
+	- Release: 0.4.1
+
+2007-10-11  Mikio Hirabayashi  <mikio@users.sourceforge.net>
+
+	* tchdb.c (tchdbopenimpl): database corruption was to be handled automatically.
+
+	* tcbdb.c, tcbtest.c, tcbmttest.c, tcbmgr.c: new files.
+
+	- Release: 0.4.0
+
 2007-09-09  Mikio Hirabayashi  <mikio@users.sourceforge.net>
 
 	* tchdb.c (tchdbsetmutex, tchdblockobj, tchdbunlockobj): new functions.
