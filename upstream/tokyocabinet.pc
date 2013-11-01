@@ -1,0 +1,13 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+bindir=${exec_prefix}/bin
+libdir=${exec_prefix}/lib
+libexecdir=${exec_prefix}/libexec
+includedir=${prefix}/include
+datadir=${prefix}/share
+
+Name: Tokyo Cabinet
+Description: a modern implementation of DBM
+Version: 0.9.1
+Libs: -L${libdir} @MYLDOPTS@ -ltokyocabinet -lz -lpthread -lm -lc 
+Cflags: -I${includedir}

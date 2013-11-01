@@ -34,6 +34,12 @@ typedef struct {                         // type of structure for read thread
   int id;
 } TARGREAD;
 
+typedef struct {                         // type of structure for remove thread
+  TCBDB *bdb;
+  int rnum;
+  int id;
+} TARGREMOVE;
+
 typedef struct {                         // type of structure for wicked thread
   TCBDB *bdb;
   int rnum;
@@ -57,13 +63,16 @@ static void mprint(TCBDB *bdb);
 static int myrand(int range);
 static int runwrite(int argc, char **argv);
 static int runread(int argc, char **argv);
+static int runremove(int argc, char **argv);
 static int runwicked(int argc, char **argv);
 static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
                      int bnum, int apow, int fpow, int opts, int omode);
 static int procread(const char *path, int tnum, int omode, bool wb);
+static int procremove(const char *path, int tnum, int omode);
 static int procwicked(const char *path, int tnum, int rnum, int opts, int omode, bool nc);
 static void *threadwrite(void *targ);
 static void *threadread(void *targ);
+static void *threadremove(void *targ);
 static void *threadwicked(void *targ);
 
 
@@ -80,6 +89,8 @@ int main(int argc, char **argv){
     rv = runwrite(argc, argv);
   } else if(!strcmp(argv[1], "read")){
     rv = runread(argc, argv);
+  } else if(!strcmp(argv[1], "remove")){
+    rv = runremove(argc, argv);
   } else if(!strcmp(argv[1], "wicked")){
     rv = runwicked(argc, argv);
   } else {
@@ -95,8 +106,9 @@ static void usage(void){
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s write [-tl] [-td|-tb] [-nl|-nb] path tnum rnum"
-          " [bnum] [apow] [fpow]\n", g_progname);
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s read [-nl|-nb] [-wb] path tnum\n", g_progname);
+  fprintf(stderr, "  %s remove [-nl|-nb] path tnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-tl] [-td|-tb] [-nl|-nb] [-nc] path tnum rnum\n",
           g_progname);
   fprintf(stderr, "\n");
@@ -173,7 +185,7 @@ static int runwrite(int argc, char **argv){
   int opts = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
         opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
@@ -228,7 +240,7 @@ static int runread(int argc, char **argv){
   int omode = 0;
   bool wb = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -254,6 +266,36 @@ static int runread(int argc, char **argv){
 }
 
 
+/* parse arguments of remove command */
+static int runremove(int argc, char **argv){
+  char *path = NULL;
+  char *tstr = NULL;
+  int omode = 0;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-nl")){
+        omode |= BDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= BDBOLCKNB;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else if(!tstr){
+      tstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path || !tstr) usage();
+  int tnum = atoi(tstr);
+  if(tnum < 1) usage();
+  int rv = procremove(path, tnum, omode);
+  return rv;
+}
+
+
 /* parse arguments of wicked command */
 static int runwicked(int argc, char **argv){
   char *path = NULL;
@@ -263,7 +305,7 @@ static int runwicked(int argc, char **argv){
   int omode = 0;
   bool nc = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
         opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
@@ -365,7 +407,7 @@ static int procwrite(const char *path, int tnum, int rnum, int lmemb, int nmemb,
 
 /* perform read command */
 static int procread(const char *path, int tnum, int omode, bool wb){
-  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d  wb=%d\n", path, tnum, omode, wb);
+  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d  wb=%d\n\n", path, tnum, omode, wb);
   bool err = false;
   double stime = tctime();
   TCBDB *bdb = tcbdbnew();
@@ -394,6 +436,65 @@ static int procread(const char *path, int tnum, int omode, bool wb){
       targs[i].wb = wb;
       targs[i].id = i;
       if(pthread_create(threads + i, NULL, threadread, targs + i) != 0){
+        eprint(bdb, "pthread_create");
+        targs[i].id = -1;
+        err = true;
+      }
+    }
+    for(int i = 0; i < tnum; i++){
+      if(targs[i].id == -1) continue;
+      void *rv;
+      if(pthread_join(threads[i], &rv) != 0){
+        eprint(bdb, "pthread_join");
+        err = true;
+      } else if(rv){
+        err = true;
+      }
+    }
+  }
+  iprintf("record number: %llu\n", (unsigned long long)tcbdbrnum(bdb));
+  iprintf("size: %llu\n", (unsigned long long)tcbdbfsiz(bdb));
+  mprint(bdb);
+  if(!tcbdbclose(bdb)){
+    eprint(bdb, "tcbdbclose");
+    err = true;
+  }
+  tcbdbdel(bdb);
+  iprintf("time: %.3f\n", (tctime() - stime) / 1000);
+  iprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+/* perform remove command */
+static int procremove(const char *path, int tnum, int omode){
+  iprintf("<Reading Test>\n  path=%s  tnum=%d  omode=%d\n\n", path, tnum, omode);
+  bool err = false;
+  double stime = tctime();
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbsetmutex(bdb)){
+    eprint(bdb, "tcbdbsetmutex");
+    err = true;
+  }
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    eprint(bdb, "tcbdbopen");
+    err = true;
+  }
+  int rnum = tcbdbrnum(bdb) / tnum;
+  TARGREMOVE targs[tnum];
+  pthread_t threads[tnum];
+  if(tnum == 1){
+    targs[0].bdb = bdb;
+    targs[0].rnum = rnum;
+    targs[0].id = 0;
+    if(threadremove(targs) != NULL) err = true;
+  } else {
+    for(int i = 0; i < tnum; i++){
+      targs[i].bdb = bdb;
+      targs[i].rnum = rnum;
+      targs[i].id = i;
+      if(pthread_create(threads + i, NULL, threadremove, targs + i) != 0){
         eprint(bdb, "pthread_create");
         targs[i].id = -1;
         err = true;
@@ -585,6 +686,31 @@ static void *threadread(void *targ){
         break;
       }
       free(vbuf);
+    }
+    if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
+      putchar('.');
+      fflush(stdout);
+      if(i == rnum || i % (rnum / 10) == 0) iprintf(" (%08d)\n", i);
+    }
+  }
+  return err ? "error" : NULL;
+}
+
+
+/* thread the remove function */
+static void *threadremove(void *targ){
+  TCBDB *bdb = ((TARGREMOVE *)targ)->bdb;
+  int rnum = ((TARGREMOVE *)targ)->rnum;
+  int id = ((TARGREMOVE *)targ)->id;
+  bool err = false;
+  int base = id * rnum;
+  for(int i = 1; i <= rnum; i++){
+    char kbuf[RECBUFSIZ];
+    int ksiz = sprintf(kbuf, "%08d", base + i);
+    if(!tcbdbout(bdb, kbuf, ksiz)){
+      eprint(bdb, "tcbdbout");
+      err = true;
+      break;
     }
     if(id == 0 && rnum > 250 && i % (rnum / 250) == 0){
       putchar('.');
@@ -839,4 +965,4 @@ static void *threadwicked(void *targ){
 
 
 
-/* END OF FILE */
+// END OF FILE

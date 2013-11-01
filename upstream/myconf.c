@@ -217,4 +217,4 @@ unsigned int (*_tc_getcrc)(const char *, int) = NULL;
 
 
 
-/* END OF FILE */
+// END OF FILE

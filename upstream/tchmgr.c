@@ -87,13 +87,13 @@ static void usage(void){
   fprintf(stderr, "%s: the command line utility of the hash database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum] [apow] [fpow]\n", g_progname);
+  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum [apow [fpow]]]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
   fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc] path key value\n", g_progname);
   fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
-  fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-nl] path key\n", g_progname);
+  fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
   fprintf(stderr, "  %s list [-nl|-nb] [-pv] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum] [apow] [fpow]\n",
+  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path [bnum [apow [fpow]]]\n",
           g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
@@ -155,7 +155,7 @@ static int runcreate(int argc, char **argv){
   char *fstr = NULL;
   int opts = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
         opts |= HDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
@@ -191,7 +191,7 @@ static int runinform(int argc, char **argv){
   char *path = NULL;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -220,7 +220,7 @@ static int runput(int argc, char **argv){
   int dmode = 0;
   bool sx = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -270,7 +270,7 @@ static int runout(int argc, char **argv){
   int omode = 0;
   bool sx = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -312,7 +312,7 @@ static int runget(int argc, char **argv){
   bool px = false;
   bool pz = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -356,7 +356,7 @@ static int runlist(int argc, char **argv){
   bool pv = false;
   bool px = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= HDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -389,7 +389,7 @@ static int runoptimize(int argc, char **argv){
   int opts = UINT8_MAX;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-tl")){
         if(opts == UINT8_MAX) opts = 0;
         opts |= HDBTLARGE;
@@ -665,4 +665,4 @@ static int procversion(void){
 
 
 
-/* END OF FILE */
+// END OF FILE

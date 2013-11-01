@@ -194,7 +194,7 @@ void tcxstrcat2(TCXSTR *xstr, const char *str){
 
 
 /* Get the pointer of the region of an extensible string object. */
-const char *tcxstrptr(const TCXSTR *xstr){
+const void *tcxstrptr(const TCXSTR *xstr){
   assert(xstr);
   return xstr->ptr;
 }
@@ -216,7 +216,7 @@ void tcxstrclear(TCXSTR *xstr){
 
 
 /* Convert an extensible string object into a usual allocated region. */
-char *tcxstrtomalloc(TCXSTR *xstr){
+void *tcxstrtomalloc(TCXSTR *xstr){
   assert(xstr);
   char *ptr;
   ptr = xstr->ptr;
@@ -226,7 +226,7 @@ char *tcxstrtomalloc(TCXSTR *xstr){
 
 
 /* Create an extensible string object from an allocated region. */
-TCXSTR *tcxstrfrommalloc(char *ptr, int size){
+TCXSTR *tcxstrfrommalloc(void *ptr, int size){
   TCXSTR *xstr = tcmalloc(sizeof(*xstr));
   xstr->ptr = tcrealloc(ptr, size + 1);
   xstr->ptr[size] = '\0';
@@ -1354,7 +1354,7 @@ const char *tcmapiternext2(TCMAP *map){
 }
 
 
-/* Get the value binded to the key fetched from the iterator of a map object. */
+/* Get the value bound to the key fetched from the iterator of a map object. */
 const void *tcmapiterval(const void *kbuf, int *sp){
   assert(kbuf && sp);
   TCMAPREC *rec = (TCMAPREC *)((char *)kbuf - sizeof(*rec));
@@ -1363,7 +1363,7 @@ const void *tcmapiterval(const void *kbuf, int *sp){
 }
 
 
-/* Get the value string binded to the key fetched from the iterator of a map object. */
+/* Get the value string bound to the key fetched from the iterator of a map object. */
 const char *tcmapiterval2(const char *kstr){
   assert(kstr);
   TCMAPREC *rec = (TCMAPREC *)(kstr - sizeof(*rec));
@@ -3641,4 +3641,4 @@ static int tcgammadecode(const char *ptr, int size, char *obuf){
 
 
 
-/* END OF FILE */
+// END OF FILE

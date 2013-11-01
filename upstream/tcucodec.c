@@ -78,7 +78,7 @@ int main(int argc, char **argv){
 
 /* print the usage and exit */
 static void usage(void){
-  fprintf(stderr, "%s: test cases of the utility API of Tokyo Cabinet\n", g_progname);
+  fprintf(stderr, "%s: popular encoders and decoders\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s url [-d] [-br] [-rs base] file\n", g_progname);
@@ -113,7 +113,7 @@ static int runurl(int argc, char **argv){
   bool br = false;
   char *base = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else if(!strcmp(argv[i], "-br")){
@@ -154,7 +154,7 @@ static int runbase(int argc, char **argv){
   char *path = NULL;
   bool dec = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else {
@@ -190,7 +190,7 @@ static int runquote(int argc, char **argv){
   char *path = NULL;
   bool dec = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else {
@@ -229,7 +229,7 @@ static int runmime(int argc, char **argv){
   bool qb = false;
   bool on = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else if(!strcmp(argv[i], "-en")){
@@ -274,7 +274,7 @@ static int runpack(int argc, char **argv){
   bool dec = false;
   bool bwt = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else if(!strcmp(argv[i], "-bwt")){
@@ -312,7 +312,7 @@ static int runtcbs(int argc, char **argv){
   char *path = NULL;
   bool dec = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else {
@@ -349,7 +349,7 @@ static int runzlib(int argc, char **argv){
   bool dec = false;
   bool gz = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else if(!strcmp(argv[i], "-gz")){
@@ -388,7 +388,7 @@ static int runxml(int argc, char **argv){
   bool dec = false;
   bool br = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-d")){
         dec = true;
       } else if(!strcmp(argv[i], "-br")){
@@ -682,6 +682,7 @@ static int procconf(void){
   printf("sizeof(time_t): %d\n", sizeof(time_t));
   printf("sizeof(off_t): %d\n", sizeof(off_t));
   printf("sizeof(ino_t): %d\n", sizeof(ino_t));
+  printf("sizeof(intptr_t): %d\n", sizeof(intptr_t));
   printf("sizeof(void *): %d\n", sizeof(void *));
   printf("macro(CHAR_MAX): %llu\n", (unsigned long long)CHAR_MAX);
   printf("macro(SHRT_MAX): %llu\n", (unsigned long long)SHRT_MAX);
@@ -704,4 +705,4 @@ static int procconf(void){
 
 
 
-/* END OF FILE */
+// END OF FILE

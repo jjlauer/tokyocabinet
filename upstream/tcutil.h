@@ -14,7 +14,7 @@
  *************************************************************************************************/
 
 
-#ifndef _TCUTIL_H                        // duplication check
+#ifndef _TCUTIL_H                        /* duplication check */
 #define _TCUTIL_H
 
 
@@ -101,10 +101,10 @@ void tcfree(void *ptr);
  *************************************************************************************************/
 
 
-typedef struct {                         // type of structure for an extensible string object
-  char *ptr;                             // pointer to the region
-  int size;                              // size of the region
-  int asize;                             // size of the allocated region
+typedef struct {                         /* type of structure for an extensible string object */
+  char *ptr;                             /* pointer to the region */
+  int size;                              /* size of the region */
+  int asize;                             /* size of the allocated region */
 } TCXSTR;
 
 
@@ -155,7 +155,7 @@ void tcxstrcat2(TCXSTR *xstr, const char *str);
    The return value is the pointer of the region of the object.
    Because an additional zero code is appended at the end of the region of the return value,
    the return value can be treated as a character string. */
-const char *tcxstrptr(const TCXSTR *xstr);
+const void *tcxstrptr(const TCXSTR *xstr);
 
 
 /* Get the size of the region of an extensible string object.
@@ -178,7 +178,7 @@ void tcxstrclear(TCXSTR *xstr);
    value is allocated with the `malloc' call, it should be released with the `free' call when it
    is no longer in use.  Because the region of the original object is deleted, it should not be
    deleted again. */
-char *tcxstrtomalloc(TCXSTR *xstr);
+void *tcxstrtomalloc(TCXSTR *xstr);
 
 
 /* Create an extensible string object from an allocated region.
@@ -186,7 +186,7 @@ char *tcxstrtomalloc(TCXSTR *xstr);
    `size' specifies the size of the region.
    The return value is the new extensible string object wrapping the specified region.
    Note that the specified region is released when the object is deleted. */
-TCXSTR *tcxstrfrommalloc(char *ptr, int size);
+TCXSTR *tcxstrfrommalloc(void *ptr, int size);
 
 
 /* Perform formatted output into an extensible string object.
@@ -218,16 +218,16 @@ char *tcsprintf(const char *format, ...);
  *************************************************************************************************/
 
 
-typedef struct {                         // type of structure for an element of a list
-  char *ptr;                             // pointer to the region
-  int size;                              // size of the effective region
+typedef struct {                         /* type of structure for an element of a list */
+  char *ptr;                             /* pointer to the region */
+  int size;                              /* size of the effective region */
 } TCLISTDATUM;
 
-typedef struct {                         // type of structure for an array list
-  TCLISTDATUM *array;                    // array of data
-  int anum;                              // number of the elements of the array
-  int start;                             // start index of used elements
-  int num;                               // number of used elements
+typedef struct {                         /* type of structure for an array list */
+  TCLISTDATUM *array;                    /* array of data */
+  int anum;                              /* number of the elements of the array */
+  int start;                             /* start index of used elements */
+  int num;                               /* number of used elements */
 } TCLIST;
 
 
@@ -429,7 +429,8 @@ void tclistsortci(TCLIST *list);
    `ptr' specifies the pointer to the region of the key.
    `size' specifies the size of the region.
    The return value is the index of a corresponding element or -1 if there is no corresponding
-   element.  If two or more elements correspond, the former returns. */
+   element.
+   If two or more elements correspond, the former returns. */
 int tclistlsearch(const TCLIST *list, const void *ptr, int size);
 
 
@@ -438,7 +439,8 @@ int tclistlsearch(const TCLIST *list, const void *ptr, int size);
    `ptr' specifies the pointer to the region of the key.
    `size' specifies the size of the region.
    The return value is the index of a corresponding element or -1 if there is no corresponding
-   element.  If two or more elements correspond, which returns is not defined. */
+   element.
+   If two or more elements correspond, which returns is not defined. */
 int tclistbsearch(const TCLIST *list, const void *ptr, int size);
 
 
@@ -473,23 +475,23 @@ TCLIST *tclistload(const void *ptr, int size);
  *************************************************************************************************/
 
 
-typedef struct _TCMAPREC {               // type of structure for an element of a map
-  int ksiz;                              // size of the region of the key
-  int vsiz;                              // size of the region of the value
-  unsigned int hash;                     // second hash value
-  struct _TCMAPREC *left;                // pointer to the left child
-  struct _TCMAPREC *right;               // pointer to the right child
-  struct _TCMAPREC *prev;                // pointer to the previous element
-  struct _TCMAPREC *next;                // pointer to the next element
+typedef struct _TCMAPREC {               /* type of structure for an element of a map */
+  int ksiz;                              /* size of the region of the key */
+  int vsiz;                              /* size of the region of the value */
+  unsigned int hash;                     /* second hash value */
+  struct _TCMAPREC *left;                /* pointer to the left child */
+  struct _TCMAPREC *right;               /* pointer to the right child */
+  struct _TCMAPREC *prev;                /* pointer to the previous element */
+  struct _TCMAPREC *next;                /* pointer to the next element */
 } TCMAPREC;
 
-typedef struct {                         // type of structure for a map
-  TCMAPREC **buckets;                    // bucket array
-  TCMAPREC *first;                       // pointer to the first element
-  TCMAPREC *last;                        // pointer to the last element
-  TCMAPREC *cur;                         // pointer to the current element
-  int bnum;                              // number of buckets
-  int rnum;                              // number of records
+typedef struct {                         /* type of structure for a map */
+  TCMAPREC **buckets;                    /* bucket array */
+  TCMAPREC *first;                       /* pointer to the first element */
+  TCMAPREC *last;                        /* pointer to the last element */
+  TCMAPREC *cur;                         /* pointer to the current element */
+  int bnum;                              /* number of buckets */
+  int rnum;                              /* number of records */
 } TCMAP;
 
 
@@ -656,7 +658,7 @@ const void *tcmapiternext(TCMAP *map, int *sp);
 const char *tcmapiternext2(TCMAP *map);
 
 
-/* Get the value binded to the key fetched from the iterator of a map object.
+/* Get the value bound to the key fetched from the iterator of a map object.
    `kbuf' specifies the pointer to the region of the iteration key.
    `sp' specifies the pointer to the variable into which the size of the region of the return
    value is assigned.
@@ -666,7 +668,7 @@ const char *tcmapiternext2(TCMAP *map);
 const void *tcmapiterval(const void *kbuf, int *sp);
 
 
-/* Get the value string binded to the key fetched from the iterator of a map object.
+/* Get the value string bound to the key fetched from the iterator of a map object.
    `kstr' specifies the string of the iteration key.
    The return value is the pointer to the region of the value of the corresponding record. */
 const char *tcmapiterval2(const char *kstr);
@@ -739,15 +741,15 @@ void *tcmaploadone(const void *ptr, int size, const void *kbuf, int ksiz, int *s
  *************************************************************************************************/
 
 
-typedef struct {                         // type of an element of memory pool
-  void *ptr;                             // pointer
-  void (*del)(void *);                   // deleting function
+typedef struct {                         /* type of an element of memory pool */
+  void *ptr;                             /* pointer */
+  void (*del)(void *);                   /* deleting function */
 } TCMPELEM;
 
-typedef struct {                         // type of structure for a memory pool object
-  TCMPELEM *elems;                       // array of elements
-  int anum;                              // number of the elements of the array
-  int num;                               // number of used elements
+typedef struct {                         /* type of structure for a memory pool object */
+  TCMPELEM *elems;                       /* array of elements */
+  int anum;                              /* number of the elements of the array */
+  int num;                               /* number of used elements */
 } TCMPOOL;
 
 
@@ -1061,7 +1063,7 @@ char *tcurldecode(const char *str, int *sp);
    resource.  The key "file" specifies the file name without the directory section.  The key
    "query" specifies the query string.  The key "fragment" specifies the fragment string.
    Supported schema are HTTP, HTTPS, FTP, and FILE.  Absolute URL and relative URL are supported.
-   Because the object of the return value is createed with the function `tcmapnew', it should be
+   Because the object of the return value is created with the function `tcmapnew', it should be
    deleted with the function `tcmapdel' when it is no longer in use. */
 TCMAP *tcurlbreak(const char *str);
 
@@ -1121,8 +1123,8 @@ char *tcquotedecode(const char *str, int *sp);
 /* Encode a string with MIME encoding.
    `str' specifies the string.
    `encname' specifies the string of the name of the character encoding.
-   The return value is the result string.
    `base' specifies whether to use Base64 encoding.  If it is false, Quoted-printable is used.
+   The return value is the result string.
    Because the region of the return value is allocated with the `malloc' call, it should be
    released with the `free' call when it is no longer in use. */
 char *tcmimeencode(const char *str, const char *encname, bool base);
@@ -1283,11 +1285,11 @@ TCMAP *tcxmlattrs(const char *str);
  *************************************************************************************************/
 
 
-typedef struct {                         // type of structure for a bit stream object
-  uint8_t *sp;                           // start pointer
-  uint8_t *cp;                           // current pointer
-  int idx;                               // bit index
-  int size;                              // size of used region
+typedef struct {                         /* type of structure for a bit stream object */
+  uint8_t *sp;                           /* start pointer */
+  uint8_t *cp;                           /* current pointer */
+  int idx;                               /* bit index */
+  int size;                              /* size of used region */
 } TCBITSTRM;
 
 
@@ -1396,9 +1398,11 @@ typedef struct {                         // type of structure for a bit stream o
  *************************************************************************************************/
 
 
-#define _TC_VERSION    "0.4.1"
+#include <stdio.h>
+
+#define _TC_VERSION    "0.9.1"
 #define _TC_LIBVER     108
-#define _TC_FORMATVER  "0.2"
+#define _TC_FORMATVER  "1.0"
 
 
 /* Show error message on the standard error output and exit.
@@ -1443,12 +1447,19 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
 
 
 /* Print debug information with a formatted string as with `printf'. */
+#if __STDC_VERSION__ >= 199901L
 #define tcdprintf(...) \
   do { \
     fprintf(stderr, "%s:%d:%s: ", __FILE__, __LINE__, __func__); \
     fprintf(stderr, __VA_ARGS__); \
     fprintf(stderr, "\n"); \
   } while(0);
+#else
+#define tcdprintf(TC_str) \
+  do { \
+    fprintf(stderr, "%s:%d:%s: %s\n", __FILE__, __LINE__, __func__, TC_str); \
+  } while(0);
+#endif
 
 
 /* Print hexadecimal pattern of a binary region. */
@@ -1505,7 +1516,7 @@ char *tcbwtdecode(const char *ptr, int size, int idx);
 
 
 
-#endif                                   // duplication check
+#endif                                   /* duplication check */
 
 
-// END OF FILE
+/* END OF FILE */

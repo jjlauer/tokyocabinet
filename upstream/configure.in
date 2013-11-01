@@ -7,12 +7,12 @@
 #================================================================
 
 # Package name
-AC_INIT(tokyocabinet, 0.4.1)
+AC_INIT(tokyocabinet, 0.9.1)
 
 # Package information
 MYLIBVER=1
 MYLIBREV=8
-MYFORMATVER="0.2"
+MYFORMATVER="1.0"
 
 # Targets
 MYHEADERFILES="tcutil.h tchdb.h tcbdb.h"
@@ -22,6 +22,7 @@ MYCOMMANDFILES="tcutest tcucodec tchtest tchmttest tchmgr tcbtest tcbmttest tcbm
 MYMAN1FILES="tcutest.1 tcucodec.1 tchtest.1 tchmttest.1 tchmgr.1 tcbtest.1 tcbmttest.1 tcbmgr.1"
 MYMAN3FILES="tcutil.3 tchdb.3 tcbdb.3"
 MYDOCUMENTFILES="COPYING ChangeLog THANKS doc"
+MYPCFILES="tokyocabinet.pc"
 
 # Building flags
 MYCFLAGS="-std=c99 -Wall -fPIC -fsigned-char -O2"
@@ -179,6 +180,7 @@ AC_SUBST(MYCOMMANDFILES)
 AC_SUBST(MYMAN1FILES)
 AC_SUBST(MYMAN3FILES)
 AC_SUBST(MYDOCUMENTFILES)
+AC_SUBST(MYPCFILES)
 AC_SUBST(MYCFLAGS)
 AC_SUBST(MYCPPFLAGS)
 AC_SUBST(MYLDFLAGS)
@@ -186,7 +188,7 @@ AC_SUBST(MYRUNPATH)
 AC_SUBST(MYPOSTCMD)
 
 # Targets
-AC_OUTPUT(Makefile)
+AC_OUTPUT(Makefile tokyocabinet.pc)
 
 # Messages
 printf '#================================================================\n'

@@ -342,7 +342,7 @@ bool tcbdbputcat(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int v
 }
 
 
-/* Concatenate a stirng value at the end of the existing record in a B+ tree database object. */
+/* Concatenate a string value at the end of the existing record in a B+ tree database object. */
 bool tcbdbputcat2(TCBDB *bdb, const char *kstr, const char *vstr){
   assert(bdb && kstr && vstr);
   return tcbdbputcat(bdb, kstr, strlen(kstr), vstr, strlen(vstr));
@@ -677,7 +677,7 @@ bool tcbdbcurlast(BDBCUR *cur){
 
 
 /* Move a cursor object to the front of records corresponding a key. */
-bool tcbdbcurjump(BDBCUR *cur, const char *kbuf, int ksiz){
+bool tcbdbcurjump(BDBCUR *cur, const void *kbuf, int ksiz){
   assert(cur && kbuf && ksiz >= 0);
   TCBDB *bdb = cur->bdb;
   if(!tcbdblockmethod(bdb, false)) return false;
@@ -689,6 +689,13 @@ bool tcbdbcurjump(BDBCUR *cur, const char *kbuf, int ksiz){
   bool rv = tcbdbcurjumpimpl(cur, kbuf, ksiz, true);
   tcbdbunlockmethod(bdb);
   return rv;
+}
+
+
+/* Move a cursor object to the front of records corresponding a key string. */
+bool tcbdbcurjump2(BDBCUR *cur, const char *kstr){
+  assert(cur && kstr);
+  return tcbdbcurjump(cur, kstr, strlen(kstr));
 }
 
 
@@ -735,7 +742,7 @@ bool tcbdbcurnext(BDBCUR *cur){
 
 
 /* Insert a record around a cursor object. */
-bool tcbdbcurput(BDBCUR *cur, const char *vbuf, int vsiz, int cpmode){
+bool tcbdbcurput(BDBCUR *cur, const void *vbuf, int vsiz, int cpmode){
   assert(cur && vbuf && vsiz >= 0);
   TCBDB *bdb = cur->bdb;
   if(!tcbdblockmethod(bdb, true)) return false;
@@ -1159,7 +1166,7 @@ bool tcbdbputdupback2(TCBDB *bdb, const char *kstr, const char *vstr){
 
 
 /* Move a cursor object to the rear of records corresponding a key. */
-bool tcbdbcurjumpback(BDBCUR *cur, const char *kbuf, int ksiz){
+bool tcbdbcurjumpback(BDBCUR *cur, const void *kbuf, int ksiz){
   assert(cur && kbuf && ksiz >= 0);
   TCBDB *bdb = cur->bdb;
   if(!tcbdblockmethod(bdb, false)) return false;
@@ -1171,6 +1178,13 @@ bool tcbdbcurjumpback(BDBCUR *cur, const char *kbuf, int ksiz){
   bool rv = tcbdbcurjumpimpl(cur, kbuf, ksiz, false);
   tcbdbunlockmethod(bdb);
   return rv;
+}
+
+
+/* Move a cursor object to the rear of records corresponding a key string. */
+bool tcbdbcurjumpback2(BDBCUR *cur, const char *kstr){
+  assert(cur && kstr);
+  return tcbdbcurjumpback(cur, kstr, strlen(kstr));
 }
 
 
@@ -1190,22 +1204,82 @@ int tcbdbcmplexical(const char *aptr, int asiz, const char *bptr, int bsiz, void
 /* Compare two keys as decimal strings of real numbers. */
 int tcbdbcmpdecimal(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
   assert(aptr && asiz >= 0 && bptr && bsiz >= 0);
-
-  return 0;
+  int sign;
+  int64_t anum = 0;
+  sign = 1;
+  if(asiz > 0 && *aptr == '-'){
+    aptr++;
+    asiz--;
+    sign = -1;
+  }
+  for(int i = 0; i < asiz; i++){
+    int c = aptr[i];
+    if(c < '0' || c > '9') continue;
+    anum = anum * 10 + c - '0';
+  }
+  anum *= sign;
+  int64_t bnum = 0;
+  sign = 1;
+  if(bsiz > 0 && *bptr == '-'){
+    bptr++;
+    bsiz--;
+    sign = -1;
+  }
+  for(int i = 0; i < bsiz; i++){
+    int c = bptr[i];
+    if(c < '0' || c > '9') continue;
+    bnum = bnum * 10 + c - '0';
+  }
+  bnum *= sign;
+  return anum - bnum;
 }
 
 
 /* Compare two keys as 32-bit integers in the native byte order. */
 int tcbdbcmpint32(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && asiz == sizeof(int32_t) && bptr && bsiz == sizeof(int32_t));
-  return *(int32_t *)aptr - *(int32_t *)bptr;
+  assert(aptr && bptr);
+  int32_t anum, bnum;
+  if(asiz == sizeof(int32_t)){
+    memcpy(&anum, aptr, sizeof(int32_t));
+  } else if(asiz < sizeof(int32_t)){
+    memset(&anum, 0, sizeof(int32_t));
+    memcpy(&anum, aptr, asiz);
+  } else {
+    memcpy(&anum, aptr, sizeof(int32_t));
+  }
+  if(bsiz == sizeof(int32_t)){
+    memcpy(&bnum, bptr, sizeof(int32_t));
+  } else if(bsiz < sizeof(int32_t)){
+    memset(&bnum, 0, sizeof(int32_t));
+    memcpy(&bnum, bptr, bsiz);
+  } else {
+    memcpy(&bnum, bptr, sizeof(int32_t));
+  }
+  return anum - bnum;
 }
 
 
 /* Compare two keys as 64-bit integers in the native byte order. */
 int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
-  assert(aptr && asiz == sizeof(int64_t) && bptr && bsiz == sizeof(int64_t));
-  return *(int64_t *)aptr - *(int64_t *)bptr;
+  assert(aptr && bptr);
+  int64_t anum, bnum;
+  if(asiz == sizeof(int64_t)){
+    memcpy(&anum, aptr, sizeof(int64_t));
+  } else if(asiz < sizeof(int64_t)){
+    memset(&anum, 0, sizeof(int64_t));
+    memcpy(&anum, aptr, asiz);
+  } else {
+    memcpy(&anum, aptr, sizeof(int64_t));
+  }
+  if(bsiz == sizeof(int64_t)){
+    memcpy(&bnum, bptr, sizeof(int64_t));
+  } else if(bsiz < sizeof(int64_t)){
+    memset(&bnum, 0, sizeof(int64_t));
+    memcpy(&bnum, bptr, bsiz);
+  } else {
+    memcpy(&bnum, bptr, sizeof(int64_t));
+  }
+  return anum - bnum;
 }
 
 
@@ -1266,7 +1340,20 @@ static void tcbdbclear(TCBDB *bdb){
    `bdb' specifies the B+ tree database object. */
 static void tcdumpmeta(TCBDB *bdb){
   assert(bdb);
+  memset(bdb->opaque, 0, 64);
   char *wp = bdb->opaque;
+  if(bdb->cmp == tcbdbcmplexical){
+    *(uint8_t *)(wp++) = 0x0;
+  } else if(bdb->cmp == tcbdbcmpdecimal){
+    *(uint8_t *)(wp++) = 0x1;
+  } else if(bdb->cmp == tcbdbcmpint32){
+    *(uint8_t *)(wp++) = 0x2;
+  } else if(bdb->cmp == tcbdbcmpint64){
+    *(uint8_t *)(wp++) = 0x3;
+  } else {
+    *(uint8_t *)(wp++) = 0xff;
+  }
+  wp += 7;
   uint32_t lnum;
   lnum = bdb->lmemb;
   lnum = TCHTOIL(lnum);
@@ -1308,6 +1395,17 @@ static void tcdumpmeta(TCBDB *bdb){
    `bdb' specifies the B+ tree database object. */
 static void tcloadmeta(TCBDB *bdb){
   const char *rp = bdb->opaque;
+  uint8_t cnum = *(uint8_t *)(rp++);
+  if(cnum == 0x0){
+    bdb->cmp = tcbdbcmplexical;
+  } else if(cnum == 0x1){
+    bdb->cmp = tcbdbcmpdecimal;
+  } else if(cnum == 0x2){
+    bdb->cmp = tcbdbcmpint32;
+  } else if(cnum == 0x3){
+    bdb->cmp = tcbdbcmpint64;
+  }
+  rp += 7;
   uint32_t lnum;
   memcpy(&lnum, rp, sizeof(lnum));
   rp += sizeof(lnum);
@@ -2460,6 +2558,7 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   const char *path = tchdbpath(bdb->hdb);
   char *tpath = tcsprintf("%s%ctmp%c%llu", path, MYEXTCHR, MYEXTCHR, tchdbinode(bdb->hdb));
   TCBDB *tbdb = tcbdbnew();
+  tcbdbsetcmpfunc(tbdb, bdb->cmp, bdb->cmpop);
   tcbdbtune(tbdb, lmemb, nmemb, bnum, apow, fpow, opts);
   if(!tcbdbopen(tbdb, tpath, BDBOWRITER | BDBOCREAT | BDBOTRUNC)){
     tchdbsetecode(bdb->hdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
@@ -3015,4 +3114,4 @@ void tcbdbprintnode(TCBDB *bdb, BDBNODE *node){
 
 
 
-/* END OF FILE */
+// END OF FILE

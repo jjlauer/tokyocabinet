@@ -88,13 +88,13 @@ static void usage(void){
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s write [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num] [-nl|-nb]"
-          " path rnum [lmemb] [nmemb] [bnum] [apow] [fpow]\n", g_progname);
+          " path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s read [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb] [-wb]"
           " path\n", g_progname);
   fprintf(stderr, "  %s remove [-mt] [-cd|-ci|-cj] [-lc num] [-nc num] [-nl|-nb]"
           " path\n", g_progname);
   fprintf(stderr, "  %s rcat [-mt] [-cd|-ci|-cj] [-tl] [-td|-tb] [-lc num] [-nc num] [-nl|-nb]"
-          " [-pn num] [-rl] path rnum [lmemb] [nmemb] [bnum] [apow] [fpow]\n", g_progname);
+          " [-pn num] [-rl] path rnum [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s misc [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "  %s wicked [-mt] [-tl] [-td|-tb] [-nl|-nb] path rnum\n", g_progname);
   fprintf(stderr, "\n");
@@ -174,7 +174,7 @@ static int runwrite(int argc, char **argv){
   int ncnum = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-cd")){
@@ -244,7 +244,7 @@ static int runread(int argc, char **argv){
   int omode = 0;
   bool wb = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-cd")){
@@ -289,7 +289,7 @@ static int runremove(int argc, char **argv){
   int ncnum = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-cd")){
@@ -341,7 +341,7 @@ static int runrcat(int argc, char **argv){
   int pnum = 0;
   bool rl = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-cd")){
@@ -414,7 +414,7 @@ static int runmisc(int argc, char **argv){
   int opts = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-tl")){
@@ -454,7 +454,7 @@ static int runwicked(int argc, char **argv){
   int opts = 0;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-mt")){
         mt = true;
       } else if(!strcmp(argv[i], "-tl")){
@@ -1676,4 +1676,4 @@ static int procwicked(const char *path, int rnum, bool mt, int opts, int omode){
 
 
 
-/* END OF FILE */
+// END OF FILE

@@ -42,15 +42,17 @@ static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
 static int runversion(int argc, char **argv);
 static int proccreate(const char *path, int lmemb, int nmemb,
-                      int bnum, int apow, int fpow, int opts);
+                      int bnum, int apow, int fpow, BDBCMP cmp, int opts);
 static int procinform(const char *path, int omode);
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
-                   int omode, int dmode);
-static int procout(const char *path, const char *kbuf, int ksiz, int omode);
-static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz);
-static int proclist(const char *path, int omode, bool pv, bool bk, const char *jstr, bool px);
+                   BDBCMP cmp, int omode, int dmode);
+static int procout(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode);
+static int procget(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode,
+                   bool px, bool pz);
+static int proclist(const char *path, BDBCMP cmp, int omode, bool pv, bool bk,
+                    const char *jstr, bool px);
 static int procoptimize(const char *path, int lmemb, int nmemb,
-                        int bnum, int apow, int fpow, int opts, int omode);
+                        int bnum, int apow, int fpow, BDBCMP cmp, int opts, int omode);
 static int procversion(void);
 
 
@@ -90,14 +92,16 @@ static void usage(void){
   fprintf(stderr, "%s: the command line utility of the B+ tree database API\n", g_progname);
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
-  fprintf(stderr, "  %s create [-tl] [-td|-tb] path [bnum] [apow] [fpow]\n", g_progname);
+  fprintf(stderr, "  %s create [-cd|-ci|-cj] [-tl] [-td|-tb] path"
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s inform [-nl|-nb] path\n", g_progname);
-  fprintf(stderr, "  %s put [-nl|-nb] [-sx] [-dk|-dc|-dd|-db] path key value\n", g_progname);
-  fprintf(stderr, "  %s out [-nl|-nb] [-sx] path key\n", g_progname);
-  fprintf(stderr, "  %s get [-nl|-nb] [-sx] [-px] [-nl] path key\n", g_progname);
-  fprintf(stderr, "  %s list [-nl|-nb] [-bk] [-pv] [-j str] path\n", g_progname);
-  fprintf(stderr, "  %s optimize [-tl] [-td|-tb] [-tz] [-nl|-nb] path"
-          " [lmebm] [nmemb] [bnum] [apow] [fpow]\n", g_progname);
+  fprintf(stderr, "  %s put [-cd|-ci|-cj] [-nl|-nb] [-sx] [-dk|-dc|-dd|-db] path"
+          " key value\n", g_progname);
+  fprintf(stderr, "  %s out [-cd|-ci|-cj] [-nl|-nb] [-sx] path key\n", g_progname);
+  fprintf(stderr, "  %s get [-cd|-ci|-cj] [-nl|-nb] [-sx] [-px] [-pz] path key\n", g_progname);
+  fprintf(stderr, "  %s list [-cd|-ci|-cj] [-nl|-nb] [-bk] [-pv] [-j str] path\n", g_progname);
+  fprintf(stderr, "  %s optimize [-cd|-ci|-cj] [-tl] [-td|-tb] [-tz] [-nl|-nb] path"
+          " [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
@@ -158,10 +162,17 @@ static int runcreate(int argc, char **argv){
   char *bstr = NULL;
   char *astr = NULL;
   char *fstr = NULL;
+  BDBCMP cmp = NULL;
   int opts = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-tl")){
         opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
         opts |= BDBTDEFLATE;
@@ -192,7 +203,7 @@ static int runcreate(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = proccreate(path, lmemb, nmemb, bnum, apow, fpow, opts);
+  int rv = proccreate(path, lmemb, nmemb, bnum, apow, fpow, cmp, opts);
   return rv;
 }
 
@@ -202,7 +213,7 @@ static int runinform(int argc, char **argv){
   char *path = NULL;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!path && argv[i][0] == '-'){
       if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
@@ -227,12 +238,19 @@ static int runput(int argc, char **argv){
   char *path = NULL;
   char *key = NULL;
   char *value = NULL;
+  BDBCMP cmp = NULL;
   int omode = 0;
   int dmode = 0;
   bool sx = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-nl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
@@ -271,7 +289,7 @@ static int runput(int argc, char **argv){
     vsiz = strlen(value);
     vbuf = tcmemdup(value, vsiz);
   }
-  int rv = procput(path, kbuf, ksiz, vbuf, vsiz, omode, dmode);
+  int rv = procput(path, kbuf, ksiz, vbuf, vsiz, cmp, omode, dmode);
   free(vbuf);
   free(kbuf);
   return rv;
@@ -282,11 +300,18 @@ static int runput(int argc, char **argv){
 static int runout(int argc, char **argv){
   char *path = NULL;
   char *key = NULL;
+  BDBCMP cmp = NULL;
   int omode = 0;
   bool sx = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-nl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
@@ -312,7 +337,7 @@ static int runout(int argc, char **argv){
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
   }
-  int rv = procout(path, kbuf, ksiz, omode);
+  int rv = procout(path, kbuf, ksiz, cmp, omode);
   free(kbuf);
   return rv;
 }
@@ -322,13 +347,20 @@ static int runout(int argc, char **argv){
 static int runget(int argc, char **argv){
   char *path = NULL;
   char *key = NULL;
+  BDBCMP cmp = NULL;
   int omode = 0;
   bool sx = false;
   bool px = false;
   bool pz = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-nl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
@@ -358,7 +390,7 @@ static int runget(int argc, char **argv){
     ksiz = strlen(key);
     kbuf = tcmemdup(key, ksiz);
   }
-  int rv = procget(path, kbuf, ksiz, omode, px, pz);
+  int rv = procget(path, kbuf, ksiz, cmp, omode, px, pz);
   free(kbuf);
   return rv;
 }
@@ -367,14 +399,21 @@ static int runget(int argc, char **argv){
 /* parse arguments of list command */
 static int runlist(int argc, char **argv){
   char *path = NULL;
+  BDBCMP cmp = NULL;
   int omode = 0;
   bool pv = false;
   bool bk = false;
   char *jstr = NULL;
   bool px = false;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-nl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-nl")){
         omode |= BDBONOLCK;
       } else if(!strcmp(argv[i], "-nb")){
         omode |= BDBOLCKNB;
@@ -397,7 +436,7 @@ static int runlist(int argc, char **argv){
     }
   }
   if(!path) usage();
-  int rv = proclist(path, omode, pv, bk, jstr, px);
+  int rv = proclist(path, cmp, omode, pv, bk, jstr, px);
   return rv;
 }
 
@@ -410,11 +449,18 @@ static int runoptimize(int argc, char **argv){
   char *bstr = NULL;
   char *astr = NULL;
   char *fstr = NULL;
+  BDBCMP cmp = NULL;
   int opts = UINT8_MAX;
   int omode = 0;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
-      if(!strcmp(argv[i], "-tl")){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tcbdbcmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tcbdbcmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tcbdbcmpint64;
+      } else if(!strcmp(argv[i], "-tl")){
         if(opts == UINT8_MAX) opts = 0;
         opts |= BDBTLARGE;
       } else if(!strcmp(argv[i], "-td")){
@@ -454,7 +500,7 @@ static int runoptimize(int argc, char **argv){
   int bnum = bstr ? atoi(bstr) : -1;
   int apow = astr ? atoi(astr) : -1;
   int fpow = fstr ? atoi(fstr) : -1;
-  int rv = procoptimize(path, lmemb, nmemb, bnum, apow, fpow, opts, omode);
+  int rv = procoptimize(path, lmemb, nmemb, bnum, apow, fpow, cmp, opts, omode);
   return rv;
 }
 
@@ -468,9 +514,10 @@ static int runversion(int argc, char **argv){
 
 /* perform create command */
 static int proccreate(const char *path, int lmemb, int nmemb,
-                      int bnum, int apow, int fpow, int opts){
+                      int bnum, int apow, int fpow, BDBCMP cmp, int opts){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
   if(!tcbdbtune(bdb, lmemb, nmemb, bnum, apow, fpow, opts)){
     printerr(bdb);
     tcbdbdel(bdb);
@@ -538,9 +585,10 @@ static int procinform(const char *path, int omode){
 
 /* perform put command */
 static int procput(const char *path, const char *kbuf, int ksiz, const char *vbuf, int vsiz,
-                   int omode, int dmode){
+                   BDBCMP cmp, int omode, int dmode){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
   if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
     printerr(bdb);
     tcbdbdel(bdb);
@@ -589,9 +637,10 @@ static int procput(const char *path, const char *kbuf, int ksiz, const char *vbu
 
 
 /* perform out command */
-static int procout(const char *path, const char *kbuf, int ksiz, int omode){
+static int procout(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
   if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
     printerr(bdb);
     tcbdbdel(bdb);
@@ -612,10 +661,12 @@ static int procout(const char *path, const char *kbuf, int ksiz, int omode){
 
 
 /* perform get command */
-static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool px, bool pz){
+static int procget(const char *path, const char *kbuf, int ksiz, BDBCMP cmp, int omode,
+                   bool px, bool pz){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
-  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
+  if(!tcbdbopen(bdb, path, BDBOREADER | omode)){
     printerr(bdb);
     tcbdbdel(bdb);
     return 1;
@@ -641,9 +692,11 @@ static int procget(const char *path, const char *kbuf, int ksiz, int omode, bool
 
 
 /* perform list command */
-static int proclist(const char *path, int omode, bool pv, bool bk, const char *jstr, bool px){
+static int proclist(const char *path, BDBCMP cmp, int omode, bool pv, bool bk,
+                    const char *jstr, bool px){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
   if(!tcbdbopen(bdb, path, BDBOREADER | omode)){
     printerr(bdb);
     tcbdbdel(bdb);
@@ -711,9 +764,10 @@ static int proclist(const char *path, int omode, bool pv, bool bk, const char *j
 
 /* perform optimize command */
 static int procoptimize(const char *path, int lmemb, int nmemb,
-                        int bnum, int apow, int fpow, int opts, int omode){
+                        int bnum, int apow, int fpow, BDBCMP cmp, int opts, int omode){
   TCBDB *bdb = tcbdbnew();
   if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
   if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
     printerr(bdb);
     tcbdbdel(bdb);
@@ -742,4 +796,4 @@ static int procversion(void){
 
 
 
-/* END OF FILE */
+// END OF FILE

@@ -14,7 +14,7 @@
  *************************************************************************************************/
 
 
-#ifndef _TCBDB_H                         // duplication check
+#ifndef _TCBDB_H                         /* duplication check */
 #define _TCBDB_H
 
 
@@ -42,79 +42,79 @@
    are equivalent. */
 typedef int (*BDBCMP)(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
 
-typedef struct {                         // type of structure for a B+ tree database
-  void *mmtx;                            // mutex for method
-  void *cmtx;                            // mutex for cache
-  void *tmtx;                            // mutex for transaction
-  TCHDB *hdb;                            // internal database object
-  char *opaque;                          // opaque buffer
-  bool open;                             // whether the internal database is opened
-  bool wmode;                            // whether to be writable
-  uint32_t lmemb;                        // number of members in each leaf
-  uint32_t nmemb;                        // number of members in each node
-  uint8_t opts;                          // options
-  uint64_t root;                         // ID number of the root page
-  uint64_t first;                        // ID number of the first leaf
-  uint64_t last;                         // ID number of the last leaf
-  uint64_t lnum;                         // number of leaves
-  uint64_t nnum;                         // number of nodes
-  uint64_t rnum;                         // number of records
-  TCMAP *leafc;                          // cache for leaves
-  TCMAP *nodec;                          // cache for nodes
-  BDBCMP cmp;                            // pointer to the comparison function
-  void *cmpop;                           // opaque object for the comparison function
-  uint32_t lcnum;                        // max number of cached leaves
-  uint32_t ncnum;                        // max number of cached nodes
-  uint64_t *hist;                        // history array of visited nodes
-  int hnum;                              // number of element of the history array
-  uint64_t hleaf;                        // ID number of the leaf referred by the history
-  uint64_t lleaf;                        // ID number of the last visited leaf
-  bool tran;                             // whether in the transaction
-  char *rbopaque;                        // opaque for rollback
-  int64_t cnt_saveleaf;                  // tesing counter for leaf save times
-  int64_t cnt_loadleaf;                  // tesing counter for leaf load times
-  int64_t cnt_adjleafc;                  // tesing counter for node cache adjust times
-  int64_t cnt_savenode;                  // tesing counter for node save times
-  int64_t cnt_loadnode;                  // tesing counter for node load times
-  int64_t cnt_adjnodec;                  // tesing counter for node cache adjust times
+typedef struct {                         /* type of structure for a B+ tree database */
+  void *mmtx;                            /* mutex for method */
+  void *cmtx;                            /* mutex for cache */
+  void *tmtx;                            /* mutex for transaction */
+  TCHDB *hdb;                            /* internal database object */
+  char *opaque;                          /* opaque buffer */
+  bool open;                             /* whether the internal database is opened */
+  bool wmode;                            /* whether to be writable */
+  uint32_t lmemb;                        /* number of members in each leaf */
+  uint32_t nmemb;                        /* number of members in each node */
+  uint8_t opts;                          /* options */
+  uint64_t root;                         /* ID number of the root page */
+  uint64_t first;                        /* ID number of the first leaf */
+  uint64_t last;                         /* ID number of the last leaf */
+  uint64_t lnum;                         /* number of leaves */
+  uint64_t nnum;                         /* number of nodes */
+  uint64_t rnum;                         /* number of records */
+  TCMAP *leafc;                          /* cache for leaves */
+  TCMAP *nodec;                          /* cache for nodes */
+  BDBCMP cmp;                            /* pointer to the comparison function */
+  void *cmpop;                           /* opaque object for the comparison function */
+  uint32_t lcnum;                        /* max number of cached leaves */
+  uint32_t ncnum;                        /* max number of cached nodes */
+  uint64_t *hist;                        /* history array of visited nodes */
+  int hnum;                              /* number of element of the history array */
+  uint64_t hleaf;                        /* ID number of the leaf referred by the history */
+  uint64_t lleaf;                        /* ID number of the last visited leaf */
+  bool tran;                             /* whether in the transaction */
+  char *rbopaque;                        /* opaque for rollback */
+  int64_t cnt_saveleaf;                  /* tesing counter for leaf save times */
+  int64_t cnt_loadleaf;                  /* tesing counter for leaf load times */
+  int64_t cnt_adjleafc;                  /* tesing counter for node cache adjust times */
+  int64_t cnt_savenode;                  /* tesing counter for node save times */
+  int64_t cnt_loadnode;                  /* tesing counter for node load times */
+  int64_t cnt_adjnodec;                  /* tesing counter for node cache adjust times */
 } TCBDB;
 
-enum {                                   // enumeration for additional flags
-  BDBFOPEN = HDBFOPEN,                   // whether opened
-  BDBFFATAL = HDBFFATAL                  // whetehr with fatal error
+enum {                                   /* enumeration for additional flags */
+  BDBFOPEN = HDBFOPEN,                   /* whether opened */
+  BDBFFATAL = HDBFFATAL                  /* whetehr with fatal error */
 };
 
-enum {                                   // enumeration for tuning options
-  BDBTLARGE = 1 << 0,                    // use 64-bit bucket array
-  BDBTDEFLATE = 1 << 1,                  // compress each page with Deflate
-  BDBTTCBS = 1 << 2,                     // compress each page with TCBS
+enum {                                   /* enumeration for tuning options */
+  BDBTLARGE = 1 << 0,                    /* use 64-bit bucket array */
+  BDBTDEFLATE = 1 << 1,                  /* compress each page with Deflate */
+  BDBTTCBS = 1 << 2                      /* compress each page with TCBS */
 };
 
-enum {                                   // enumeration for open modes
-  BDBOREADER = 1 << 0,                   // open as a reader
-  BDBOWRITER = 1 << 1,                   // open as a writer
-  BDBOCREAT = 1 << 2,                    // writer creating
-  BDBOTRUNC = 1 << 3,                    // writer truncating
-  BDBONOLCK = 1 << 4,                    // open without locking
-  BDBOLCKNB = 1 << 5                     // lock without blocking
+enum {                                   /* enumeration for open modes */
+  BDBOREADER = 1 << 0,                   /* open as a reader */
+  BDBOWRITER = 1 << 1,                   /* open as a writer */
+  BDBOCREAT = 1 << 2,                    /* writer creating */
+  BDBOTRUNC = 1 << 3,                    /* writer truncating */
+  BDBONOLCK = 1 << 4,                    /* open without locking */
+  BDBOLCKNB = 1 << 5                     /* lock without blocking */
 };
 
-enum {                                   // enumeration for transaction locking modes
-  BDBTLSHAR,                             // shared locking
-  BDBTLEXCL                              // exclusive locking
+enum {                                   /* enumeration for transaction locking modes */
+  BDBTLSHAR,                             /* shared locking */
+  BDBTLEXCL                              /* exclusive locking */
 };
 
-typedef struct {                         // type of structure for a B+ tree cursor
-  TCBDB *bdb;                            // database object
-  uint64_t id;                           // ID number of the leaf
-  int32_t kidx;                          // number of the key
-  int32_t vidx;                          // number of the value
+typedef struct {                         /* type of structure for a B+ tree cursor */
+  TCBDB *bdb;                            /* database object */
+  uint64_t id;                           /* ID number of the leaf */
+  int32_t kidx;                          /* number of the key */
+  int32_t vidx;                          /* number of the value */
 } BDBCUR;
 
-enum {                                   // enumeration for cursor put mode
-  BDBCPCURRENT,                          // current
-  BDBCPBEFORE,                           // before
-  BDBCPAFTER                             // after
+enum {                                   /* enumeration for cursor put mode */
+  BDBCPCURRENT,                          /* current */
+  BDBCPBEFORE,                           /* before */
+  BDBCPAFTER                             /* after */
 };
 
 
@@ -144,8 +144,8 @@ int tcbdbecode(TCBDB *bdb);
 /* Set mutual exclusion control of a B+ tree database object for threading.
    `bdb' specifies the B+ tree database object which is not opened.
    If successful, the return value is true, else, it is false.
-   Note that the mutual exclusion control of the database should be set before the database is
-   opened. */
+   Note that the mutual exclusion control is needed if the object is shared by plural threads and
+   this function should should be called before the database is opened. */
 bool tcbdbsetmutex(TCBDB *bdb);
 
 
@@ -200,7 +200,7 @@ bool tcbdbsetcache(TCBDB *bdb, int32_t lcnum, int32_t ncnum);
    If the mode is `BDBOWRITER', the following may be added by bitwise or: `BDBOCREAT', which
    means it creates a new database if not exist, `BDBOTRUNC', which means it creates a new database
    regardless if one exists.  Both of `BDBOREADER' and `BDBOWRITER' can be added to by
-   bitwise or: `BDBONOLOCK', which means it opens the database file without file locking, or
+   bitwise or: `BDBONOLCK', which means it opens the database file without file locking, or
    `BDBOLOCKNB', which means locking is performed without blocking.
    If successful, the return value is true, else, it is false. */
 bool tcbdbopen(TCBDB *bdb, const char *path, int omode);
@@ -266,7 +266,7 @@ bool tcbdbputkeep2(TCBDB *bdb, const char *kstr, const char *vstr);
 bool tcbdbputcat(TCBDB *bdb, const void *kbuf, int ksiz, const void *vbuf, int vsiz);
 
 
-/* Concatenate a stirng value at the end of the existing record in a B+ tree database object.
+/* Concatenate a string value at the end of the existing record in a B+ tree database object.
    `bdb' specifies the B+ tree database object connected as a writer.
    `kstr' specifies the string of the key.
    `vstr' specifies the string of the value.
@@ -427,6 +427,7 @@ bool tcbdboptimize(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
 
 /* Begin the transaction of a B+ tree database object.
    `bdb' specifies the B+ tree database object connected as a writer.
+   If successful, the return value is true, else, it is false.
    The database is locked by the thread while the transaction so that only one transaction can be
    activated with a database object at the same time.  Thus, the serializable isolation level is
    assumed if every database operation is performed in the transaction. */
@@ -505,7 +506,17 @@ bool tcbdbcurlast(BDBCUR *cur);
    no record corresponding the condition.
    The cursor is set to the first record corresponding the key or the next substitute if
    completely matching record does not exist. */
-bool tcbdbcurjump(BDBCUR *cur, const char *kbuf, int ksiz);
+bool tcbdbcurjump(BDBCUR *cur, const void *kbuf, int ksiz);
+
+
+/* Move a cursor object to the front of records corresponding a key string.
+   `cur' specifies the cursor object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is true, else, it is false.  False is returned if there is
+   no record corresponding the condition.
+   The cursor is set to the first record corresponding the key or the next substitute if
+   completely matching record does not exist. */
+bool tcbdbcurjump2(BDBCUR *cur, const char *kstr);
 
 
 /* Move a cursor object to the previous record.
@@ -533,7 +544,7 @@ bool tcbdbcurnext(BDBCUR *cur);
    If successful, the return value is true, else, it is false.  False is returned when the cursor
    is at invalid position.
    After insertion, the cursor is moved to the inserted record. */
-bool tcbdbcurput(BDBCUR *cur, const char *vbuf, int vsiz, int cpmode);
+bool tcbdbcurput(BDBCUR *cur, const void *vbuf, int vsiz, int cpmode);
 
 
 /* Insert a string record around a cursor object.
@@ -777,7 +788,17 @@ bool tcbdbputdupback2(TCBDB *bdb, const char *kstr, const char *vstr);
    no record corresponding the condition.
    The cursor is set to the last record corresponding the key or the previous substitute if
    completely matching record does not exist. */
-bool tcbdbcurjumpback(BDBCUR *cur, const char *kbuf, int ksiz);
+bool tcbdbcurjumpback(BDBCUR *cur, const void *kbuf, int ksiz);
+
+
+/* Move a cursor object to the rear of records corresponding a key string.
+   `cur' specifies the cursor object.
+   `kstr' specifies the string of the key.
+   If successful, the return value is true, else, it is false.  False is returned if there is
+   no record corresponding the condition.
+   The cursor is set to the last record corresponding the key or the previous substitute if
+   completely matching record does not exist. */
+bool tcbdbcurjumpback2(BDBCUR *cur, const char *kstr);
 
 
 /* Compare two keys by lexical order.
@@ -825,7 +846,7 @@ int tcbdbcmpint64(const char *aptr, int asiz, const char *bptr, int bsiz, void *
 
 
 
-#endif                                   // duplication check
+#endif                                   /* duplication check */
 
 
-// END OF FILE
+/* END OF FILE */

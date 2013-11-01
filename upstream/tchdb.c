@@ -411,7 +411,7 @@ bool tchdbputcat(TCHDB *hdb, const void *kbuf, int ksiz, const void *vbuf, int v
 }
 
 
-/* Concatenate a stirng value at the end of the existing record in a hash database object. */
+/* Concatenate a string value at the end of the existing record in a hash database object. */
 bool tchdbputcat2(TCHDB *hdb, const char *kstr, const char *vstr){
   assert(hdb && kstr && vstr);
   return tchdbputcat(hdb, kstr, strlen(kstr), vstr, strlen(vstr));
@@ -2758,4 +2758,4 @@ void tchdbprintrec(TCHDB *hdb, TCHREC *rec){
 
 
 
-/* END OF FILE */
+// END OF FILE

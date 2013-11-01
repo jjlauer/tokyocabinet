@@ -70,7 +70,7 @@ static void usage(void){
   fprintf(stderr, "\n");
   fprintf(stderr, "usage:\n");
   fprintf(stderr, "  %s xstr rnum\n", g_progname);
-  fprintf(stderr, "  %s list rnum [anum\n", g_progname);
+  fprintf(stderr, "  %s list rnum [anum]\n", g_progname);
   fprintf(stderr, "  %s map rnum [bnum]\n", g_progname);
   fprintf(stderr, "  %s misc rnum\n", g_progname);
   fprintf(stderr, "  %s wicked rnum\n", g_progname);
@@ -99,7 +99,7 @@ static int myrand(int range){
 static int runxstr(int argc, char **argv){
   char *rstr = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!rstr && argv[i][0] == '-'){
       usage();
     } else if(!rstr){
       rstr = argv[i];
@@ -120,7 +120,7 @@ static int runlist(int argc, char **argv){
   char *rstr = NULL;
   char *astr = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!rstr && argv[i][0] == '-'){
       usage();
     } else if(!rstr){
       rstr = argv[i];
@@ -144,7 +144,7 @@ static int runmap(int argc, char **argv){
   char *rstr = NULL;
   char *bstr = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!rstr && argv[i][0] == '-'){
       usage();
     } else if(!rstr){
       rstr = argv[i];
@@ -167,7 +167,7 @@ static int runmap(int argc, char **argv){
 static int runmisc(int argc, char **argv){
   char *rstr = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!rstr && argv[i][0] == '-'){
       usage();
     } else if(!rstr){
       rstr = argv[i];
@@ -187,7 +187,7 @@ static int runmisc(int argc, char **argv){
 static int runwicked(int argc, char **argv){
   char *rstr = NULL;
   for(int i = 2; i < argc; i++){
-    if(argv[i][0] == '-'){
+    if(!rstr && argv[i][0] == '-'){
       usage();
     } else if(!rstr){
       rstr = argv[i];
@@ -755,4 +755,4 @@ static int procwicked(int rnum){
 
 
 
-/* END OF FILE */
+// END OF FILE
