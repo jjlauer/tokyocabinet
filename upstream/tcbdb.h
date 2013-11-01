@@ -64,18 +64,18 @@ typedef struct {                         /* type of structure for a B+ tree data
   uint64_t capnum;                       /* capacity number of records */
   uint64_t *hist;                        /* history array of visited nodes */
   int hnum;                              /* number of element of the history array */
-  uint64_t hleaf;                        /* ID number of the leaf referred by the history */
-  uint64_t lleaf;                        /* ID number of the last visited leaf */
+  volatile uint64_t hleaf;               /* ID number of the leaf referred by the history */
+  volatile uint64_t lleaf;               /* ID number of the last visited leaf */
   bool tran;                             /* whether in the transaction */
   char *rbopaque;                        /* opaque for rollback */
-  uint64_t clock;                        /* logical clock */
-  int64_t cnt_saveleaf;                  /* tesing counter for leaf save times */
-  int64_t cnt_loadleaf;                  /* tesing counter for leaf load times */
-  int64_t cnt_killleaf;                  /* tesing counter for leaf kill times */
-  int64_t cnt_adjleafc;                  /* tesing counter for node cache adjust times */
-  int64_t cnt_savenode;                  /* tesing counter for node save times */
-  int64_t cnt_loadnode;                  /* tesing counter for node load times */
-  int64_t cnt_adjnodec;                  /* tesing counter for node cache adjust times */
+  volatile uint64_t clock;               /* logical clock */
+  volatile int64_t cnt_saveleaf;         /* tesing counter for leaf save times */
+  volatile int64_t cnt_loadleaf;         /* tesing counter for leaf load times */
+  volatile int64_t cnt_killleaf;         /* tesing counter for leaf kill times */
+  volatile int64_t cnt_adjleafc;         /* tesing counter for node cache adjust times */
+  volatile int64_t cnt_savenode;         /* tesing counter for node save times */
+  volatile int64_t cnt_loadnode;         /* tesing counter for node load times */
+  volatile int64_t cnt_adjnodec;         /* tesing counter for node cache adjust times */
 } TCBDB;
 
 enum {                                   /* enumeration for additional flags */

@@ -141,7 +141,7 @@ static int printdata(const char *ptr, int size, bool px){
 static char *mygetline(FILE *ifp){
   int len = 0;
   int blen = 1024;
-  char *buf = tcmalloc(blen);
+  char *buf = tcmalloc(blen + 1);
   bool end = true;
   int c;
   while((c = fgetc(ifp)) != EOF){

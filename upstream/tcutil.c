@@ -1339,7 +1339,7 @@ bool tcmapout(TCMAP *map, const void *kbuf, int ksiz){
           *entp = rec->left;
         } else if(!rec->left && rec->right){
           *entp = rec->right;
-        } else if(!rec->left && !rec->left){
+        } else if(!rec->left){
           *entp = NULL;
         } else {
           *entp = rec->left;

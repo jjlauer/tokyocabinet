@@ -17,7 +17,7 @@
 /**
  * namespace of Tokyo Cabinet
  */
-module TokyoCabinet {
+module tokyocabinet {
   //----------------------------------------------------------------
   // list of strings (substituted for by the native mechanism)
   //----------------------------------------------------------------

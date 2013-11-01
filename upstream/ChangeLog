@@ -1,3 +1,11 @@
+2010-01-26  Mikio Hirabayashi  <hirarin@gmail.com>
+
+	* tcutil.c (tcmapout): a useless condition was fixed.
+
+	* tchdb.h, tcbdb.h: some members have volatile flag now.
+
+	- Release: 1.4.43
+
 2010-01-01  Mikio Hirabayashi  <hirarin@gmail.com>
 
 	* tchdb.c (tchdbnew, tchdbsetmutex): a useless lock object was removed.

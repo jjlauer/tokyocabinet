@@ -90,23 +90,23 @@ typedef struct {                         /* type of structure for a hash databas
   int walfd;                             /* file descriptor of write ahead logging */
   uint64_t walend;                       /* end offset of write ahead logging */
   int dbgfd;                             /* file descriptor for debugging */
-  int64_t cnt_writerec;                  /* tesing counter for record write times */
-  int64_t cnt_reuserec;                  /* tesing counter for record reuse times */
-  int64_t cnt_moverec;                   /* tesing counter for record move times */
-  int64_t cnt_readrec;                   /* tesing counter for record read times */
-  int64_t cnt_searchfbp;                 /* tesing counter for FBP search times */
-  int64_t cnt_insertfbp;                 /* tesing counter for FBP insert times */
-  int64_t cnt_splicefbp;                 /* tesing counter for FBP splice times */
-  int64_t cnt_dividefbp;                 /* tesing counter for FBP divide times */
-  int64_t cnt_mergefbp;                  /* tesing counter for FBP merge times */
-  int64_t cnt_reducefbp;                 /* tesing counter for FBP reduce times */
-  int64_t cnt_appenddrp;                 /* tesing counter for DRP append times */
-  int64_t cnt_deferdrp;                  /* tesing counter for DRP defer times */
-  int64_t cnt_flushdrp;                  /* tesing counter for DRP flush times */
-  int64_t cnt_adjrecc;                   /* tesing counter for record cache adjust times */
-  int64_t cnt_defrag;                    /* tesing counter for defragmentation times */
-  int64_t cnt_shiftrec;                  /* tesing counter for record shift times */
-  int64_t cnt_trunc;                     /* tesing counter for truncation times */
+  volatile int64_t cnt_writerec;         /* tesing counter for record write times */
+  volatile int64_t cnt_reuserec;         /* tesing counter for record reuse times */
+  volatile int64_t cnt_moverec;          /* tesing counter for record move times */
+  volatile int64_t cnt_readrec;          /* tesing counter for record read times */
+  volatile int64_t cnt_searchfbp;        /* tesing counter for FBP search times */
+  volatile int64_t cnt_insertfbp;        /* tesing counter for FBP insert times */
+  volatile int64_t cnt_splicefbp;        /* tesing counter for FBP splice times */
+  volatile int64_t cnt_dividefbp;        /* tesing counter for FBP divide times */
+  volatile int64_t cnt_mergefbp;         /* tesing counter for FBP merge times */
+  volatile int64_t cnt_reducefbp;        /* tesing counter for FBP reduce times */
+  volatile int64_t cnt_appenddrp;        /* tesing counter for DRP append times */
+  volatile int64_t cnt_deferdrp;         /* tesing counter for DRP defer times */
+  volatile int64_t cnt_flushdrp;         /* tesing counter for DRP flush times */
+  volatile int64_t cnt_adjrecc;          /* tesing counter for record cache adjust times */
+  volatile int64_t cnt_defrag;           /* tesing counter for defragmentation times */
+  volatile int64_t cnt_shiftrec;         /* tesing counter for record shift times */
+  volatile int64_t cnt_trunc;            /* tesing counter for truncation times */
 } TCHDB;
 
 enum {                                   /* enumeration for additional flags */
